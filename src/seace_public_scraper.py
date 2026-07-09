@@ -1,19 +1,17 @@
-
 from typing import List, Tuple
-from urllib.parse import urljoin
-
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
 SEACE_PUBLIC_URL = "https://prod2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml"
 TIMEOUT = 60
+PROCESS_FORM = "tbBuscador:idFormBuscarProceso"
 
 
 def _session():
     s = requests.Session()
     s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 SEACE-Radar/0.4",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 SEACE-Radar/0.7",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "es-PE,es;q=0.9,en;q=0.8",
     })
@@ -37,67 +35,19 @@ def _inputs_payload(soup):
     return payload
 
 
-def _find_field_by_label(soup, label_keywords):
-    labels = soup.find_all(text=True)
-    best = []
-    for txt in labels:
-        clean = " ".join(str(txt).split()).lower()
-        if all(k.lower() in clean for k in label_keywords):
-            parent = txt.parent
-            for _ in range(5):
-                if parent is None:
-                    break
-                controls = parent.find_all(["input", "select", "textarea"])
-                for c in controls:
-                    if c.get("name"):
-                        best.append(c.get("name"))
-                parent = parent.parent
-    return best[0] if best else None
-
-
-def _set_first_matching(payload, soup, possible_labels, value):
-    if value in [None, ""]:
-        return None
-    for labels in possible_labels:
-        name = _find_field_by_label(soup, labels)
-        if name:
-            payload[name] = value
-            return name
-    # fallback by name contains
-    lower_map = {k.lower(): k for k in payload.keys()}
-    for labels in possible_labels:
-        joined = " ".join(labels).lower().replace(" ", "")
-        for low, original in lower_map.items():
-            if any(token in low for token in joined.split()):
-                payload[original] = value
-                return original
-    return None
-
-
-def _choose_select_option(soup, payload, field_name, desired_text):
-    if not field_name or not desired_text:
-        return
-    sel = soup.find("select", attrs={"name": field_name})
-    if not sel:
-        payload[field_name] = desired_text
-        return
-    desired = desired_text.lower().strip()
-    for opt in sel.find_all("option"):
-        text = opt.get_text(" ", strip=True).lower()
-        value = opt.get("value", "")
-        if desired == text or desired in text:
-            payload[field_name] = value
-            return
-    payload[field_name] = desired_text
-
-
 def _find_buttons(soup):
     buttons = []
     for tag in soup.find_all(["button", "input", "a"]):
         text = tag.get_text(" ", strip=True) or tag.get("value", "") or tag.get("title", "")
         name = tag.get("name") or tag.get("id")
         if text or name:
-            buttons.append({"tag": tag.name, "text": text, "name": name, "id": tag.get("id"), "class": " ".join(tag.get("class", []))})
+            buttons.append({
+                "tag": tag.name,
+                "text": str(text or ""),
+                "name": str(name or ""),
+                "id": str(tag.get("id") or ""),
+                "class": " ".join(tag.get("class", [])),
+            })
     return buttons
 
 
@@ -106,26 +56,93 @@ def _parse_tables(html):
         tables = pd.read_html(html)
     except Exception:
         tables = []
+
     candidates = []
     for t in tables:
         cols = " ".join(map(str, t.columns)).lower()
-        body = " ".join(map(str, t.head(5).values.flatten())).lower()
-        if any(k in cols + body for k in ["entidad", "nomenclatura", "objeto", "requerimiento", "publicacion", "descripción", "descripcion"]):
+        body = " ".join(map(str, t.head(10).values.flatten())).lower()
+        signature = cols + " " + body
+        # Tabla de resultados de procesos SEACE suele contener estas columnas/textos.
+        if any(k in signature for k in [
+            "entidad", "nomenclatura", "objeto", "descrip", "publicacion", "publicación",
+            "versión seace", "version seace", "acciones", "cuantía", "cuantia"
+        ]):
             candidates.append(t)
+
     if candidates:
-        return max(candidates, key=len)
+        # Normalmente la tabla de resultados es la mayor tabla candidata.
+        return max(candidates, key=lambda x: (len(x), len(x.columns)))
     return pd.DataFrame()
 
 
 def _normalize_seace_table(df):
     if df.empty:
         return df
-    # flatten multiindex columns
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [" ".join(str(x) for x in col if str(x) != "nan").strip() for col in df.columns]
     df = df.copy()
     df.columns = [" ".join(str(c).split()) for c in df.columns]
     return df
+
+
+def _safe_get(obj, key, default=""):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return default
+
+
+def _version_value(version: str) -> str:
+    text = str(version or "").lower()
+    if "3" in text:
+        return "3"
+    if "2" in text:
+        return "2"
+    return str(version or "")
+
+
+def _force_process_search_payload(payload, keyword, year, version):
+    """Configura exclusivamente el formulario Buscador de Procedimientos de Seleccion.
+
+    Hallazgo del debug:
+    - El formulario correcto es tbBuscador:idFormBuscarProceso.
+    - descripcionObjeto, anioConvocatoria_input y j_idt247_input ya aparecen en el payload.
+    - tbBuscador_activeIndex debe ser 1 para dejar activa la pestana de Procedimientos.
+    """
+    payload["tbBuscador_activeIndex"] = "1"
+
+    # Asegurar que el formulario correcto sea enviado.
+    payload[PROCESS_FORM] = PROCESS_FORM
+    payload[f"{PROCESS_FORM}:numPositionTabView"] = "1"
+
+    # Campos del formulario correcto observados en tu PAYLOAD DETECTADO.
+    payload[f"{PROCESS_FORM}:descripcionObjeto"] = keyword
+    payload[f"{PROCESS_FORM}:anioConvocatoria_input"] = str(year)
+    payload[f"{PROCESS_FORM}:anioConvocatoria_focus"] = str(year)
+    payload[f"{PROCESS_FORM}:j_idt247_input"] = _version_value(version)
+
+    # Limpiar campos potencialmente confundidos de otros tabs para no lanzar ACF/otros formularios.
+    for k in list(payload.keys()):
+        kl = str(k).lower()
+        if "idformbuscaracf" in kl and "descripcionobjeto" in kl:
+            payload[k] = ""
+    return payload
+
+
+def _find_process_search_buttons(buttons):
+    preferred = []
+    fallback = []
+    for b in buttons:
+        if not isinstance(b, dict):
+            continue
+        name = str(b.get("name", ""))
+        bid = str(b.get("id", ""))
+        text = str(b.get("text", "")).lower()
+        haystack = f"{name} {bid}".lower()
+        if PROCESS_FORM.lower() in haystack and ("btnbuscar" in haystack or "buscar" in text):
+            preferred.append(b)
+        elif "btnbuscar" in haystack or "buscar" in text:
+            fallback.append(b)
+    return preferred or fallback
 
 
 def search_seace_public(url=SEACE_PUBLIC_URL, keyword="satelital", objeto="Servicio", year="2026", version="Seace 3", mode="procedimientos") -> Tuple[pd.DataFrame, List[str]]:
@@ -140,56 +157,65 @@ def search_seace_public(url=SEACE_PUBLIC_URL, keyword="satelital", objeto="Servi
 
     soup = BeautifulSoup(r.text, "html.parser")
     payload = _inputs_payload(soup)
+    payload = _force_process_search_payload(payload, keyword=keyword, year=year, version=version)
+
+    print("\n" + "=" * 80)
+    print("PAYLOAD PROCESO SEACE")
+    print("=" * 80)
+    for k, v in payload.items():
+        if k.startswith(PROCESS_FORM) or k == "tbBuscador_activeIndex" or k == "javax.faces.ViewState":
+            print(k, "=", v)
+    print("=" * 80 + "\n")
+
     diagnostics.append(f"Inputs detectados: {len(payload)}")
-
-    # campos por etiquetas visibles en la pantalla SEACE
-    field_desc = _set_first_matching(payload, soup, [["descripción", "objeto"], ["descripcion", "objeto"], ["descripción", "requerimiento"], ["descripcion", "requerimiento"]], keyword)
-    field_year = _set_first_matching(payload, soup, [["año", "convocatoria"], ["anio", "convocatoria"], ["año"]], year)
-    field_obj = _set_first_matching(payload, soup, [["objeto", "contratación"], ["objeto", "contratacion"]], objeto)
-    field_ver = _set_first_matching(payload, soup, [["version", "seace"], ["versión", "seace"]], version)
-
-    _choose_select_option(soup, payload, field_obj, objeto)
-    _choose_select_option(soup, payload, field_year, year)
-    _choose_select_option(soup, payload, field_ver, version)
-
-    diagnostics.append(f"Campo descripcion usado: {field_desc}")
-    diagnostics.append(f"Campo objeto usado: {field_obj}")
-    diagnostics.append(f"Campo año usado: {field_year}")
-    diagnostics.append(f"Campo version usado: {field_ver}")
+    diagnostics.append(f"Formulario usado: {PROCESS_FORM}")
+    diagnostics.append(f"Descripcion proceso: {payload.get(PROCESS_FORM + ':descripcionObjeto')}")
+    diagnostics.append(f"Año proceso: {payload.get(PROCESS_FORM + ':anioConvocatoria_input')}")
+    diagnostics.append(f"Version proceso: {payload.get(PROCESS_FORM + ':j_idt247_input')}")
 
     buttons = _find_buttons(soup)
-    search_buttons = [b for b in buttons if "buscar" in str(b).get("text", "").lower() or "buscar" in str(b).get("name", "").lower()]
-    diagnostics.append(f"Botones Buscar detectados: {search_buttons[:3]}")
+    diagnostics.append(f"Botones totales detectados: {len(buttons)}")
+    search_buttons = _find_process_search_buttons(buttons)
+    diagnostics.append(f"Botones Buscar proceso detectados: {search_buttons[:5]}")
 
-    # Try JSF command submit variants
-    post_urls = [r.url, url]
-    submitted = False
-    response_texts = []
-    for btn in search_buttons[:3] or [{}]:
+    post_urls = [r.url]
+    if url != r.url:
+        post_urls.append(url)
+
+    # Probar solo botones del formulario correcto primero.
+    for btn in (search_buttons[:5] if search_buttons else [{}]):
+        if not isinstance(btn, dict):
+            continue
         post_payload = dict(payload)
-        if btn.get("name"):
-            post_payload[btn["name"]] = btn.get("name")
-        elif btn.get("id"):
-            post_payload[btn["id"]] = btn.get("id")
+        btn_name = _safe_get(btn, "name", "")
+        btn_id = _safe_get(btn, "id", "")
+        if btn_name:
+            post_payload[btn_name] = btn_name
+        elif btn_id:
+            post_payload[btn_id] = btn_id
+
+        diagnostics.append(f"Submit usado: {btn}")
+
         for post_url in post_urls:
             try:
                 pr = s.post(post_url, data=post_payload, timeout=TIMEOUT, headers={"Referer": r.url})
+                with open("respuesta_seace.html", "w", encoding="utf-8", errors="ignore") as f:
+                    f.write(pr.text)
                 diagnostics.append(f"POST {post_url} -> {pr.status_code} / {pr.headers.get('content-type')} / len={len(pr.text)}")
-                response_texts.append(pr.text)
+
                 df = _normalize_seace_table(_parse_tables(pr.text))
                 if not df.empty:
-                    diagnostics.append(f"Tabla detectada por POST: {len(df)} filas")
+                    diagnostics.append(f"Tabla detectada por POST: {len(df)} filas / {len(df.columns)} columnas")
                     return df, diagnostics
-                submitted = True
             except Exception as e:
                 diagnostics.append(f"Error POST {post_url}: {type(e).__name__} - {e}")
 
-    # Fallback: parse initial page (sometimes contains prior results)
+    # Fallback: intentar leer cualquier tabla cargada en la respuesta inicial.
     df = _normalize_seace_table(_parse_tables(r.text))
     if not df.empty:
         diagnostics.append(f"Tabla detectada en HTML inicial: {len(df)} filas")
         return df, diagnostics
 
-    diagnostics.append("No se detectaron tablas de resultados. Probable causa: evento JSF/PrimeFaces especifico, AJAX parcial o CAPTCHA/reCAPTCHA.")
-    diagnostics.append("Siguiente ajuste: capturar en DevTools la solicitud XHR que se genera al pulsar Buscar o Exportar a Excel.")
+    diagnostics.append("No se detectaron tablas de resultados en respuesta_seace.html.")
+    diagnostics.append("Si el navegador manual si devuelve tabla, falta replicar exactamente el evento JSF/PrimeFaces del boton Buscar o el token/captcha.")
     return pd.DataFrame(), diagnostics

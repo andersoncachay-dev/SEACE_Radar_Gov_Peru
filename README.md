@@ -1,15 +1,7 @@
 
-# SEACE Radar Gov Peru v4 - Public Scraper
+# SEACE Radar Gov Peru v5 - Browser Auto
 
-Version v4 con modulo experimental para consultar automaticamente el Buscador Publico SEACE y procesar resultados sin subir Excel manualmente.
-
-## Importante
-
-El portal SEACE publico usa tecnologia JSF/PrimeFaces y puede devolver HTML, requerir ViewState, reCAPTCHA o eventos internos. Esta version intenta leer y enviar el formulario publico con requests; si el portal bloquea o cambia parametros, muestra diagnostico y mantiene los modos de respaldo:
-
-- URL publica directa
-- Archivo local CSV/XLSX
-- Auto OECE masivo
+Esta versión agrega un conector automático con navegador real usando Selenium. Es el enfoque correcto para SEACE Público cuando el formulario usa JSF/PrimeFaces/reCAPTCHA/JS del navegador y `requests` devuelve la página base sin resultados.
 
 ## Ejecutar
 
@@ -20,10 +12,10 @@ python -m streamlit run app.py
 
 ## Uso recomendado
 
-1. Selecciona **SEACE Publico - busqueda automatica**.
-2. Usa keyword: `satelital` o `internet satelital`.
-3. Objeto: `Servicio`.
-4. Año: `2026`.
-5. Pulsa **Buscar en SEACE Publico**.
+1. Selecciona **SEACE Público - navegador automático**.
+2. Keyword: `satelital`.
+3. Año: `2026`.
+4. Deja **Navegador visible** activado.
+5. Pulsa **Buscar con navegador**.
 
-Si no devuelve resultados, revisa **Diagnostico**. En ese caso el portal probablemente requiere un evento JSF/PrimeFaces especifico o CAPTCHA; se debe ajustar con los campos reales capturados en DevTools.
+La app abrirá Chrome, llenará el formulario, hará clic en Buscar y leerá la tabla HTML resultante.

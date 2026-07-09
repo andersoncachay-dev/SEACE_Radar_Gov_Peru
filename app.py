@@ -1,46 +1,44 @@
 
 import streamlit as st
 import pandas as pd
-
 from src.normalizer import normalize_columns
 from src.scoring import enriquecer_oportunidades
 from src.exporter import build_excel
+from src.seace_browser_scraper import search_seace_public_browser, SEACE_PUBLIC_URL
+from src.seace_public_scraper import search_seace_public
 from src.oece_massive_connector import download_any_dataset, fetch_massive_by_params, DEFAULT_PORTAL_URL
-from src.seace_public_scraper import SEACE_PUBLIC_URL, search_seace_public
 
-st.set_page_config(page_title="SEACE Radar Gov Peru v4", layout="wide")
-st.title("SEACE Radar Gov Peru v4 - Public Scraper")
-st.caption("Busqueda automatica en SEACE Publico + descargas OECE/OCDS + scoring comercial.")
+st.set_page_config(page_title="SEACE Radar Gov Peru v5", layout="wide")
+st.title("SEACE Radar Gov Peru v5 - Browser Auto")
+st.caption("Automatización con navegador real para SEACE Público + scoring comercial Hughes.")
 
-source = st.sidebar.radio(
-    "Fuente de datos",
-    [
-        "SEACE Publico - busqueda automatica",
-        "Auto OECE - descarga construida",
-        "URL publica directa",
-        "Archivo local CSV/XLSX",
-    ],
-)
-raw = pd.DataFrame()
-diagnostics = []
+source = st.sidebar.radio("Fuente de datos", [
+    "SEACE Público - navegador automático",
+    "SEACE Público - requests experimental",
+    "Auto OECE - descarga construida",
+    "URL pública directa",
+    "Archivo local CSV/XLSX",
+])
+raw = pd.DataFrame(); diagnostics=[]
 
-if source == "SEACE Publico - busqueda automatica":
+if source == "SEACE Público - navegador automático":
     url = st.sidebar.text_input("URL Buscador SEACE", SEACE_PUBLIC_URL)
-    keyword = st.sidebar.text_input("Descripcion / palabra clave", "satelital")
-    objeto = st.sidebar.selectbox("Objeto", ["Servicio", "Bien", "Obra", "Consultoria de Obra", ""], index=0)
+    keyword = st.sidebar.text_input("Descripción / palabra clave", "satelital")
     year = st.sidebar.text_input("Año convocatoria", "2026")
-    version = st.sidebar.selectbox("Version SEACE", ["Seace 3", "Seace 2", ""], index=0)
-    mode = st.sidebar.selectbox("Tipo de consulta", ["procedimientos", "requerimientos", "expresiones_interes"], index=0)
-    if st.sidebar.button("Buscar en SEACE Publico"):
-        with st.spinner("Consultando Buscador Publico SEACE..."):
-            raw, diagnostics = search_seace_public(
-                url=url,
-                keyword=keyword,
-                objeto=objeto,
-                year=year,
-                version=version,
-                mode=mode,
-            )
+    version = st.sidebar.selectbox("Versión SEACE", ["Seace 3", "Seace 2", ""], index=0)
+    headless = not st.sidebar.checkbox("Navegador visible", value=True)
+    max_wait = st.sidebar.slider("Espera de resultados (segundos)", 5, 60, 20)
+    if st.sidebar.button("Buscar con navegador"):
+        with st.spinner("Abriendo navegador y consultando SEACE Público..."):
+            raw, diagnostics = search_seace_public_browser(url=url, keyword=keyword, year=year, version=version, headless=headless, max_wait=max_wait)
+
+elif source == "SEACE Público - requests experimental":
+    url = st.sidebar.text_input("URL Buscador SEACE", SEACE_PUBLIC_URL)
+    keyword = st.sidebar.text_input("Descripción / palabra clave", "satelital")
+    year = st.sidebar.text_input("Año convocatoria", "2026")
+    version = st.sidebar.selectbox("Versión SEACE", ["Seace 3", "Seace 2", ""], index=0)
+    if st.sidebar.button("Buscar con requests"):
+        raw, diagnostics = search_seace_public(url=url, keyword=keyword, objeto="", year=year, version=version)
 
 elif source == "Auto OECE - descarga construida":
     base_url = st.sidebar.text_input("Portal API OECE", DEFAULT_PORTAL_URL)
@@ -49,72 +47,49 @@ elif source == "Auto OECE - descarga construida":
     year = st.sidebar.text_input("year", "2026")
     month = st.sidebar.text_input("month", "")
     keyword_hint = st.sidebar.text_input("Keyword posterior", "satelital")
-    if st.sidebar.button("Conectar y descargar automaticamente"):
-        with st.spinner("Probando descarga masiva OECE..."):
-            raw, diagnostics = fetch_massive_by_params(base_url, source_name, file_type, year, month)
+    if st.sidebar.button("Conectar y descargar automáticamente"):
+        raw, diagnostics = fetch_massive_by_params(base_url, source_name, file_type, year, month)
         if not raw.empty and keyword_hint:
-            mask = raw.astype(str).apply(lambda s: s.str.lower().str.contains(keyword_hint.lower(), na=False)).any(axis=1)
-            raw = raw[mask]
+            raw = raw[raw.astype(str).apply(lambda s: s.str.lower().str.contains(keyword_hint.lower(), na=False)).any(axis=1)]
 
-elif source == "URL publica directa":
+elif source == "URL pública directa":
     url = st.sidebar.text_input("URL directa CSV/XLSX/JSON/JSONL/GZ/ZIP/TAR.GZ")
     keyword_hint = st.sidebar.text_input("Keyword posterior", "satelital")
     if st.sidebar.button("Descargar URL") and url:
-        with st.spinner("Descargando dataset publico..."):
-            raw, msg = download_any_dataset(url)
-            diagnostics = [msg]
+        raw, msg = download_any_dataset(url); diagnostics=[msg]
         if not raw.empty and keyword_hint:
-            mask = raw.astype(str).apply(lambda s: s.str.lower().str.contains(keyword_hint.lower(), na=False)).any(axis=1)
-            raw = raw[mask]
+            raw = raw[raw.astype(str).apply(lambda s: s.str.lower().str.contains(keyword_hint.lower(), na=False)).any(axis=1)]
 
-elif source == "Archivo local CSV/XLSX":
-    uploaded = st.sidebar.file_uploader("Carga CSV o Excel", type=["csv", "xlsx", "xls"])
+else:
+    uploaded = st.sidebar.file_uploader("Carga CSV o Excel", type=["csv","xlsx","xls"])
     if uploaded:
-        if uploaded.name.lower().endswith(".csv"):
-            raw = pd.read_csv(uploaded)
-        else:
-            raw = pd.read_excel(uploaded, engine="openpyxl")
+        raw = pd.read_csv(uploaded) if uploaded.name.lower().endswith('.csv') else pd.read_excel(uploaded, engine='openpyxl')
 
 if diagnostics:
-    with st.expander("Diagnostico", expanded=True):
-        for d in diagnostics:
-            st.write(d)
+    with st.expander("Diagnóstico", expanded=True):
+        for d in diagnostics: st.write(d)
 
 if not raw.empty:
-    df = normalize_columns(raw)
-    df = enriquecer_oportunidades(df)
-
+    df = enriquecer_oportunidades(normalize_columns(raw))
     st.subheader("Dashboard ejecutivo")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Registros", len(df))
-    col2.metric("Prioridad A", int((df["prioridad"] == "A").sum()))
-    col3.metric("Prioridad B", int((df["prioridad"] == "B").sum()))
-    col4.metric("Monto potencial", f"S/ {df['monto'].sum():,.0f}")
-    col5.metric("Cierran <=30 dias", int(((df["dias_presentacion"] <= 30) & (df["dias_presentacion"] >= 0)).sum()))
-
+    c1,c2,c3,c4,c5=st.columns(5)
+    c1.metric("Registros", len(df)); c2.metric("Prioridad A", int((df['prioridad']=='A').sum()))
+    c3.metric("Prioridad B", int((df['prioridad']=='B').sum())); c4.metric("Monto potencial", f"S/ {df['monto'].sum():,.0f}")
+    c5.metric("Cierran <=30 días", int(((df['dias_presentacion']<=30)&(df['dias_presentacion']>=0)).sum()))
     st.subheader("Filtros")
-    c1, c2, c3, c4 = st.columns(4)
-    keyword_filter = c1.text_input("Palabra clave", value="satelital")
-    prioridad = c2.multiselect("Prioridad", ["A", "B", "C"], default=["A", "B", "C"])
-    sector = c3.multiselect("Sector", sorted(df["sector"].dropna().unique().tolist()), default=[])
-    region = c4.text_input("Region contiene")
-
-    filtered = df.copy()
-    if keyword_filter:
-        mask = filtered.astype(str).apply(lambda s: s.str.lower().str.contains(keyword_filter.lower(), na=False)).any(axis=1)
-        filtered = filtered[mask]
-    if prioridad:
-        filtered = filtered[filtered["prioridad"].isin(prioridad)]
-    if sector:
-        filtered = filtered[filtered["sector"].isin(sector)]
-    if region:
-        filtered = filtered[filtered["region"].astype(str).str.lower().str.contains(region.lower(), na=False)]
-
+    f1,f2,f3,f4=st.columns(4)
+    kw=f1.text_input("Palabra clave", "satelital")
+    pri=f2.multiselect("Prioridad", ["A","B","C"], default=["A","B","C"])
+    sec=f3.multiselect("Sector", sorted(df['sector'].dropna().unique().tolist()), default=[])
+    reg=f4.text_input("Región contiene")
+    filtered=df.copy()
+    if kw: filtered=filtered[filtered.astype(str).apply(lambda s: s.str.lower().str.contains(kw.lower(), na=False)).any(axis=1)]
+    if pri: filtered=filtered[filtered['prioridad'].isin(pri)]
+    if sec: filtered=filtered[filtered['sector'].isin(sec)]
+    if reg: filtered=filtered[filtered['region'].astype(str).str.lower().str.contains(reg.lower(), na=False)]
+    cols=[c for c in ["semaforo","prioridad","score","entidad","sector","region","nomenclatura","objeto","descripcion","monto","fecha_publicacion","fecha_presentacion","dias_presentacion","estado","motivos_score","url_detalle"] if c in filtered.columns]
     st.subheader("Oportunidades")
-    cols = [c for c in ["semaforo", "prioridad", "score", "entidad", "sector", "region", "nomenclatura", "objeto", "descripcion", "monto", "fecha_publicacion", "fecha_presentacion", "dias_presentacion", "estado", "motivos_score", "url_detalle"] if c in filtered.columns]
     st.dataframe(filtered[cols], use_container_width=True)
-
-    excel_bytes = build_excel(filtered)
-    st.download_button("Descargar Excel ejecutivo", excel_bytes, file_name="SEACE_Radar_v4_Oportunidades.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button("Descargar Excel ejecutivo", build_excel(filtered), file_name="SEACE_Radar_v5_Oportunidades.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
-    st.info("Selecciona una fuente. Para automatico, prueba SEACE Publico - busqueda automatica con keyword 'satelital'.")
+    st.info("Selecciona una fuente. Para automático usa SEACE Público - navegador automático.")
