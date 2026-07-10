@@ -1,7 +1,7 @@
 
-# SEACE Radar Gov Peru v5 - Browser Auto
+# SEACE Radar Gov Peru v6 - RUC + CRM
 
-Esta versión agrega un conector automático con navegador real usando Selenium. Es el enfoque correcto para SEACE Público cuando el formulario usa JSF/PrimeFaces/reCAPTCHA/JS del navegador y `requests` devuelve la página base sin resultados.
+Versión v6 con columna **RUC** antes de **Entidad** en pantalla y Excel.
 
 ## Ejecutar
 
@@ -10,12 +10,6 @@ python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-## Uso recomendado
+## Nota
 
-1. Selecciona **SEACE Público - navegador automático**.
-2. Keyword: `satelital`.
-3. Año: `2026`.
-4. Deja **Navegador visible** activado.
-5. Pulsa **Buscar con navegador**.
-
-La app abrirá Chrome, llenará el formulario, hará clic en Buscar y leerá la tabla HTML resultante.
+SEACE Público no muestra el RUC en la grilla principal de procedimientos. Por eso esta versión crea la columna `ruc` vacía y la deja lista para la siguiente fase: extraer RUC desde el detalle del proceso o desde una tabla maestra de entidades.

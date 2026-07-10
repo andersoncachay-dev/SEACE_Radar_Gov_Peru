@@ -8,9 +8,9 @@ from src.seace_browser_scraper import search_seace_public_browser, SEACE_PUBLIC_
 from src.seace_public_scraper import search_seace_public
 from src.oece_massive_connector import download_any_dataset, fetch_massive_by_params, DEFAULT_PORTAL_URL
 
-st.set_page_config(page_title="SEACE Radar Gov Peru v5", layout="wide")
-st.title("SEACE Radar Gov Peru v5 - Browser Auto")
-st.caption("Automatización con navegador real para SEACE Público + scoring comercial Hughes.")
+st.set_page_config(page_title="SEACE Radar Gov Peru v6", layout="wide")
+st.title("SEACE Radar Gov Peru v6 - RUC + CRM")
+st.caption("Extracción automática SEACE + columna RUC preparada + scoring comercial Hughes.")
 
 source = st.sidebar.radio("Fuente de datos", [
     "SEACE Público - navegador automático",
@@ -27,7 +27,7 @@ if source == "SEACE Público - navegador automático":
     year = st.sidebar.text_input("Año convocatoria", "2026")
     version = st.sidebar.selectbox("Versión SEACE", ["Seace 3", "Seace 2", ""], index=0)
     headless = not st.sidebar.checkbox("Navegador visible", value=True)
-    max_wait = st.sidebar.slider("Espera de resultados (segundos)", 5, 60, 20)
+    max_wait = st.sidebar.slider("Espera de resultados (segundos)", 5, 60, 25)
     if st.sidebar.button("Buscar con navegador"):
         with st.spinner("Abriendo navegador y consultando SEACE Público..."):
             raw, diagnostics = search_seace_public_browser(url=url, keyword=keyword, year=year, version=version, headless=headless, max_wait=max_wait)
@@ -87,9 +87,9 @@ if not raw.empty:
     if pri: filtered=filtered[filtered['prioridad'].isin(pri)]
     if sec: filtered=filtered[filtered['sector'].isin(sec)]
     if reg: filtered=filtered[filtered['region'].astype(str).str.lower().str.contains(reg.lower(), na=False)]
-    cols=[c for c in ["semaforo","prioridad","score","entidad","sector","region","nomenclatura","objeto","descripcion","monto","fecha_publicacion","fecha_presentacion","dias_presentacion","estado","motivos_score","url_detalle"] if c in filtered.columns]
+    cols=[c for c in ["semaforo","prioridad","score","ruc","entidad","sector","region","nomenclatura","objeto","descripcion","monto","moneda","version_seace","fecha_publicacion","fecha_presentacion","dias_presentacion","estado","motivos_score","url_detalle"] if c in filtered.columns]
     st.subheader("Oportunidades")
-    st.dataframe(filtered[cols], use_container_width=True)
-    st.download_button("Descargar Excel ejecutivo", build_excel(filtered), file_name="SEACE_Radar_v5_Oportunidades.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.dataframe(filtered[cols], width='stretch')
+    st.download_button("Descargar Excel ejecutivo", build_excel(filtered), file_name="SEACE_Radar_v6_RUC_Oportunidades.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
     st.info("Selecciona una fuente. Para automático usa SEACE Público - navegador automático.")
