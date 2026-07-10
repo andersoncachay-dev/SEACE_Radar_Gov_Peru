@@ -1,13 +1,27 @@
 
-# SEACE Radar Gov Peru v7 - Estado y Fechas de Procesos
+# SEACE Radar Gov Peru v9 - Cronograma y Nueva Vigencia
 
-Versión v7 con:
+Versión v9 enfocada en el cronograma real de SEACE.
 
-- Columna **Estado Comercial**: Vigente / En evaluación / Cerrado / Revisar.
-- Columnas **Fecha Presentación** y **Fecha Buena Pro**.
-- Columna **RUC** antes de Entidad.
-- Opción de abrir detalle del proceso para enriquecer RUC y cronograma.
-- Exportación Excel con hojas: Oportunidades, Resumen y CRM_Entidades.
+## Cambios principales
+
+- Extrae la tabla de cronograma con estructura: **Etapa | Fecha Inicio | Fecha Fin**.
+- Agrega columnas por etapa:
+  - convocatoria_inicio / convocatoria_fin
+  - registro_inicio / registro_fin
+  - consulta_inicio / consulta_fin
+  - absolucion_inicio / absolucion_fin
+  - integracion_inicio / integracion_fin
+  - propuesta_inicio / propuesta_fin
+  - evaluacion_inicio / evaluacion_fin
+  - buena_pro_inicio / buena_pro_fin
+- Nueva lógica de vigencia:
+  - 🟢 Vigente para Consultas y Propuesta: si aún no vence Formulación de consultas y observaciones.
+  - 🟡 Vigente sólo para Propuesta: si ya cerraron consultas, pero aún no vence Presentación de propuestas.
+  - 🟠 En Evaluación: si ya venció la propuesta y aún no corresponde marcar Buena Pro cerrada.
+  - 🔴 Cerrado: si la fecha de Buena Pro ya pasó.
+- Orden por fecha de publicación descendente.
+- Exportación Excel con hojas: Oportunidades, Resumen, CRM_Entidades y Cronograma_Detalle.
 
 ## Ejecutar
 
@@ -15,15 +29,3 @@ Versión v7 con:
 python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
-
-## Uso recomendado
-
-1. Seleccionar **SEACE Público - navegador automático**.
-2. Keyword: `satelital`.
-3. Año: `2026`.
-4. Activar **Navegador visible**.
-5. Opcional: activar **Enriquecer con detalle** para capturar RUC y cronograma de los primeros procesos.
-
-## Nota técnica
-
-La grilla principal de SEACE muestra la relación de procesos, pero no siempre incluye RUC ni todas las fechas del cronograma. Para completarlas, v7 intenta abrir el detalle de cada proceso cuando puede identificar el enlace de ficha.

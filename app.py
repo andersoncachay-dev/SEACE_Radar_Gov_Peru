@@ -8,9 +8,9 @@ from src.seace_browser_scraper import search_seace_public_browser, SEACE_PUBLIC_
 from src.seace_public_scraper import search_seace_public
 from src.oece_massive_connector import download_any_dataset, fetch_massive_by_params, DEFAULT_PORTAL_URL
 
-st.set_page_config(page_title="SEACE Radar Gov Peru v7", layout="wide")
-st.title("SEACE Radar Gov Peru v7 - Estado y Fechas")
-st.caption("Extracción automática SEACE + estado comercial + fechas de presentación/Buena Pro + RUC preparado.")
+st.set_page_config(page_title="SEACE Radar Gov Peru v9", layout="wide")
+st.title("SEACE Radar Gov Peru v9 - Cronograma y Vigencia")
+st.caption("SEACE automático + cronograma por etapa + vigencia comercial para consultas/propuestas.")
 
 source = st.sidebar.radio("Fuente de datos", [
     "SEACE Público - navegador automático",
@@ -27,21 +27,12 @@ if source == "SEACE Público - navegador automático":
     year = st.sidebar.text_input("Año convocatoria", "2026")
     version = st.sidebar.selectbox("Versión SEACE", ["Seace 3", "Seace 2", ""], index=0)
     headless = not st.sidebar.checkbox("Navegador visible", value=True)
-    max_wait = st.sidebar.slider("Espera de resultados (segundos)", 5, 90, 30)
-    enrich_details = st.sidebar.checkbox("Enriquecer con detalle (RUC y cronograma)", value=False)
+    max_wait = st.sidebar.slider("Espera de resultados (segundos)", 5, 120, 45)
+    enrich_details = st.sidebar.checkbox("Enriquecer con detalle (RUC y cronograma)", value=True)
     max_details = st.sidebar.slider("Máximo detalles a revisar", 1, 25, 10)
     if st.sidebar.button("Buscar con navegador"):
-        with st.spinner("Consultando SEACE Público..."):
-            raw, diagnostics = search_seace_public_browser(
-                url=url,
-                keyword=keyword,
-                year=year,
-                version=version,
-                headless=headless,
-                max_wait=max_wait,
-                enrich_details=enrich_details,
-                max_details=max_details,
-            )
+        with st.spinner("Consultando SEACE Público y leyendo cronogramas..."):
+            raw, diagnostics = search_seace_public_browser(url=url, keyword=keyword, year=year, version=version, headless=headless, max_wait=max_wait, enrich_details=enrich_details, max_details=max_details)
 
 elif source == "SEACE Público - requests experimental":
     url = st.sidebar.text_input("URL Buscador SEACE", SEACE_PUBLIC_URL)
@@ -70,7 +61,6 @@ elif source == "URL pública directa":
         raw, msg = download_any_dataset(url); diagnostics=[msg]
         if not raw.empty and keyword_hint:
             raw = raw[raw.astype(str).apply(lambda s: s.str.lower().str.contains(keyword_hint.lower(), na=False)).any(axis=1)]
-
 else:
     uploaded = st.sidebar.file_uploader("Carga CSV o Excel", type=["csv","xlsx","xls"])
     if uploaded:
@@ -81,14 +71,18 @@ if diagnostics:
         for d in diagnostics: st.write(d)
 
 if not raw.empty:
-    df = enriquecer_oportunidades(normalize_columns(raw))
+    df = normalize_columns(raw)
+    if "fecha_publicacion" in df.columns:
+        df = df.sort_values(by="fecha_publicacion", ascending=False, na_position="last")
+    df = enriquecer_oportunidades(df)
+
     st.subheader("Dashboard ejecutivo")
     c1,c2,c3,c4,c5,c6=st.columns(6)
     c1.metric("Registros", len(df))
-    c2.metric("Vigentes", int((df.get('estado_comercial','')=='Vigente').sum()) if 'estado_comercial' in df else 0)
-    c3.metric("Cerrados", int((df.get('estado_comercial','')=='Cerrado').sum()) if 'estado_comercial' in df else 0)
-    c4.metric("Prioridad A", int((df['prioridad']=='A').sum()))
-    c5.metric("Prioridad B", int((df['prioridad']=='B').sum()))
+    c2.metric("Consultas + Propuesta", int((df.get('estado_comercial','')=='Vigente para Consultas y Propuesta').sum()) if 'estado_comercial' in df else 0)
+    c3.metric("Sólo Propuesta", int((df.get('estado_comercial','')=='Vigente sólo para Propuesta').sum()) if 'estado_comercial' in df else 0)
+    c4.metric("Evaluación", int((df.get('estado_comercial','')=='En Evaluación').sum()) if 'estado_comercial' in df else 0)
+    c5.metric("Cerrados", int((df.get('estado_comercial','')=='Cerrado').sum()) if 'estado_comercial' in df else 0)
     c6.metric("Monto potencial", f"S/ {df['monto'].sum():,.0f}")
 
     st.subheader("Filtros")
@@ -105,15 +99,19 @@ if not raw.empty:
     if estado and 'estado_comercial' in filtered: filtered=filtered[filtered['estado_comercial'].isin(estado)]
     if sec: filtered=filtered[filtered['sector'].isin(sec)]
     if reg: filtered=filtered[filtered['region'].astype(str).str.lower().str.contains(reg.lower(), na=False)]
+    if "fecha_publicacion" in filtered.columns:
+        filtered = filtered.sort_values(by="fecha_publicacion", ascending=False, na_position="last")
 
     cols=[c for c in [
-        "vigencia","estado_comercial","fecha_presentacion","fecha_buena_pro","ruc","entidad","sector","region",
-        "nomenclatura","objeto","descripcion","monto","moneda","version_seace","fecha_publicacion",
-        "dias_presentacion","estado","motivos_score","url_detalle","semaforo","prioridad","score"
+        "vigencia","estado_comercial","fecha_publicacion","consulta_fin","propuesta_fin","buena_pro_fin",
+        "dias_para_consulta","dias_para_propuesta","ruc","entidad","sector","region","nomenclatura","objeto",
+        "descripcion","monto","moneda","version_seace","consulta_inicio","propuesta_inicio","buena_pro_inicio",
+        "convocatoria_inicio","convocatoria_fin","registro_inicio","registro_fin","evaluacion_inicio","evaluacion_fin",
+        "direccion_legal","telefono_entidad","motivos_score","semaforo","prioridad","score","url_detalle"
     ] if c in filtered.columns]
 
     st.subheader("Oportunidades")
     st.dataframe(filtered[cols], width='stretch')
-    st.download_button("Descargar Excel ejecutivo", build_excel(filtered), file_name="SEACE_Radar_v7_Estado_Fechas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button("Descargar Excel ejecutivo", build_excel(filtered), file_name="SEACE_Radar_v9_Cronograma_Vigencia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
     st.info("Selecciona una fuente. Para automático usa SEACE Público - navegador automático.")
