@@ -9,6 +9,22 @@ from src.seace_public_scraper import search_seace_public
 from src.oece_massive_connector import download_any_dataset, fetch_massive_by_params, DEFAULT_PORTAL_URL
 
 st.set_page_config(page_title="SEACE Radar Gov Peru v9", layout="wide")
+@st.cache_data(show_spinner=False)
+def generar_excel(df):
+    return build_excel(df)
+
+if "raw_data" not in st.session_state:
+    st.session_state.raw_data = None
+
+if "diagnostics" not in st.session_state:
+    st.session_state.diagnostics = []
+
+if "df_final" not in st.session_state:
+    st.session_state.df_final = None
+
+if "excel_bytes" not in st.session_state:
+    st.session_state.excel_bytes = None
+
 st.title("SEACE Radar Gov Peru v9 - Cronograma y Vigencia")
 st.caption("SEACE automático + cronograma por etapa + vigencia comercial para consultas/propuestas.")
 
@@ -19,7 +35,8 @@ source = st.sidebar.radio("Fuente de datos", [
     "URL pública directa",
     "Archivo local CSV/XLSX",
 ])
-raw = pd.DataFrame(); diagnostics=[]
+raw = st.session_state.raw_data
+diagnostics = st.session_state.diagnostics
 
 if source == "SEACE Público - navegador automático":
     url = st.sidebar.text_input("URL Buscador SEACE", SEACE_PUBLIC_URL)
@@ -32,7 +49,20 @@ if source == "SEACE Público - navegador automático":
     max_details = st.sidebar.slider("Máximo detalles a revisar", 1, 25, 10)
     if st.sidebar.button("Buscar con navegador"):
         with st.spinner("Consultando SEACE Público y leyendo cronogramas..."):
-            raw, diagnostics = search_seace_public_browser(url=url, keyword=keyword, year=year, version=version, headless=headless, max_wait=max_wait, enrich_details=enrich_details, max_details=max_details)
+
+            raw, diagnostics = search_seace_public_browser(
+                url=url,
+                keyword=keyword,
+                year=year,
+                version=version,
+                headless=headless,
+                max_wait=max_wait,
+                enrich_details=enrich_details,
+                max_details=max_details
+            )
+
+            st.session_state.raw_data = raw
+            st.session_state.diagnostics = diagnostics
 
 elif source == "SEACE Público - requests experimental":
     url = st.sidebar.text_input("URL Buscador SEACE", SEACE_PUBLIC_URL)
@@ -70,7 +100,7 @@ if diagnostics:
     with st.expander("Diagnóstico", expanded=True):
         for d in diagnostics: st.write(d)
 
-if not raw.empty:
+if raw is not None and not raw.empty:
     df = normalize_columns(raw)
     if "fecha_publicacion" in df.columns:
         df = df.sort_values(by="fecha_publicacion", ascending=False, na_position="last")
@@ -101,6 +131,7 @@ if not raw.empty:
     if reg: filtered=filtered[filtered['region'].astype(str).str.lower().str.contains(reg.lower(), na=False)]
     if "fecha_publicacion" in filtered.columns:
         filtered = filtered.sort_values(by="fecha_publicacion", ascending=False, na_position="last")
+    st.session_state.df_final = filtered
 
     cols=[c for c in [
         "vigencia","estado_comercial","fecha_publicacion","consulta_fin","propuesta_fin","buena_pro_fin",
@@ -110,8 +141,27 @@ if not raw.empty:
         "direccion_legal","telefono_entidad","motivos_score","semaforo","prioridad","score","url_detalle"
     ] if c in filtered.columns]
 
+    
     st.subheader("Oportunidades")
     st.dataframe(filtered[cols], width='stretch')
-    st.download_button("Descargar Excel ejecutivo", build_excel(filtered), file_name="SEACE_Radar_v9_Cronograma_Vigencia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # Guardar dataframe final en memoria
+    st.session_state.df_final = filtered
+
+    # Generar Excel una sola vez
+    
+    st.session_state.df_final = filtered
+
+    st.session_state.excel_bytes = generar_excel(filtered)
+
+    excel_bytes = st.session_state.excel_bytes
+
+    st.download_button(
+        "Descargar Excel ejecutivo",
+        data=st.session_state.excel_bytes,
+        file_name="SEACE_Radar_v9_1_Cronograma_Vigencia.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 else:
-    st.info("Selecciona una fuente. Para automático usa SEACE Público - navegador automático.")
+        st.info("Selecciona una fuente. Para automático usa SEACE Público - navegador automático.")
+

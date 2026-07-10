@@ -307,8 +307,16 @@ def _apply_if_valid(df,idx,row,info,diagnostics):
         if info.get(k): df.at[idx,k]=info[k]
     estado,vig=_infer_estado_cron(df.loc[idx])
     df.at[idx,'Estado Comercial']=estado; df.at[idx,'Vigencia']=vig
-    df.at[idx,'dias_para_consulta']=_dias_hasta(df.at[idx,'consulta_fin'])
-    df.at[idx,'dias_para_propuesta']=_dias_hasta(df.at[idx,'propuesta_fin'])
+    dias_consulta = _dias_hasta(df.at[idx,'consulta_fin'])
+    dias_propuesta = _dias_hasta(df.at[idx,'propuesta_fin'])
+
+    df.at[idx,'dias_para_consulta'] = (
+        str(dias_consulta) if dias_consulta != '' else ''
+    )
+
+    df.at[idx,'dias_para_propuesta'] = (
+        str(dias_propuesta) if dias_propuesta != '' else ''
+    )
     # Save compact cronograma text for Excel audit
     if info.get('cronograma'):
         df.at[idx,'cronograma_texto']=' | '.join([f"{r['Etapa']}: {r['Fecha Inicio']} -> {r['Fecha Fin']}" for r in info['cronograma']])
@@ -380,8 +388,22 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2
             if not df.empty:
                 with open('respuesta_seace_browser.html','w',encoding='utf-8',errors='ignore') as f: f.write(html)
                 df=_normalize(df)
-                for col in ['RUC','Estado Comercial','Vigencia','Dirección Legal','Teléfono de la Entidad','dias_para_consulta','dias_para_propuesta','cronograma_texto']:
-                    if col not in df.columns: df[col]=''
+                for col in [
+                    'RUC',
+                    'Estado Comercial',
+                    'Vigencia',
+                    'Dirección Legal',
+                    'Teléfono de la Entidad',
+                    'cronograma_texto'
+                ]:
+                    if col not in df.columns:
+                        df[col] = ''
+
+                if 'dias_para_consulta' not in df.columns:
+                    df['dias_para_consulta'] = ''
+
+                if 'dias_para_propuesta' not in df.columns:
+                    df['dias_para_propuesta'] = ''
                 for col in ['convocatoria_inicio','convocatoria_fin','registro_inicio','registro_fin','consulta_inicio','consulta_fin','absolucion_inicio','absolucion_fin','integracion_inicio','integracion_fin','propuesta_inicio','propuesta_fin','evaluacion_inicio','evaluacion_fin','buena_pro_inicio','buena_pro_fin']:
                     if col not in df.columns: df[col]=''
                 if enrich_details:
@@ -389,8 +411,21 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2
                     df=_enrich_details(driver,df,max_details,diagnostics)
                 for idx,row in df.iterrows():
                     estado,vig=_infer_estado_cron(row); df.at[idx,'Estado Comercial']=estado; df.at[idx,'Vigencia']=vig
-                    df.at[idx,'dias_para_consulta']=_dias_hasta(row.get('consulta_fin',''))
-                    df.at[idx,'dias_para_propuesta']=_dias_hasta(row.get('propuesta_fin',''))
+                    dias_consulta = _dias_hasta(
+                        row.get('consulta_fin','')
+                    )
+
+                    dias_propuesta = _dias_hasta(
+                        row.get('propuesta_fin','')
+                    )
+
+                    df.at[idx,'dias_para_consulta'] = (
+                        str(dias_consulta) if dias_consulta != '' else ''
+                    )
+
+                    df.at[idx,'dias_para_propuesta'] = (
+                        str(dias_propuesta) if dias_propuesta != '' else ''
+                    )
                 diagnostics.append(f"Tablas HTML detectadas: {tables_count}"); diagnostics.append(f"Candidatas: {candidates_info}"); diagnostics.append(f"Tabla detectada navegador: {len(df)} filas / {len(df.columns)} columnas")
                 return df,diagnostics
         html=driver.page_source
