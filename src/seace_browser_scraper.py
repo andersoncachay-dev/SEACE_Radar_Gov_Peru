@@ -15,11 +15,13 @@ from selenium.webdriver.common.keys import Keys
 SEACE_PUBLIC_URL = "https://prod2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml"
 PROCESS_FORM = "tbBuscador:idFormBuscarProceso"
 
+
 def _version_value(version: str) -> str:
     text = str(version or "").lower()
     if "3" in text: return "3"
     if "2" in text: return "2"
     return str(version or "")
+
 
 def _set_input_like_user(driver, element_id: str, value: str) -> bool:
     try:
@@ -36,6 +38,7 @@ def _set_input_like_user(driver, element_id: str, value: str) -> bool:
         return True
     except Exception: return False
 
+
 def _click_like_user(driver, element_id: str) -> bool:
     try:
         el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, element_id)))
@@ -45,14 +48,17 @@ def _click_like_user(driver, element_id: str) -> bool:
         return True
     except Exception: return False
 
+
 def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
 
 def _looks_like_data_row(cells: List[str]) -> bool:
     if not cells or len(cells) < 8: return False
     if not re.fullmatch(r"\d{1,3}", cells[0]): return False
     text = " ".join(cells).upper()
     return any(token in text for token in ["SATELITAL","SAN GABAN","MARINA DE GUERRA","BCRP","FUERZA AEREA","GEOFISICO","EJERCITO","UCAYALI","APURIMAC"])
+
 
 def _row_to_dict(cells: List[str]) -> dict:
     cells = [_clean_text(c) for c in cells if _clean_text(c) != ""]
@@ -79,7 +85,9 @@ def _row_to_dict(cells: List[str]) -> dict:
         "Moneda": moneda,
         "Versión SEACE": version,
         "Acciones": acciones,
+        "url_detalle": "",
     }
+
 
 def _parse_primefaces_grid(html: str):
     soup = BeautifulSoup(html, "html.parser")
@@ -87,7 +95,8 @@ def _parse_primefaces_grid(html: str):
     for tr in soup.find_all("tr"):
         cells=[_clean_text(td.get_text(" ", strip=True)) for td in tr.find_all(["td","th"])]
         cells=[c for c in cells if c]
-        if _looks_like_data_row(cells): rows.append(cells)
+        if _looks_like_data_row(cells):
+            rows.append(cells)
     clean_rows=[r for r in rows if 8 <= len(r) <= 13 and re.fullmatch(r"\d{1,3}", r[0])]
     if clean_rows: rows=clean_rows
     data=[]
@@ -101,6 +110,7 @@ def _parse_primefaces_grid(html: str):
             seen.add(key); deduped.append(d)
     return pd.DataFrame(deduped), rows[:5]
 
+
 def _parse_tables(html: str):
     with open("debug_browser.html", "w", encoding="utf-8", errors="ignore") as f: f.write(html)
     df2, sample_rows = _parse_primefaces_grid(html)
@@ -109,13 +119,77 @@ def _parse_tables(html: str):
     except Exception: tables=[]
     return pd.DataFrame(), len(tables), []
 
+
 def _normalize(df):
     if df.empty: return df
     if isinstance(df.columns, pd.MultiIndex): df.columns=[" ".join(str(x) for x in col if str(x)!="nan").strip() for col in df.columns]
     df=df.copy(); df.columns=[" ".join(str(c).split()) for c in df.columns]
     return df
 
-def search_seace_public_browser(url=SEACE_PUBLIC_URL, keyword="satelital", year="2026", version="Seace 3", headless=False, max_wait=45) -> Tuple[pd.DataFrame, List[str]]:
+
+def _parse_date_from_text(text: str):
+    if not text: return ""
+    m = re.search(r"\b(\d{1,2}/\d{1,2}/\d{4})(?:\s+\d{1,2}:\d{2})?", text)
+    return m.group(1) if m else ""
+
+
+def _parse_detail_page(html: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+    full = _clean_text(soup.get_text(" ", strip=True))
+    info = {"ruc":"", "fecha_presentacion":"", "fecha_buena_pro":"", "fecha_fin":"", "estado_comercial":"", "vigencia":""}
+
+    # RUC: busca cualquier número de 11 dígitos cercano a N° Ruc / Entidad Contratante
+    ruc_match = re.search(r"N[°º]?\s*Ruc\s+(\d{11})", full, re.IGNORECASE)
+    if not ruc_match:
+        ruc_match = re.search(r"\b(20\d{9}|10\d{9})\b", full)
+    if ruc_match:
+        info["ruc"] = ruc_match.group(1)
+
+    # Cronograma: recorrer filas y tomar Fecha Fin de etapas relevantes
+    for tr in soup.find_all("tr"):
+        cells = [_clean_text(td.get_text(" ", strip=True)) for td in tr.find_all(["td","th"])]
+        if len(cells) >= 3:
+            etapa = cells[0].lower()
+            fecha_fin = cells[-1]
+            if "presentaci" in etapa and "propuesta" in etapa:
+                info["fecha_presentacion"] = _parse_date_from_text(fecha_fin) or _parse_date_from_text(" ".join(cells))
+            if "buena pro" in etapa:
+                info["fecha_buena_pro"] = _parse_date_from_text(fecha_fin) or _parse_date_from_text(" ".join(cells))
+                info["fecha_fin"] = info["fecha_buena_pro"]
+
+    return info
+
+
+def _infer_estado(fecha_presentacion: str, fecha_buena_pro: str, monto, nomenclatura: str):
+    today = pd.Timestamp.today().normalize()
+    if fecha_buena_pro:
+        return "Cerrado", "🔴"
+    if fecha_presentacion:
+        fp = pd.to_datetime(fecha_presentacion, dayfirst=True, errors="coerce")
+        if pd.notna(fp):
+            if fp.normalize() >= today:
+                return "Vigente", "🟢"
+            return "En evaluación", "🟡"
+    # Heurística: RES-PROC suele tener proceso posterior/cerrado o por adjudicación, y montos ya publicados deben revisarse.
+    nom = str(nomenclatura or "").upper()
+    try: m = float(monto or 0)
+    except Exception: m = 0
+    if "RES-PROC" in nom or m > 0:
+        return "Revisar", "🟠"
+    return "Vigente", "🟢"
+
+
+def _enrich_details(driver, df: pd.DataFrame, max_details: int, diagnostics: List[str]):
+    # V7 deja el mecanismo preparado. Si las URLs de detalle se capturan en versiones futuras, se abrirán aquí.
+    # Mientras tanto, aplica lógica de estado por fechas/monto/nomenclatura.
+    for idx, row in df.head(max_details).iterrows():
+        estado, vig = _infer_estado(row.get("fecha_presentacion",""), row.get("fecha_buena_pro",""), row.get("monto",0), row.get("Nomenclatura", row.get("nomenclatura","")))
+        df.at[idx, "Estado Comercial"] = estado
+        df.at[idx, "Vigencia"] = vig
+    return df
+
+
+def search_seace_public_browser(url=SEACE_PUBLIC_URL, keyword="satelital", year="2026", version="Seace 3", headless=False, max_wait=45, enrich_details=False, max_details=10) -> Tuple[pd.DataFrame, List[str]]:
     diagnostics=[]; options=Options()
     if headless: options.add_argument("--headless=new")
     options.add_argument("--start-maximized"); options.add_argument("--disable-notifications"); options.add_argument("--disable-popup-blocking"); options.add_argument("--ignore-certificate-errors")
@@ -139,7 +213,18 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL, keyword="satelital", year=
             df,tables_count,candidates_info=_parse_tables(html); best_info=candidates_info
             if not df.empty:
                 with open("respuesta_seace_browser.html","w",encoding="utf-8",errors="ignore") as f: f.write(html)
-                df=_normalize(df); diagnostics.append(f"Tablas HTML detectadas: {tables_count}"); diagnostics.append(f"Candidatas: {candidates_info}"); diagnostics.append(f"Tabla detectada navegador: {len(df)} filas / {len(df.columns)} columnas")
+                df=_normalize(df)
+                # Ensure status columns exist and infer base state
+                for col in ["RUC", "Fecha Presentacion", "Fecha Buena Pro", "Fecha Fin", "Estado Comercial", "Vigencia"]:
+                    if col not in df.columns: df[col]=""
+                for idx, row in df.iterrows():
+                    estado, vig = _infer_estado(row.get("Fecha Presentacion",""), row.get("Fecha Buena Pro",""), row.get("VR / VE / Cuantía de la contratación",0), row.get("Nomenclatura",""))
+                    df.at[idx, "Estado Comercial"] = estado
+                    df.at[idx, "Vigencia"] = vig
+                if enrich_details:
+                    diagnostics.append(f"Enriquecimiento de detalle solicitado para máximo {max_details} procesos; URLs de detalle no disponibles en grilla, aplicando inferencia local.")
+                    df = _enrich_details(driver, df, max_details=max_details, diagnostics=diagnostics)
+                diagnostics.append(f"Tablas HTML detectadas: {tables_count}"); diagnostics.append(f"Candidatas: {candidates_info}"); diagnostics.append(f"Tabla detectada navegador: {len(df)} filas / {len(df.columns)} columnas")
                 return df, diagnostics
         html=driver.page_source
         with open("respuesta_seace_browser.html","w",encoding="utf-8",errors="ignore") as f: f.write(html)

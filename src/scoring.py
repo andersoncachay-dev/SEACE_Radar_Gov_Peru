@@ -12,7 +12,7 @@ def detectar_sector(row):
     if 'san gaban' in texto or 'electrica' in texto or 'energ' in texto: return 'Energia'
     return 'Otros'
 def calcular_score(row):
-    descripcion=f"{row.get('descripcion','')} {row.get('objeto','')} {row.get('nomenclatura','')}".lower(); entidad=str(row.get('entidad','')).lower(); region=str(row.get('region','')).lower(); monto=row.get('monto',0); dias=row.get('dias_presentacion',None); score=0; motivos=[]
+    descripcion=f"{row.get('descripcion','')} {row.get('objeto','')} {row.get('nomenclatura','')}".lower(); entidad=str(row.get('entidad','')).lower(); region=str(row.get('region','')).lower(); monto=row.get('monto',0); dias=row.get('dias_presentacion',None); estado=str(row.get('estado_comercial','')).lower(); score=0; motivos=[]
     if contains_any(descripcion,CORE_KEYWORDS): score+=25; motivos.append('Keyword conectividad/satelital')
     if contains_any(entidad,TARGET_ENTITIES): score+=20; motivos.append('Entidad objetivo')
     if any(r==region or r in region for r in TARGET_REGIONS): score+=15; motivos.append('Region priorizada')
@@ -24,6 +24,7 @@ def calcular_score(row):
         elif dias is not None and float(dias)<=30 and float(dias)>=0: score+=5; motivos.append('Cierre proximo')
     except Exception: pass
     if contains_any(descripcion,ENTERPRISE_REQUIREMENTS): score+=10; motivos.append('Requisitos enterprise')
+    if estado == 'cerrado': score=max(0,score-20); motivos.append('Proceso cerrado')
     score=min(score,100); prioridad='A' if score>=70 else ('B' if score>=45 else 'C')
     return score,prioridad,', '.join(motivos)
 def enriquecer_oportunidades(df):

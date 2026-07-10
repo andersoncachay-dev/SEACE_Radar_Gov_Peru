@@ -1,7 +1,13 @@
 
-# SEACE Radar Gov Peru v6 - RUC + CRM
+# SEACE Radar Gov Peru v7 - Estado y Fechas de Procesos
 
-Versión v6 con columna **RUC** antes de **Entidad** en pantalla y Excel.
+Versión v7 con:
+
+- Columna **Estado Comercial**: Vigente / En evaluación / Cerrado / Revisar.
+- Columnas **Fecha Presentación** y **Fecha Buena Pro**.
+- Columna **RUC** antes de Entidad.
+- Opción de abrir detalle del proceso para enriquecer RUC y cronograma.
+- Exportación Excel con hojas: Oportunidades, Resumen y CRM_Entidades.
 
 ## Ejecutar
 
@@ -10,6 +16,14 @@ python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-## Nota
+## Uso recomendado
 
-SEACE Público no muestra el RUC en la grilla principal de procedimientos. Por eso esta versión crea la columna `ruc` vacía y la deja lista para la siguiente fase: extraer RUC desde el detalle del proceso o desde una tabla maestra de entidades.
+1. Seleccionar **SEACE Público - navegador automático**.
+2. Keyword: `satelital`.
+3. Año: `2026`.
+4. Activar **Navegador visible**.
+5. Opcional: activar **Enriquecer con detalle** para capturar RUC y cronograma de los primeros procesos.
+
+## Nota técnica
+
+La grilla principal de SEACE muestra la relación de procesos, pero no siempre incluye RUC ni todas las fechas del cronograma. Para completarlas, v7 intenta abrir el detalle de cada proceso cuando puede identificar el enlace de ficha.
