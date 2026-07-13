@@ -342,6 +342,8 @@ def _enrich_details(driver,df,max_details,diagnostics):
                 time.sleep(2)
                 new=list(set(driver.window_handles)-before)
                 if new: driver.switch_to.window(new[-1])
+            if 'fichaSeleccion' in driver.current_url:
+                df.at[idx,'url_detalle']=driver.current_url
             time.sleep(2)
             info=_parse_detail_page(driver.page_source,expected_nomen=nomen)
             diagnostics.append(f"Fila {idx} cronograma: esperado={nomen} / contiene={info.get('Detalle Contiene Nomenclatura')} / ruc={info.get('RUC','')} / consulta_fin={info.get('consulta_fin','')} / propuesta_fin={info.get('propuesta_fin','')} / buena_fin={info.get('buena_pro_fin','')}")
@@ -367,6 +369,7 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2
     diagnostics=[]; options=Options()
     if headless: options.add_argument('--headless=new')
     options.add_argument('--start-maximized'); options.add_argument('--disable-notifications'); options.add_argument('--disable-popup-blocking'); options.add_argument('--ignore-certificate-errors')
+    options.add_argument('--no-sandbox'); options.add_argument('--disable-dev-shm-usage')
     driver=None
     try:
         driver=webdriver.Chrome(options=options); wait=WebDriverWait(driver,max_wait); driver.get(url); diagnostics.append(f"GET navegador: {url}")

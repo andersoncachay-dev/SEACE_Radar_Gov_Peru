@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .config import settings
+from .database import Base, engine
+from .routers import alerts, auth, documents, opportunities, runs, search_profiles, users
+from .services.scheduler_service import start_scheduler, stop_scheduler
+
+
+def create_app() -> FastAPI:
+    if settings.auto_create_tables:
+        Base.metadata.create_all(bind=engine)
+
+    app = FastAPI(title=settings.app_name)
+    origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(auth.router)
+    app.include_router(users.router)
+    app.include_router(search_profiles.router)
+    app.include_router(opportunities.router)
+    app.include_router(runs.router)
+    app.include_router(alerts.router)
+    app.include_router(documents.router)
+
+    @app.get("/")
+    def root():
+        return {
+            "name": settings.app_name,
+            "docs": "/docs",
+            "health": "/health",
+        }
+
+    @app.get("/health")
+    def health():
+        return {
+            "status": "ok",
+            "environment": settings.environment,
+            "menor8_enabled": settings.enable_menor8_module,
+            "scheduler_enabled": settings.enable_scheduler,
+        }
+
+    @app.on_event("startup")
+    def on_startup():
+        start_scheduler()
+
+    @app.on_event("shutdown")
+    def on_shutdown():
+        stop_scheduler()
+
+    return app
+
+
+app = create_app()

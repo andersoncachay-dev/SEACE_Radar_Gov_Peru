@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16
+    container_name: seace_radar_db
+    environment:
+      POSTGRES_DB: seace_radar
+      POSTGRES_USER: seace
+      POSTGRES_PASSWORD: seace_dev_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - seace_radar_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seace -d seace_radar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: seace_radar_api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://seace:seace_dev_password@db:5432/seace_radar
+      SECRET_KEY: change-this-secret-before-production
+      ENVIRONMENT: docker
+      ENABLE_MENOR8_MODULE: "false"
+      ENABLE_SCHEDULER: "true"
+      SCHEDULER_INTERVAL_MINUTES: "60"
+      AUTO_SEND_ALERTS: "true"
+      ALERT_SENDER_INTERVAL_MINUTES: "10"
+      CORS_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8501,http://127.0.0.1:8501"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./exports:/app/exports
+      - ./data:/app/data
+    command: >
+      sh -c "alembic upgrade head &&
+             python backend/scripts/seed_admin.py &&
+             uvicorn backend.app.main:app --host 0.0.0.0 --port 8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: seace_radar_frontend
+    depends_on:
+      - api
+    environment:
+      VITE_API_URL: http://127.0.0.1:8000
+    ports:
+      - "5173:5173"
+    command: npm run dev
+
+volumes:
+  seace_radar_pgdata:

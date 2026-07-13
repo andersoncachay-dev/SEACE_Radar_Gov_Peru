@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+debug_*.html
+debug_*.json
+respuesta_*.html
+exports/requerimientos_menores8uit/*
+data/*.db
+frontend/node_modules
+frontend/dist

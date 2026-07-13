@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .database import Base
+
+
+class TimestampMixin:
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class User(TimestampMixin, Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default="viewer", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    search_profiles: Mapped[list["SearchProfile"]] = relationship(back_populates="owner")
+
+
+class SearchProfile(TimestampMixin, Base):
+    __tablename__ = "search_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    keyword: Mapped[str] = mapped_column(String(255), default="satelital", nullable=False)
+    source: Mapped[str] = mapped_column(String(80), default="seace_public_browser", nullable=False)
+    year: Mapped[str] = mapped_column(String(10), default="2026", nullable=False)
+    version: Mapped[str] = mapped_column(String(40), default="Seace 3", nullable=False)
+    max_results: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    owner: Mapped[User | None] = relationship(back_populates="search_profiles")
+    runs: Mapped[list["ScrapeRun"]] = relationship(back_populates="search_profile")
+
+
+class ScrapeRun(TimestampMixin, Base):
+    __tablename__ = "scrape_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    search_profile_id: Mapped[int | None] = mapped_column(ForeignKey("search_profiles.id"), nullable=True)
+    source: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="queued", nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rows_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    diagnostics: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+    search_profile: Mapped[SearchProfile | None] = relationship(back_populates="runs")
+
+
+class Opportunity(TimestampMixin, Base):
+    __tablename__ = "opportunities"
+    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_opportunities_source_external_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(80), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(180), nullable=False)
+    entity: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    nomenclature: Mapped[str] = mapped_column(String(180), default="", nullable=False)
+    object_type: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    region: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    currency: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    priority: Mapped[str] = mapped_column(String(10), default="C", nullable=False)
+    score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reasons: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    detail_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    requirement_pdf_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    requirement_pdf_local: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    publication_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    consultation_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    quote_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    proposal_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+
+
+class OpportunitySnapshot(TimestampMixin, Base):
+    __tablename__ = "opportunity_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"), nullable=False)
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("scrape_runs.id"), nullable=True)
+    previous_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    change_type: Mapped[str] = mapped_column(String(40), default="upsert", nullable=False)
+    raw_payload: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class Document(TimestampMixin, Base):
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opportunity_id: Mapped[int | None] = mapped_column(ForeignKey("opportunities.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    document_type: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    local_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="registered", nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class AlertRule(TimestampMixin, Base):
+    __tablename__ = "alert_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    channel: Mapped[str] = mapped_column(String(40), default="email", nullable=False)
+    destination: Mapped[str] = mapped_column(String(255), nullable=False)
+    min_priority: Mapped[str] = mapped_column(String(10), default="A", nullable=False)
+    hours_before_deadline: Mapped[int] = mapped_column(Integer, default=48, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class Alert(TimestampMixin, Base):
+    __tablename__ = "alerts"
+    __table_args__ = (UniqueConstraint("opportunity_id", "rule_id", "alert_type", name="uq_alert_once"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"), nullable=False)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("alert_rules.id"), nullable=False)
+    alert_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
+    message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
