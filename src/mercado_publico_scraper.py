@@ -91,6 +91,19 @@ def _href_to_url(href: str, current_url: str) -> str:
     return urljoin(current_url or BASE_URL, href)
 
 
+def _detail_link_url(link, current_url: str) -> str:
+    if not link:
+        return ""
+    url = _href_to_url(link.get("href", ""), current_url)
+    if url:
+        return url
+    onclick = link.get("onclick", "") or ""
+    match = re.search(r"window\.open\('([^']+DetailsAcquisition\.aspx\?qs=[^']+)'", onclick, re.I)
+    if match:
+        return urljoin(current_url or BASE_URL, match.group(1))
+    return ""
+
+
 def _to_float(value: str) -> float:
     text = _clean(value).replace("$", "").replace("CLP", "").replace("Pesos", "")
     text = re.sub(r"[^0-9,.\-]", "", text)
@@ -173,7 +186,7 @@ def _parse_regular_results(html: str, current_url: str) -> List[dict]:
     for tr in soup.find_all("tr"):
         cells = [_clean(td.get_text(" ", strip=True)) for td in tr.find_all("td")]
         cells = [cell for cell in cells if cell]
-        if len(cells) < 5 or not re.match(r"^\d{3,}-\d+-[A-Z]{2}\d{2}$", cells[0]):
+        if len(cells) < 5 or not re.match(r"^\d{3,}-\d+-[A-Z]{1,2}\d{2,3}$", cells[0]):
             continue
         row = _empty_row("licitaciones")
         row["Nomenclatura"] = cells[0]
@@ -183,7 +196,7 @@ def _parse_regular_results(html: str, current_url: str) -> List[dict]:
         row["Vigencia"] = cells[4]
         row["Estado Comercial"] = _estado_comercial(cells[4], row["propuesta_fin"])
         link = tr.find("a")
-        row["url_detalle"] = _href_to_url(link.get("href", "") if link else "", current_url)
+        row["url_detalle"] = _detail_link_url(link, current_url)
         rows.append(row)
     return rows
 
@@ -206,9 +219,67 @@ def _parse_large_purchase_results(html: str, current_url: str) -> List[dict]:
         row["Vigencia"] = cells[6] if len(cells) > 6 else ""
         row["Estado Comercial"] = _estado_comercial(row["Vigencia"], row["propuesta_fin"])
         link = tr.find("a")
-        row["url_detalle"] = _href_to_url(link.get("href", "") if link else "", current_url)
+        row["url_detalle"] = _detail_link_url(link, current_url)
         rows.append(row)
     return rows
+
+
+def _parse_results_for_mode(mode: str, html: str, current_url: str) -> List[dict]:
+    if mode == "grandes_compras":
+        return _parse_large_purchase_results(html, current_url)
+    return _parse_regular_results(html, current_url)
+
+
+def _click_next_results_page(driver) -> bool:
+    candidates = driver.find_elements(By.CSS_SELECTOR, "a, input[type='button'], input[type='submit'], button, div[onclick*='fnMovePage']")
+    for item in candidates:
+        try:
+            label = _norm(item.text or item.get_attribute("value") or item.get_attribute("title") or "")
+            href = _norm(item.get_attribute("href") or "")
+            if not item.is_displayed():
+                continue
+            if "siguiente" not in label and "page$next" not in href:
+                continue
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", item)
+            time.sleep(0.2)
+            item.click()
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _collect_result_rows(driver, mode: str, max_results: int) -> List[dict]:
+    rows: List[dict] = []
+    seen: set[str] = set()
+    visited_pages: set[str] = set()
+    while True:
+        page_rows = _parse_results_for_mode(mode, driver.page_source, driver.current_url)
+        for row in page_rows:
+            key = row.get("Nomenclatura") or f"{row.get('Nombre o Sigla de la Entidad')}|{row.get('Descripcion de Objeto')}"
+            if key and key not in seen:
+                seen.add(key)
+                rows.append(row)
+                if max_results and len(rows) >= max_results:
+                    return rows
+        page_marker = "|".join(row.get("Nomenclatura", "") for row in page_rows) or driver.current_url
+        if page_marker in visited_pages:
+            return rows
+        visited_pages.add(page_marker)
+        previous_marker = page_marker
+        if not _click_next_results_page(driver):
+            return rows
+        try:
+            WebDriverWait(driver, 20).until(
+                lambda d: (
+                    "|".join(row.get("Nomenclatura", "") for row in _parse_results_for_mode(mode, d.page_source, d.current_url))
+                    or d.current_url
+                )
+                != previous_marker
+            )
+        except TimeoutException:
+            return rows
+        time.sleep(0.8)
 
 
 def _find_date(text: str, labels: List[str]) -> str:
@@ -357,13 +428,8 @@ def search_mercado_publico(
             _click_search(driver)
         _wait_results(driver, keyword)
         time.sleep(1)
-        if mode == "grandes_compras":
-            rows = _parse_large_purchase_results(driver.page_source, driver.current_url)
-        else:
-            rows = _parse_regular_results(driver.page_source, driver.current_url)
-        if max_results:
-            rows = rows[:max_results]
-        diagnostics.append(f"Mercado Publico {mode}: {len(rows)} procesos detectados para keyword={keyword}")
+        rows = _collect_result_rows(driver, mode, max_results)
+        diagnostics.append(f"Mercado Publico {mode}: {len(rows)} procesos detectados para keyword={keyword} incluyendo paginas siguientes")
 
         if enrich_details and rows and mode == "licitaciones":
             limit = min(max_details or len(rows), len(rows))

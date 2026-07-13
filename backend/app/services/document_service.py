@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import mimetypes
+import json
 import re
 import time
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
@@ -16,7 +18,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Document, Opportunity
+from ..models import Document, Opportunity, OpportunitySnapshot
 
 try:
     from src.seace_browser_scraper import (
@@ -282,7 +284,6 @@ def _download_direct(db: Session, opportunity: Opportunity, url: str, title: str
     target_dir = DOCUMENT_ROOT / str(opportunity.id)
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = _filename_from_url(url, title, opportunity)
-    target = target_dir / filename
     try:
         session = requests.Session()
         if cookies:
@@ -292,6 +293,11 @@ def _download_direct(db: Session, opportunity: Opportunity, url: str, title: str
         response.raise_for_status()
         if "text/html" in response.headers.get("Content-Type", "").lower() and response.content[:4] != b"%PDF":
             raise RuntimeError("La URL devolvio HTML, no un archivo descargable.")
+        disposition = response.headers.get("Content-Disposition", "")
+        disposition_match = re.search(r"filename\*?=(?:UTF-8''|\"?)([^\";]+)", disposition, re.I)
+        if disposition_match:
+            filename = _safe_filename(unquote(disposition_match.group(1)))
+        target = target_dir / filename
         target.write_bytes(response.content)
         return _register_document(
             db,
@@ -522,10 +528,522 @@ def _click_download_candidates(db: Session, driver, opportunity: Opportunity, ta
     return docs
 
 
+def _click_chile_attachments(driver) -> bool:
+    selectors = [
+        (By.ID, "imgAdjuntos"),
+        (By.XPATH, "//*[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'ver adjuntos')]"),
+        (By.XPATH, "//*[contains(translate(@title,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'adjunto') or contains(translate(@alt,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'adjunto')]"),
+    ]
+    for by, selector in selectors:
+        try:
+            elements = driver.find_elements(by, selector)
+        except Exception:
+            continue
+        for element in elements:
+            try:
+                if not element.is_displayed():
+                    continue
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                time.sleep(0.3)
+                driver.execute_script("arguments[0].click();", element)
+                return True
+            except Exception:
+                continue
+    return False
+
+
+def _chile_direct_attachment_links(driver) -> list[dict]:
+    return driver.execute_script(
+        r"""
+        function clean(s){return (s||'').replace(/\s+/g,' ').trim();}
+        const out = [];
+        for(const el of Array.from(document.querySelectorAll("a,input,img,button"))){
+            const href = el.href || el.getAttribute('href') || '';
+            if(!href.includes('Attachment/VerAntecedentes')) continue;
+            let p = el;
+            let title = clean(el.innerText || el.value || el.title || el.alt || '');
+            for(let i=0; i<8 && p; i++, p=p.parentElement){
+                if((p.tagName||'').toLowerCase()==='tr'){
+                    title = clean(p.innerText) || title;
+                    break;
+                }
+            }
+            out.push({href, title: title || 'Documento Mercado Publico'});
+        }
+        return out.slice(0, 20);
+        """
+    ) or []
+
+
+def _find_chile_direct_attachment(driver, index: int):
+    return driver.execute_script(
+        """
+        const elements = Array.from(document.querySelectorAll('a,input,img,button'))
+            .filter(el => String(el.href || el.getAttribute('href') || '').includes('Attachment/VerAntecedentes'));
+        const el = elements[arguments[0]] || null;
+        return el ? (el.closest('a') || el) : null;
+        """,
+        index,
+    )
+
+
+def _filename_from_disposition(disposition: str, fallback: str) -> str:
+    disposition_match = re.search(r"filename\*?=(?:UTF-8''|\"?)([^\";]+)", disposition or "", re.I)
+    if disposition_match:
+        return _safe_filename(unquote(disposition_match.group(1)))
+    return _safe_filename(fallback)
+
+
+def _download_chile_attachment_page(
+    db: Session,
+    opportunity: Opportunity,
+    *,
+    session: requests.Session,
+    url: str,
+    title: str,
+    target_dir: Path,
+    referer: str,
+) -> list[Document]:
+    docs: list[Document] = []
+    try:
+        response = session.get(url, headers={"User-Agent": "Mozilla/5.0", "Referer": referer}, timeout=45)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        image_buttons = [item for item in soup.find_all("input") if (item.get("type") or "").lower() == "image" and item.get("name")]
+        hidden_payload = {
+            item.get("name"): item.get("value") or ""
+            for item in soup.find_all("input")
+            if item.get("name") and (item.get("type") or "").lower() != "image"
+        }
+        for index, button in enumerate(image_buttons, start=1):
+            button_name = button.get("name") or ""
+            payload = dict(hidden_payload)
+            payload[f"{button_name}.x"] = "10"
+            payload[f"{button_name}.y"] = "10"
+            row_title = _clean(button.find_parent("tr").get_text(" ", strip=True) if button.find_parent("tr") else "") or title
+            download = session.post(
+                url,
+                data=payload,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": url},
+                timeout=60,
+                allow_redirects=True,
+            )
+            download.raise_for_status()
+            content_type = download.headers.get("Content-Type", "").lower()
+            if "text/html" in content_type and download.content[:4] != b"%PDF":
+                docs.append(
+                    _register_document(
+                        db,
+                        opportunity,
+                        title=row_title,
+                        source_url=f"{url}#{button_name}",
+                        status="error",
+                        error_message="Mercado Publico devolvio HTML al intentar descargar el anexo.",
+                    )
+                )
+                continue
+            filename = _filename_from_disposition(download.headers.get("Content-Disposition", ""), row_title)
+            target = target_dir / filename
+            target.write_bytes(download.content)
+            docs.append(
+                _register_document(
+                    db,
+                    opportunity,
+                    title=row_title,
+                    source_url=f"{url}#{button_name}",
+                    local_path=str(target),
+                    filename=target.name,
+                    status="downloaded",
+                )
+            )
+        return docs
+    except Exception as exc:
+        return [
+            _register_document(
+                db,
+                opportunity,
+                title=title,
+                source_url=url,
+                status="error",
+                error_message=f"{type(exc).__name__}: {exc}",
+            )
+        ]
+
+
+def _click_chile_direct_links(db: Session, driver, opportunity: Opportunity, target_dir: Path) -> list[Document]:
+    docs: list[Document] = []
+    candidates = _chile_direct_attachment_links(driver)
+    for index, candidate in enumerate(candidates):
+        element = _find_chile_direct_attachment(driver, index)
+        if element is None:
+            continue
+        title = _clean(candidate.get("title") or "") or f"Documento Mercado Publico {index + 1}"
+        before_files = {p.name for p in target_dir.glob("*")}
+        before_handles = set(driver.window_handles)
+        current_handle = driver.current_window_handle
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.3)
+            try:
+                ActionChains(driver).move_to_element(element).pause(0.1).click(element).perform()
+            except Exception:
+                driver.execute_script("arguments[0].click();", element)
+            deadline = time.time() + 12
+            new_files: list[Path] = []
+            while time.time() < deadline:
+                new_files = _finished_downloads(target_dir, before_files)
+                if new_files:
+                    break
+                opened = list(set(driver.window_handles) - before_handles)
+                if opened:
+                    driver.switch_to.window(opened[-1])
+                    time.sleep(2)
+                    new_files = _finished_downloads(target_dir, before_files)
+                    if new_files:
+                        break
+                    if driver.current_url and not driver.current_url.startswith("data:"):
+                        docs.append(_download_direct(db, opportunity, driver.current_url, title, cookies=driver.get_cookies(), referer=opportunity.detail_url))
+                    driver.close()
+                    driver.switch_to.window(current_handle)
+                    break
+                time.sleep(0.8)
+            if not new_files and driver.current_window_handle == current_handle and driver.current_url != opportunity.detail_url:
+                docs.append(_download_direct(db, opportunity, driver.current_url, title, cookies=driver.get_cookies(), referer=opportunity.detail_url))
+                driver.get(opportunity.detail_url)
+                time.sleep(2)
+            for path in new_files:
+                docs.append(_register_local_download(db, opportunity, path, title, source_url=f"{opportunity.detail_url}#{path.name}"))
+        except Exception as exc:
+            docs.append(
+                _register_document(
+                    db,
+                    opportunity,
+                    title=title,
+                    source_url=f"{opportunity.detail_url}#mercado-publico-directo-{index + 1}",
+                    status="error",
+                    error_message=f"{type(exc).__name__}: {exc}",
+                )
+            )
+    return docs
+
+
+def _chile_attachment_actions(driver) -> list[dict]:
+    return driver.execute_script(
+        r"""
+        function clean(s){return (s||'').replace(/\s+/g,' ').trim();}
+        const rows = Array.from(document.querySelectorAll('tr'));
+        const out = [];
+        for(const tr of rows){
+            const text = clean(tr.innerText || '');
+            const normalized = text.toLowerCase();
+            if(!text || !(normalized.includes('base') || normalized.includes('.pdf') || normalized.includes('.doc') || normalized.includes('anexo'))) continue;
+            const actions = Array.from(tr.querySelectorAll('a,button,input,img'));
+            let action = null;
+            for(const el of actions.reverse()){
+                const merged = clean((el.innerText||'')+' '+(el.value||'')+' '+(el.title||'')+' '+(el.alt||'')+' '+(el.href||'')+' '+(el.getAttribute('onclick')||'')).toLowerCase();
+                if(merged.includes('ver') || merged.includes('download') || merged.includes('attachment') || merged.includes('adjunto') || merged.includes('lupa')){
+                    action = el;
+                    break;
+                }
+            }
+            if(action){
+                out.push({
+                    id: action.id || '',
+                    index: out.length,
+                    title: text,
+                    href: action.getAttribute('href') || '',
+                    onclick: action.getAttribute('onclick') || ''
+                });
+            }
+        }
+        return out.slice(0, 12);
+        """
+    ) or []
+
+
+def _find_chile_attachment_action(driver, candidate: dict):
+    element_id = candidate.get("id") or ""
+    if element_id:
+        try:
+            return driver.find_element(By.ID, element_id)
+        except Exception:
+            pass
+    actions = driver.execute_script(
+        r"""
+        function clean(s){return (s||'').replace(/\s+/g,' ').trim();}
+        const out = [];
+        for(const tr of Array.from(document.querySelectorAll('tr'))){
+            const text = clean(tr.innerText || '').toLowerCase();
+            if(!text || !(text.includes('base') || text.includes('.pdf') || text.includes('.doc') || text.includes('anexo'))) continue;
+            const candidates = Array.from(tr.querySelectorAll('a,button,input,img'));
+            for(const el of candidates.reverse()){
+                const merged = clean((el.innerText||'')+' '+(el.value||'')+' '+(el.title||'')+' '+(el.alt||'')+' '+(el.href||'')+' '+(el.getAttribute('onclick')||'')).toLowerCase();
+                if(merged.includes('ver') || merged.includes('download') || merged.includes('attachment') || merged.includes('adjunto') || merged.includes('lupa')){
+                    out.push(el);
+                    break;
+                }
+            }
+        }
+        return out;
+        """
+    ) or []
+    index = int(candidate.get("index") or 0)
+    return actions[index] if 0 <= index < len(actions) else None
+
+
+def _click_chile_ficha_pdf(db: Session, driver, opportunity: Opportunity, target_dir: Path) -> list[Document]:
+    nomen = _nomenclature(opportunity)
+    existing_pdf = target_dir / f"PDF{nomen}.pdf" if nomen else None
+    if existing_pdf and existing_pdf.exists() and existing_pdf.stat().st_size > 0:
+        return [
+            _register_local_download(
+                db,
+                opportunity,
+                existing_pdf,
+                "Ficha Mercado Publico",
+                source_url=f"{opportunity.detail_url}#descargar_pdf:{existing_pdf.name}",
+            )
+        ]
+    candidates = [
+        ("descargar_pdf", "Ficha Mercado Publico"),
+        ("imgPDF", "Ficha Mercado Publico"),
+    ]
+    docs: list[Document] = []
+    for element_id, title in candidates:
+        try:
+            element = driver.find_element(By.ID, element_id)
+        except Exception:
+            continue
+        before_files = {p.name for p in target_dir.glob("*")}
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.2)
+            try:
+                ActionChains(driver).move_to_element(element).pause(0.1).click(element).perform()
+            except Exception:
+                driver.execute_script("arguments[0].click();", element)
+            deadline = time.time() + 25
+            new_files: list[Path] = []
+            while time.time() < deadline:
+                new_files = _finished_downloads(target_dir, before_files)
+                if new_files:
+                    break
+                time.sleep(0.8)
+            for path in new_files:
+                docs.append(
+                    _register_local_download(
+                        db,
+                        opportunity,
+                        path,
+                        title,
+                        source_url=f"{opportunity.detail_url}#{element_id}:{path.name}",
+                    )
+                )
+            if docs:
+                return docs
+        except Exception as exc:
+            try:
+                driver.switch_to.alert.accept()
+            except Exception:
+                pass
+            docs.append(
+                _register_document(
+                    db,
+                    opportunity,
+                    title=title,
+                    source_url=f"{opportunity.detail_url}#{element_id}",
+                    status="error",
+                    error_message=f"{type(exc).__name__}: {exc}",
+                )
+            )
+    return docs
+
+
+def _unique_documents(docs: list[Document]) -> list[Document]:
+    unique: list[Document] = []
+    seen: set[int] = set()
+    for doc in docs:
+        if doc.id in seen:
+            continue
+        seen.add(doc.id)
+        unique.append(doc)
+    return unique
+
+
+def _discover_chile_documents(db: Session, opportunity: Opportunity, driver, target_dir: Path) -> list[Document]:
+    docs: list[Document] = []
+    driver.get(opportunity.detail_url)
+    time.sleep(4)
+    session = requests.Session()
+    for cookie in driver.get_cookies():
+        session.cookies.set(cookie.get("name"), cookie.get("value"), domain=cookie.get("domain"))
+    for candidate in _chile_direct_attachment_links(driver):
+        href = _clean(candidate.get("href") or "")
+        if not href:
+            continue
+        docs.extend(
+            _download_chile_attachment_page(
+                db,
+                opportunity,
+                session=session,
+                url=urljoin(driver.current_url, href),
+                title=_clean(candidate.get("title") or "Documento Mercado Publico"),
+                target_dir=target_dir,
+                referer=driver.current_url,
+            )
+        )
+    downloaded = [doc for doc in docs if doc.status == "downloaded"]
+    if downloaded:
+        return _unique_documents(downloaded)
+    docs.extend(_click_chile_direct_links(db, driver, opportunity, target_dir))
+    downloaded = [doc for doc in docs if doc.status == "downloaded"]
+    if downloaded:
+        return _unique_documents(downloaded)
+    docs.extend(_click_chile_ficha_pdf(db, driver, opportunity, target_dir))
+    downloaded = [doc for doc in docs if doc.status == "downloaded"]
+    if downloaded:
+        return _unique_documents(downloaded)
+    driver.get(opportunity.detail_url)
+    time.sleep(2)
+    before_handles = set(driver.window_handles)
+    if not _click_chile_attachments(driver):
+        return docs or [
+            _register_document(
+                db,
+                opportunity,
+                title="Sin acceso a adjuntos Mercado Publico",
+                status="error",
+                error_message="No se encontro la accion Ver adjuntos en la ficha de Mercado Publico.",
+            )
+        ]
+    time.sleep(2)
+    new_handles = list(set(driver.window_handles) - before_handles)
+    if new_handles:
+        driver.switch_to.window(new_handles[-1])
+        time.sleep(2)
+    actions = _chile_attachment_actions(driver)
+    cookies = driver.get_cookies()
+    for index, candidate in enumerate(actions, start=1):
+        title = _clean(candidate.get("title") or "") or f"Documento Mercado Publico {index}"
+        href = _clean(candidate.get("href") or "")
+        if href and not href.lower().startswith("javascript"):
+            docs.append(_download_direct(db, opportunity, urljoin(driver.current_url, href), title, cookies=cookies, referer=driver.current_url))
+            continue
+        element = _find_chile_attachment_action(driver, candidate)
+        if element is None:
+            continue
+        before_files = {p.name for p in target_dir.glob("*")}
+        before_click_handles = set(driver.window_handles)
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.2)
+            attachment_handle = driver.current_window_handle
+            try:
+                ActionChains(driver).move_to_element(element).pause(0.1).click(element).perform()
+            except Exception:
+                driver.execute_script("arguments[0].click();", element)
+            deadline = time.time() + 45
+            new_files: list[Path] = []
+            while time.time() < deadline:
+                new_files = _finished_downloads(target_dir, before_files)
+                if new_files:
+                    break
+                opened = list(set(driver.window_handles) - before_click_handles)
+                if opened:
+                    driver.switch_to.window(opened[-1])
+                    time.sleep(1)
+                    if driver.current_url and not driver.current_url.startswith("data:"):
+                        docs.append(_download_direct(db, opportunity, driver.current_url, title, cookies=driver.get_cookies(), referer=opportunity.detail_url))
+                    driver.close()
+                    driver.switch_to.window(attachment_handle)
+                    break
+                time.sleep(0.8)
+            for path in new_files:
+                docs.append(_register_local_download(db, opportunity, path, title, source_url=f"{driver.current_url}#{path.name}"))
+        except Exception as exc:
+            docs.append(
+                _register_document(
+                    db,
+                    opportunity,
+                    title=title,
+                    source_url=f"{opportunity.detail_url}#mercado-publico-adjunto-{index}",
+                    status="error",
+                    error_message=f"{type(exc).__name__}: {exc}",
+                )
+            )
+    if docs:
+        return docs
+    return [
+        _register_document(
+            db,
+            opportunity,
+            title="Adjuntos Mercado Publico sin descarga",
+            status="error",
+            error_message="Se abrio Ver adjuntos, pero no se pudo activar una descarga en Acciones.",
+        )
+    ]
+
+
 def discover_documents_for_opportunity(db: Session, opportunity_id: int) -> list[Document]:
     opportunity = db.get(Opportunity, opportunity_id)
     if not opportunity:
         raise ValueError("Opportunity not found")
+    if opportunity.source == "oece_ocds_api":
+        snapshot = db.scalar(
+            select(OpportunitySnapshot)
+            .where(OpportunitySnapshot.opportunity_id == opportunity.id)
+            .order_by(OpportunitySnapshot.id.desc())
+        )
+        docs_payload: list[dict] = []
+        if snapshot and snapshot.raw_payload:
+            try:
+                raw_payload = json.loads(snapshot.raw_payload)
+                raw_docs = raw_payload.get("documentos_ocds") or "[]"
+                docs_payload = json.loads(raw_docs) if isinstance(raw_docs, str) else raw_docs
+            except Exception:
+                docs_payload = []
+        if not docs_payload and opportunity.detail_url:
+            try:
+                response = requests.get(opportunity.detail_url, timeout=45, headers={"User-Agent": "GovRadar CRM/1.0"})
+                response.raise_for_status()
+                payload = response.json()
+                releases = payload.get("releases") or []
+                release = releases[0] if releases else payload.get("compiledRelease") or payload
+                tender_docs = ((release.get("tender") or {}).get("documents") or [])
+                docs_payload = [
+                    {
+                        "title": _clean(item.get("title") or item.get("description") or "Documento OCDS"),
+                        "url": _clean(item.get("url")),
+                    }
+                    for item in tender_docs
+                    if _clean(item.get("url"))
+                ]
+            except Exception:
+                docs_payload = []
+        if not docs_payload and opportunity.requirement_pdf_url:
+            docs_payload = [{"title": "Documento OCDS", "url": opportunity.requirement_pdf_url}]
+        docs = [
+            _register_document(
+                db,
+                opportunity,
+                title=_clean(item.get("title") or "Documento OCDS"),
+                source_url=_clean(item.get("url")),
+                status="registered",
+            )
+            for item in docs_payload
+            if _clean(item.get("url"))
+        ]
+        if docs:
+            return docs
+        return [
+            _register_document(
+                db,
+                opportunity,
+                title="Sin documentos OCDS",
+                status="error",
+                error_message="La API OCDS no devolvio enlaces de documentos para esta oportunidad.",
+            )
+        ]
     if not opportunity.detail_url:
         return [
             _register_document(
@@ -563,6 +1081,12 @@ def discover_documents_for_opportunity(db: Session, opportunity_id: int) -> list
     docs: list[Document] = []
     try:
         driver = webdriver.Chrome(options=options)
+        try:
+            driver.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": str(target_dir)})
+        except Exception:
+            pass
+        if opportunity.source.startswith("mercado_publico"):
+            return _discover_chile_documents(db, opportunity, driver, target_dir)
         driver.get(opportunity.detail_url)
         time.sleep(4)
         if not _page_has_process_data(driver, opportunity):

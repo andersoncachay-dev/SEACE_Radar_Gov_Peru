@@ -64,6 +64,9 @@ class RunStart(BaseModel):
     source: str = "seace_public_browser"
     keyword: str = "satelital"
     year: str = "2026"
+    month: str | None = None
+    years: list[str] | None = None
+    months: list[str] | None = None
     version: str = "Seace 3"
     max_results: int = 25
     max_details: int = 15

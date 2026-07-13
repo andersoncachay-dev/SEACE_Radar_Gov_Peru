@@ -33,7 +33,7 @@ def calcular_score(row):
     except Exception: pass
     if "menor_8" in origen: score += 10; motivos.append("Compra rápida menor a 8 UIT")
     if "consultas y propuesta" in estado or "consulta y cotiz" in estado: score += 30; motivos.append("Vigente para consultas/cotización")
-    elif "solo para propuesta" in estado or "sólo para propuesta" in estado or "solo para cotiz" in estado or "sólo para cotiz" in estado: score += 20; motivos.append("Vigente solo para propuesta/cotización")
+    elif "vigente para propuesta" in estado or "solo para propuesta" in estado or "sólo para propuesta" in estado or "solo para cotiz" in estado or "sólo para cotiz" in estado: score += 20; motivos.append("Vigente solo para propuesta/cotización")
     elif "en evalu" in estado: score += 5; motivos.append("En evaluación")
     elif "cerrado" in estado: score = max(0, score - 35); motivos.append("Proceso cerrado")
     elif "revisar" in estado: motivos.append("Revisar cronograma")
@@ -51,7 +51,7 @@ def enriquecer_oportunidades(df):
     def semaforo(row):
         estado = str(row.get("estado_comercial", "")).lower()
         if "consultas y propuesta" in estado or "consulta y cotiz" in estado: return "🟢"
-        if "solo para propuesta" in estado or "sólo para propuesta" in estado or "solo para cotiz" in estado or "sólo para cotiz" in estado: return "🟡"
+        if "vigente para propuesta" in estado or "solo para propuesta" in estado or "sólo para propuesta" in estado or "solo para cotiz" in estado or "sólo para cotiz" in estado: return "🟡"
         if "en evalu" in estado or "revisar" in estado: return "🟠"
         if "cerrado" in estado: return "🔴"
         return row.get("prioridad", "C")

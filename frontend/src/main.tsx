@@ -3,12 +3,16 @@ import { createRoot } from "react-dom/client";
 import { api, Alert, AlertRule, DocumentRecord, login, Opportunity, Run, Stats } from "./api";
 import "./styles.css";
 
-type Page = "Inicio" | "Oportunidades" | "Alertas" | "Usuarios" | "Sistema";
+type Page = "Inicio" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Oportunidades OCDS Peru" | "Alertas" | "Usuarios" | "Sistema";
 type Country = "Peru" | "Chile";
-type Module = "SEACE Publico" | "Contratos Menores a 8 UIT" | "Licitaciones Mercado Publico" | "Grandes Compras" | "Ambos modulos";
+type Module = "SEACE Publico" | "Contratos Menores a 8 UIT" | "Oportunidades Chile LMP-GC" | "Ambos modulos";
 type CommercialClass = "green" | "amber" | "red";
 type SortDirection = "asc" | "desc";
 type SearchMode = "append" | "replace";
+type OpportunityVariant = "radar" | "ocds";
+type MaxResultsMode = "custom" | "all" | "active";
+type PendingSearch = { mode: SearchMode; keywords: string[]; runIds: number[] };
+type NavIconName = "home" | "target" | "globe" | "database" | "bell" | "users" | "settings";
 type SortKey =
   | "priority"
   | "commercial"
@@ -22,27 +26,57 @@ type SortKey =
   | "days_proposal"
   | "amount";
 
-const nav: Page[] = ["Inicio", "Oportunidades", "Alertas", "Usuarios", "Sistema"];
+const nav: Page[] = ["Inicio", "Oportunidades", "Oportunidades Chile LMP-GC", "Oportunidades OCDS Peru", "Alertas", "Usuarios", "Sistema"];
 const commercialFilters = [
   { label: "Vigente para Consultas y Propuesta", className: "green" },
   { label: "Vigente para Propuesta", className: "amber" },
   { label: "Proceso Culminado", className: "red" },
 ] as const;
-const activeSearchStorageKey = "govradar.opportunities.activeSearch";
+const activeSearchStoragePrefix = "govradar.opportunities.activeSearch";
+const monthOptions = [
+  ["1", "Enero"],
+  ["2", "Febrero"],
+  ["3", "Marzo"],
+  ["4", "Abril"],
+  ["5", "Mayo"],
+  ["6", "Junio"],
+  ["7", "Julio"],
+  ["8", "Agosto"],
+  ["9", "Setiembre"],
+  ["10", "Octubre"],
+  ["11", "Noviembre"],
+  ["12", "Diciembre"],
+] as const;
+const currentYear = new Date().getFullYear();
+const yearOptions = Array.from({ length: 6 }, (_, index) => String(currentYear - index));
+const rodarLogoUrl = "/assets/Rodarfondoblanco.png";
+const countryFlagUrls: Record<Country, string> = {
+  Peru: "/assets/flag-peru.svg",
+  Chile: "/assets/flag-chile.svg",
+};
+const excelLogoUrl = "/assets/logoexcel.png";
+const navIcons: Record<Page, NavIconName> = {
+  Inicio: "home",
+  Oportunidades: "target",
+  "Oportunidades Chile LMP-GC": "globe",
+  "Oportunidades OCDS Peru": "database",
+  Alertas: "bell",
+  Usuarios: "users",
+  Sistema: "settings",
+};
 
 function modulesForCountry(country: Country): Module[] {
   return country === "Chile"
-    ? ["Licitaciones Mercado Publico", "Grandes Compras"]
+    ? ["Oportunidades Chile LMP-GC"]
     : ["SEACE Publico", "Contratos Menores a 8 UIT", "Ambos modulos"];
 }
 
 function defaultModuleForCountry(country: Country): Module {
-  return country === "Chile" ? "Licitaciones Mercado Publico" : "SEACE Publico";
+  return country === "Chile" ? "Oportunidades Chile LMP-GC" : "SEACE Publico";
 }
 
 function sourceForModule(module: Module) {
-  if (module === "Licitaciones Mercado Publico") return "mercado_publico_browser";
-  if (module === "Grandes Compras") return "mercado_publico_grandes_compras";
+  if (module === "Oportunidades Chile LMP-GC") return "mercado_publico_lmp_gc";
   if (module === "Contratos Menores a 8 UIT") return "menor8_browser";
   return "seace_public_browser";
 }
@@ -50,16 +84,37 @@ function sourceForModule(module: Module) {
 function sourceBelongsToCountry(source: string, country: Country) {
   const normalized = source.toLowerCase();
   if (country === "Chile") return normalized.startsWith("mercado_publico");
-  return normalized.startsWith("seace") || normalized.includes("menor8");
+  return normalized.startsWith("seace") || normalized.includes("menor8") || normalized.startsWith("oece_ocds");
+}
+
+function sourceBelongsToView(source: string, country: Country, variant: OpportunityVariant) {
+  const normalized = source.toLowerCase();
+  if (variant === "ocds") return country === "Peru" && normalized.startsWith("oece_ocds");
+  if (country === "Peru") return (normalized.startsWith("seace") || normalized.includes("menor8")) && !normalized.startsWith("oece_ocds");
+  return sourceBelongsToCountry(source, country);
 }
 
 function formatMoney(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return <span className="reserved-amount">Monto reservado</span>;
+  }
   return new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 0 }).format(value || 0);
 }
 
 function formatDate(value: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatManualTimestamp(value: string) {
+  return new Intl.DateTimeFormat("es-PE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
 }
 
 function parseDate(value: string | null) {
@@ -84,6 +139,74 @@ function presentationDeadline(item: Opportunity) {
   return item.proposal_deadline || item.quote_deadline;
 }
 
+function toggleSelected(values: string[], value: string) {
+  if (values.includes(value)) {
+    return values.length > 1 ? values.filter((item) => item !== value) : values;
+  }
+  return [...values, value];
+}
+
+function CountryFlagIcon({ country, className = "" }: { country: Country; className?: string }) {
+  return (
+    <img
+      className={className}
+      src={countryFlagUrls[country]}
+      alt={country === "Chile" ? "Chile" : "Peru"}
+      loading="eager"
+    />
+  );
+}
+
+function NavIcon({ name }: { name: NavIconName }) {
+  const common = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  return (
+    <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {name === "home" ? <path {...common} d="M3 11.5 12 4l9 7.5M5 10.5V20h14v-9.5M9 20v-6h6v6" /> : null}
+      {name === "target" ? <><circle {...common} cx="12" cy="12" r="8" /><circle {...common} cx="12" cy="12" r="3" /><path {...common} d="M17 7l3-3M17.5 4H20v2.5" /></> : null}
+      {name === "globe" ? <><circle {...common} cx="12" cy="12" r="9" /><path {...common} d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z" /></> : null}
+      {name === "database" ? <><ellipse {...common} cx="12" cy="5" rx="7" ry="3" /><path {...common} d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></> : null}
+      {name === "bell" ? <><path {...common} d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path {...common} d="M10 21h4" /></> : null}
+      {name === "users" ? <><path {...common} d="M16 21v-2a4 4 0 0 0-8 0v2" /><circle {...common} cx="12" cy="7" r="4" /><path {...common} d="M22 21v-2a4 4 0 0 0-3-3.8M16 3.2a4 4 0 0 1 0 7.6" /></> : null}
+      {name === "settings" ? <><path {...common} d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z" /><path {...common} d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.7 1.7 0 0 0-2 .2 1.7 1.7 0 0 0-.8 1.7V22H9.2v-.2a1.7 1.7 0 0 0-.8-1.7 1.7 1.7 0 0 0-2-.2l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.4-1.1H3v-4h.2a1.7 1.7 0 0 0 1.4-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.7 1.7 0 0 0 2-.2A1.7 1.7 0 0 0 9.2 2V2h5.6v.2a1.7 1.7 0 0 0 .8 1.7 1.7 1.7 0 0 0 2 .2l.2-.1 2 3.4-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.4 1.1h.2v4h-.2A1.7 1.7 0 0 0 19.4 15Z" /></> : null}
+    </svg>
+  );
+}
+
+function pageLabel(item: Page) {
+  return (
+    <span className="nav-label">
+      <NavIcon name={navIcons[item]} />
+      <span>{item}</span>
+    </span>
+  );
+}
+
+function displayUserName(email: string) {
+  if (email.toLowerCase().startsWith("admin@")) return "Admin Hughes";
+  return email;
+}
+
+function userInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "U";
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+}
+
+function datePart(value: string | null, part: "year" | "month") {
+  const timestamp = parseDate(value);
+  if (timestamp === null) return null;
+  const date = new Date(timestamp);
+  return part === "year" ? String(date.getFullYear()) : String(date.getMonth() + 1);
+}
+
+function uniqueDefined(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter((item): item is string => Boolean(item))));
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function parseRunDetails(run?: Run | null) {
   const diagnostics = run?.diagnostics || "";
   const reviewed = diagnostics.match(/Cronogramas revisados:\s*(\d+)\/(\d+);\s*aplicados correctamente:\s*(\d+)/);
@@ -99,15 +222,15 @@ function parseRunDetails(run?: Run | null) {
 function estimateRunProgress(run: Run, detail: ReturnType<typeof parseRunDetails>, now: number) {
   if (run.status === "completed") return 100;
   if (run.status === "failed") return 100;
-  if (run.status === "queued") return 8;
+  const startedAt = run.started_at ? new Date(run.started_at).getTime() : now;
+  const elapsedSeconds = Math.max(0, (now - startedAt) / 1000);
+  if (run.status === "queued") return Math.min(18, 4 + elapsedSeconds * 1.4);
 
   if (run.status === "running") {
     if (detail.reviewed !== null && detail.requested && detail.requested > 0) {
-      return Math.min(94, 28 + (detail.reviewed / detail.requested) * 58);
+      return Math.min(94, 12 + (detail.reviewed / detail.requested) * 72);
     }
-    const startedAt = run.started_at ? new Date(run.started_at).getTime() : now;
-    const elapsedSeconds = Math.max(0, (now - startedAt) / 1000);
-    return Math.min(92, 14 + elapsedSeconds * 1.9);
+    return Math.min(92, 8 + elapsedSeconds * 2.6);
   }
 
   return 12;
@@ -179,6 +302,105 @@ function commercialSignal(item: Opportunity): { label: string; hint: string; cla
   };
 }
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function highlightTermsFromKeywords(keywords: string[]) {
+  const terms = new Set<string>();
+  keywords.forEach((keyword) => {
+    const clean = keyword.trim();
+    if (clean.length >= 3 && !/^\d+$/.test(clean)) terms.add(clean);
+    clean.split(/[,\s;]+/).forEach((part) => {
+      const normalized = part.trim();
+      if (normalized.length >= 3 && !/^\d+$/.test(normalized)) terms.add(normalized);
+    });
+  });
+  return Array.from(terms).sort((left, right) => right.length - left.length).slice(0, 40);
+}
+
+function HighlightedText({ text, terms }: { text: string; terms: string[] }) {
+  const cleanText = text || "-";
+  const cleanTerms = useMemo(() => highlightTermsFromKeywords(terms), [terms]);
+  if (!cleanTerms.length) return <>{cleanText}</>;
+  const matcher = new RegExp(`(${cleanTerms.map(escapeRegex).join("|")})`, "gi");
+  const lowerTerms = cleanTerms.map((term) => term.toLowerCase());
+  return (
+    <>
+      {cleanText.split(matcher).map((part, index) => {
+        const isMatch = lowerTerms.includes(part.toLowerCase());
+        return isMatch ? <mark className="keyword-mark" key={`${part}-${index}`}>{part}</mark> : <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>;
+      })}
+    </>
+  );
+}
+
+function moneyText(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "Monto reservado";
+  return new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 0 }).format(value || 0);
+}
+
+function daysText(value: number | null) {
+  if (value === null) return "-";
+  if (value < 0) return `Vencido hace ${Math.abs(value)} dias`;
+  return String(value);
+}
+
+function exportOpportunitiesToExcel(rows: Array<{ item: Opportunity; signal: ReturnType<typeof commercialSignal> }>, title: string) {
+  const headers = [
+    "Prioridad",
+    "Semaforo comercial",
+    "Entidad",
+    "Proceso",
+    "Descripcion",
+    "Fecha de convocatoria",
+    "Fin Consultas",
+    "Dias Consultas",
+    "Fin Propuesta",
+    "Dias Propuesta",
+    "Monto",
+  ];
+  const body = rows.map(({ item, signal }) => {
+    const proposalDeadline = presentationDeadline(item);
+    return [
+      item.priority,
+      `${signal.label} - ${signal.hint}`,
+      item.entity,
+      item.nomenclature,
+      item.description,
+      formatDate(item.publication_date),
+      formatDate(item.consultation_deadline),
+      daysText(daysUntil(item.consultation_deadline)),
+      formatDate(proposalDeadline),
+      daysText(daysUntil(proposalDeadline)),
+      moneyText(item.amount),
+    ];
+  });
+  const html = `<!doctype html><html><head><meta charset="utf-8" /></head><body><table><caption>${escapeHtml(title)}</caption><thead><tr>${headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("")}</tr></thead><tbody>${body
+    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`)
+    .join("")}</tbody></table></body></html>`;
+  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `oportunidades-${new Date().toISOString().slice(0, 10)}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function useBackend(token: string) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -242,7 +464,7 @@ function Login({ onLogin }: { onLogin: (token: string, email: string) => void })
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <div className="brand-mark">R</div>
+        <img className="brand-logo" src={rodarLogoUrl} alt="RODAR Consulting" />
         <p className="overline">RODAR Consulting</p>
         <h1>Radar comercial para procesos de gobierno.</h1>
         <p>
@@ -289,12 +511,21 @@ function AppShell({
   const [country, setCountry] = useState<Country>("Peru");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const backend = useBackend(token);
+  const userName = displayUserName(email);
+
+  useEffect(() => {
+    if (page === "Oportunidades Chile LMP-GC") {
+      setCountry("Chile");
+    } else if (page === "Oportunidades" || page === "Oportunidades OCDS Peru") {
+      setCountry("Peru");
+    }
+  }, [page]);
 
   return (
     <div className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
       <aside className="side">
         <div className="side-brand">
-          <div className="brand-mark compact">R</div>
+          <img className="brand-logo compact" src={rodarLogoUrl} alt="RODAR Consulting" />
           <div>
             <strong>GovRadar CRM</strong>
             <span>RODAR Consulting</span>
@@ -303,7 +534,7 @@ function AppShell({
         <nav>
           {nav.map((item) => (
             <button key={item} className={item === page ? "active" : ""} onClick={() => setPage(item)}>
-              {item}
+              {pageLabel(item)}
             </button>
           ))}
         </nav>
@@ -326,17 +557,21 @@ function AppShell({
             </div>
           </div>
           <div className="top-actions">
-            <div className="segmented" aria-label="Pais">
-              <button className={country === "Peru" ? "selected" : ""} onClick={() => setCountry("Peru")}>Peru</button>
-              <button className={country === "Chile" ? "selected" : ""} onClick={() => setCountry("Chile")}>Chile</button>
+            <div className="country-flag-pill" title={country} aria-label={`Modulo ${country}`}>
+              <CountryFlagIcon country={country} className="country-flag-image" />
             </div>
-            <div className="user-pill">{email.slice(0, 1).toUpperCase()}</div>
+            <div className="user-identity" title={userName}>
+              <div className="user-pill">{userInitials(userName)}</div>
+              <span>{userName}</span>
+            </div>
             <button className="ghost" onClick={onLogout}>Salir</button>
           </div>
         </header>
         {backend.error ? <div className="notice danger">{backend.error}</div> : null}
         {page === "Inicio" ? <Home country={country} stats={backend.stats} runs={backend.runs} alerts={backend.alerts} /> : null}
-        {page === "Oportunidades" ? <Opportunities country={country} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} /> : null}
+        {page === "Oportunidades" ? <Opportunities country="Peru" token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} /> : null}
+        {page === "Oportunidades Chile LMP-GC" ? <Opportunities country="Chile" token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} /> : null}
+        {page === "Oportunidades OCDS Peru" ? <Opportunities country="Peru" token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} variant="ocds" /> : null}
         {page === "Alertas" ? <Alerts token={token} rules={backend.rules} alerts={backend.alerts} refresh={backend.refresh} /> : null}
         {page === "Usuarios" ? <Users /> : null}
         {page === "Sistema" ? <System runs={backend.runs} refresh={backend.refresh} /> : null}
@@ -346,7 +581,7 @@ function AppShell({
 }
 
 function Kpis({ stats }: { stats: Stats | null }) {
-  const values = [
+  const values: Array<[string, React.ReactNode, string]> = [
     ["Procesos radar", stats?.total ?? 0, "Total persistido"],
     ["Prioridad A", stats?.by_priority?.A ?? 0, "Requiere accion"],
     ["Vigentes", stats?.vigentes ?? 0, "Ventana activa"],
@@ -448,20 +683,32 @@ function Opportunities({
   data,
   runs,
   refresh,
+  variant = "radar",
 }: {
   country: Country;
   token: string;
   data: Opportunity[];
   runs: Run[];
   refresh: () => Promise<void>;
+  variant?: OpportunityVariant;
 }) {
-  const initialSearchState = useMemo(() => loadActiveSearchState(), []);
+  const storageScope = `${variant}.${country}`;
+  const initialSearchState = useMemo(() => loadActiveSearchState(storageScope), [storageScope]);
   const [module, setModule] = useState<Module>(defaultModuleForCountry(country));
   const [keyword, setKeyword] = useState("satelital");
+  const [keyword2, setKeyword2] = useState("");
+  const [keyword3, setKeyword3] = useState("");
+  const [nomenclatureFilter, setNomenclatureFilter] = useState("");
   const [priority, setPriority] = useState("Todas");
+  const [ocdsYears, setOcdsYears] = useState<string[]>([String(currentYear)]);
+  const [ocdsMonths, setOcdsMonths] = useState<string[]>([String(new Date().getMonth() + 1)]);
+  const ocdsYear = ocdsYears[0] || String(currentYear);
+  const ocdsMonth = ocdsMonths[0] || String(new Date().getMonth() + 1);
+  const setOcdsYear = (value: string) => setOcdsYears([value]);
+  const setOcdsMonth = (value: string) => setOcdsMonths([value]);
+  const usesPeriodFilters = variant === "ocds" || country === "Chile";
+  const [maxResultsMode, setMaxResultsMode] = useState<MaxResultsMode>("active");
   const [maxResults, setMaxResults] = useState(25);
-  const [readDetails, setReadDetails] = useState(false);
-  const [maxDetails, setMaxDetails] = useState(10);
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [starting, setStarting] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>("append");
@@ -469,9 +716,10 @@ function Opportunities({
   const [activeRunIds, setActiveRunIds] = useState<number[]>(initialSearchState.runIds);
   const [scopedRows, setScopedRows] = useState<Opportunity[] | null>(null);
   const [pinnedRows, setPinnedRows] = useState<Opportunity[]>([]);
-  const [pendingSearch, setPendingSearch] = useState<{ mode: SearchMode; keyword: string; runId: number } | null>(null);
+  const [pendingSearch, setPendingSearch] = useState<PendingSearch | null>(null);
   const [confirmNewSearch, setConfirmNewSearch] = useState(false);
-  const visibleRuns = useMemo(() => runs.filter((run) => sourceBelongsToCountry(run.source, country)), [runs, country]);
+  const [confirmClearFields, setConfirmClearFields] = useState(false);
+  const visibleRuns = useMemo(() => runs.filter((run) => sourceBelongsToView(run.source, country, variant)), [runs, country, variant]);
 
   useEffect(() => {
     const latest = visibleRuns.find((run) => run.id === activeRun?.id) || activeRun;
@@ -485,20 +733,44 @@ function Opportunities({
   }, [activeRun, visibleRuns]);
 
   useEffect(() => {
-    saveActiveSearchState(activeKeywords, activeRunIds);
-  }, [activeKeywords, activeRunIds]);
+    saveActiveSearchState(storageScope, activeKeywords, activeRunIds);
+  }, [storageScope, activeKeywords, activeRunIds]);
+
+  async function syncPendingSearch(search: PendingSearch, statuses: Run[]) {
+    const nextPendingRun = statuses.find((run) => run.status === "queued" || run.status === "running");
+    if (nextPendingRun) {
+      setActiveRun(nextPendingRun);
+      return false;
+    }
+    const terminal = statuses.every((run) => run.status === "completed" || run.status === "failed");
+    if (!terminal) return false;
+
+    await refresh();
+    const completedIds = statuses.filter((run) => run.status === "completed").map((run) => run.id);
+    const nextKeywords = search.mode === "append" ? addKeywords(activeKeywords, search.keywords) : search.keywords;
+    const nextRunIds = search.mode === "append" ? addRunIds(activeRunIds, completedIds) : completedIds;
+    const runRows = nextRunIds.length ? await api.opportunities(token, { runIds: nextRunIds }) : [];
+    setActiveKeywords(nextKeywords);
+    setActiveRunIds(nextRunIds);
+    setScopedRows(search.mode === "append" ? mergeOpportunities(pinnedRows, runRows) : runRows);
+    setPendingSearch(null);
+    setActiveRun(statuses[statuses.length - 1] || null);
+    return true;
+  }
 
   useEffect(() => {
+    const nextInitialState = loadActiveSearchState(storageScope);
     setModule(defaultModuleForCountry(country));
     setActiveRun(null);
-    setActiveKeywords(["satelital"]);
-    setActiveRunIds([]);
+    setActiveKeywords(nextInitialState.keywords);
+    setActiveRunIds(nextInitialState.runIds);
     setScopedRows(null);
     setPinnedRows([]);
     setPendingSearch(null);
     setConfirmNewSearch(false);
+    setConfirmClearFields(false);
     setSearchMode("append");
-  }, [country]);
+  }, [country, storageScope]);
 
   useEffect(() => {
     if (!activeRunIds.length) return;
@@ -524,15 +796,12 @@ function Opportunities({
         if (cancelled) return;
         setActiveRun(nextRun);
         if (nextRun.status === "completed" || nextRun.status === "failed") {
-          await refresh();
-          if (nextRun.status === "completed" && pendingSearch?.runId === nextRun.id) {
-            const nextKeywords = pendingSearch.mode === "append" ? addKeyword(activeKeywords, pendingSearch.keyword) : [pendingSearch.keyword];
-            const nextRunIds = pendingSearch.mode === "append" ? addRunId(activeRunIds, nextRun.id) : [nextRun.id];
-            const runRows = await api.opportunities(token, { runIds: nextRunIds });
-            setActiveKeywords(nextKeywords);
-            setActiveRunIds(nextRunIds);
-            setScopedRows(pendingSearch.mode === "append" ? mergeOpportunities(pinnedRows, runRows) : runRows);
-            setPendingSearch(null);
+          if (pendingSearch?.runIds.includes(nextRun.id)) {
+            const statuses = await Promise.all(pendingSearch.runIds.map((runId) => api.run(token, runId)));
+            if (cancelled) return;
+            await syncPendingSearch(pendingSearch, statuses);
+          } else {
+            await refresh();
           }
         }
       } catch {
@@ -548,27 +817,30 @@ function Opportunities({
   const baseRows = scopedRows ?? data;
   const filtered = useMemo(() => {
     const normalizedActiveKeywords = activeKeywords.map((item) => item.toLowerCase()).filter(Boolean);
+    const normalizedNomenclature = nomenclatureFilter.trim().toLowerCase();
+    const activeOnly = maxResultsMode === "active";
     return baseRows.filter((item) => {
-      if (!sourceBelongsToCountry(item.source, country)) return false;
+      if (!sourceBelongsToView(item.source, country, variant)) return false;
       const haystack = `${item.entity} ${item.nomenclature} ${item.description}`.toLowerCase();
       const keywordMatch = !normalizedActiveKeywords.length || normalizedActiveKeywords.some((item) => haystack.includes(item));
+      const nomenclatureMatch = !normalizedNomenclature || item.nomenclature.toLowerCase().includes(normalizedNomenclature);
       const priorityMatch = priority === "Todas" || item.priority === priority;
-      return keywordMatch && priorityMatch;
+      const activeMatch = !activeOnly || commercialSignal(item).className !== "red";
+      const timestamp = parseDate(item.publication_date) ?? parseDate(presentationDeadline(item));
+      const date = timestamp !== null ? new Date(timestamp) : null;
+      const yearMatch = !usesPeriodFilters || !ocdsYears.length || (date !== null && ocdsYears.includes(String(date.getFullYear())));
+      const monthMatch = !usesPeriodFilters || !ocdsMonths.length || (date !== null && ocdsMonths.includes(String(date.getMonth() + 1)));
+      return keywordMatch && nomenclatureMatch && priorityMatch && activeMatch && yearMatch && monthMatch;
     });
-  }, [baseRows, activeKeywords, priority, country]);
+  }, [baseRows, activeKeywords, nomenclatureFilter, priority, maxResultsMode, country, variant, usesPeriodFilters, ocdsYears, ocdsMonths]);
 
   useEffect(() => {
-    if (!activeRun || activeRun.status !== "completed" || pendingSearch?.runId !== activeRun.id) return;
+    if (!activeRun || activeRun.status !== "completed" || !pendingSearch?.runIds.includes(activeRun.id)) return;
     let cancelled = false;
-    const nextKeywords = pendingSearch.mode === "append" ? addKeyword(activeKeywords, pendingSearch.keyword) : [pendingSearch.keyword];
-    const nextRunIds = pendingSearch.mode === "append" ? addRunId(activeRunIds, activeRun.id) : [activeRun.id];
-    api.opportunities(token, { runIds: nextRunIds })
-      .then((rows) => {
+    Promise.all(pendingSearch.runIds.map((runId) => api.run(token, runId)))
+      .then(async (statuses) => {
         if (cancelled) return;
-        setActiveKeywords(nextKeywords);
-        setActiveRunIds(nextRunIds);
-        setScopedRows(pendingSearch.mode === "append" ? mergeOpportunities(pinnedRows, rows) : rows);
-        setPendingSearch(null);
+        await syncPendingSearch(pendingSearch, statuses);
       })
       .catch(() => {
         // The polling loop or manual refresh can retry the visible state.
@@ -609,70 +881,222 @@ function Opportunities({
   }
 
   async function executeConfirmed(mode: SearchMode) {
-    const cleanKeyword = keyword.trim() || "satelital";
+    const cleanNomenclature = nomenclatureFilter.trim();
+    const cleanKeywords = cleanNomenclature
+      ? [cleanNomenclature]
+      : uniqueKeywords([keyword, keyword2, keyword3]).length
+        ? uniqueKeywords([keyword, keyword2, keyword3])
+        : ["satelital"];
+    const effectiveMaxResults = maxResultsMode === "all" || maxResultsMode === "active" ? 0 : maxResults;
+    const forceDetailByNomenclature = Boolean(cleanNomenclature);
+    const effectiveMaxDetails = forceDetailByNomenclature ? 1 : 0;
     setConfirmNewSearch(false);
     setStarting(true);
     try {
       if (mode === "replace") {
-        setActiveKeywords([cleanKeyword]);
+        setActiveKeywords(cleanKeywords);
         setActiveRunIds([]);
         setPinnedRows([]);
         setScopedRows([]);
       } else {
-        setActiveKeywords((current) => addKeyword(current, cleanKeyword));
+        setActiveKeywords((current) => addKeywords(current, cleanKeywords));
         if (!activeRunIds.length && scopedRows === null) {
           setPinnedRows(filtered);
         }
       }
-      const run = await api.startRun(token, {
-        source: sourceForModule(module),
-        keyword: cleanKeyword,
-        year: country === "Peru" ? "2026" : "",
-        version: country === "Peru" ? "Seace 3" : "Mercado Publico",
-        max_results: maxResults,
-        max_details: readDetails ? maxDetails : 0,
-        enrich_details: readDetails,
-      });
-      setActiveRun(run);
-      setPendingSearch({ mode, keyword: cleanKeyword, runId: run.id });
+      const startedRuns: Run[] = [];
+      for (const searchKeyword of cleanKeywords) {
+        const run = await api.startRun(token, {
+          source: variant === "ocds" ? "oece_ocds_api" : sourceForModule(module),
+          keyword: searchKeyword,
+          nomenclature: cleanNomenclature || undefined,
+          year: usesPeriodFilters ? ocdsYears.join(",") : country === "Peru" ? "2026" : "",
+          month: usesPeriodFilters ? ocdsMonths.join(",") : "",
+          years: usesPeriodFilters ? ocdsYears : undefined,
+          months: usesPeriodFilters ? ocdsMonths : undefined,
+          version: variant === "ocds" ? "OCDS OECE" : country === "Peru" ? "Seace 3" : "Mercado Publico",
+          max_results: effectiveMaxResults,
+          max_details: effectiveMaxDetails,
+          enrich_details: forceDetailByNomenclature,
+        });
+        startedRuns.push(run);
+      }
+      const runningRun = startedRuns.find((run) => run.status === "queued" || run.status === "running") || startedRuns[startedRuns.length - 1] || null;
+      setActiveRun(runningRun);
+      setPendingSearch({ mode, keywords: cleanKeywords, runIds: startedRuns.map((run) => run.id) });
       await refresh();
     } finally {
       setStarting(false);
     }
   }
 
+  async function waitForRun(runId: number) {
+    for (let index = 0; index < 120; index += 1) {
+      const nextRun = await api.run(token, runId);
+      setActiveRun(nextRun);
+      if (nextRun.status === "completed" || nextRun.status === "failed") return nextRun;
+      await delay(1800);
+    }
+    return api.run(token, runId);
+  }
+
+  async function revalidateProposalDate(item: Opportunity) {
+    const cleanNomenclature = item.nomenclature.trim();
+    if (!cleanNomenclature) return false;
+    const detailKeyword = item.description.trim() || cleanNomenclature;
+    setStarting(true);
+    try {
+      const revalidateYears = uniqueDefined([
+        ...ocdsYears,
+        datePart(item.publication_date, "year"),
+        datePart(item.consultation_deadline, "year"),
+        datePart(item.proposal_deadline, "year"),
+      ]);
+      const revalidateMonths = uniqueDefined([
+        ...ocdsMonths,
+        datePart(item.publication_date, "month"),
+        datePart(item.consultation_deadline, "month"),
+        datePart(item.proposal_deadline, "month"),
+      ]);
+      const run = await api.startRun(token, {
+        source: variant === "ocds" ? "oece_ocds_api" : sourceForModule(module),
+        keyword: detailKeyword,
+        nomenclature: cleanNomenclature,
+        year: usesPeriodFilters ? revalidateYears.join(",") : country === "Peru" ? "2026" : "",
+        month: usesPeriodFilters ? revalidateMonths.join(",") : "",
+        years: usesPeriodFilters ? revalidateYears : undefined,
+        months: usesPeriodFilters ? revalidateMonths : undefined,
+        version: variant === "ocds" ? "OCDS OECE" : country === "Peru" ? "Seace 3" : "Mercado Publico",
+        max_results: 1,
+        max_details: 12,
+        enrich_details: true,
+      });
+      setActiveRun(run);
+      await refresh();
+      const finishedRun = await waitForRun(run.id);
+      await refresh();
+      if (finishedRun.status !== "completed") return false;
+      const runRows = await api.opportunities(token, { runIds: [run.id] });
+      const updatedRow = runRows.find((row) => row.nomenclature.toLowerCase() === cleanNomenclature.toLowerCase())
+        || runRows.find((row) => row.nomenclature.toLowerCase().includes(cleanNomenclature.toLowerCase()) || cleanNomenclature.toLowerCase().includes(row.nomenclature.toLowerCase()));
+      const nextRunIds = addRunId(activeRunIds, run.id);
+      setActiveRunIds(nextRunIds);
+      setActiveKeywords((current) => addKeyword(current, cleanNomenclature));
+      setScopedRows((current) => mergeOpportunities(current ?? filtered, runRows));
+      return Boolean(updatedRow && presentationDeadline(updatedRow));
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  function clearFields() {
+    setConfirmClearFields(false);
+    setKeyword("");
+    setKeyword2("");
+    setKeyword3("");
+    setNomenclatureFilter("");
+    setPriority("Todas");
+    setMaxResultsMode("active");
+    setMaxResults(25);
+    setSearchMode("append");
+    setActiveKeywords([]);
+    setActiveRunIds([]);
+    setScopedRows([]);
+    setPinnedRows([]);
+    setPendingSearch(null);
+    setActiveRun(null);
+  }
+
   return (
     <section className="panel">
       <div className="panel-title">
         <div>
-          <h2>Radar de oportunidades {country}</h2>
-          <p>{country === "Peru" ? "Ejecuta SEACE en backend headless y revisa avance sin abrir Chrome al usuario." : "Ejecuta Mercado Publico en backend headless, con licitaciones y grandes compras en la misma bandeja comercial."}</p>
+          <h2>{variant === "ocds" ? "Oportunidades OCDS Peru" : country === "Chile" ? "Oportunidades Chile LMP-GC" : "Radar de oportunidades Peru"}</h2>
+          <p>
+            {variant === "ocds"
+              ? "Consulta la API de Contrataciones Abiertas OECE/OCDS para procesos Peru, incluyendo licitaciones, adjudicaciones, contratos y compras menores publicadas."
+              : country === "Peru"
+                ? "Ejecuta SEACE en backend headless y revisa avance sin abrir Chrome al usuario."
+                : "Ejecuta Mercado Publico en backend headless, separando Chile en una bandeja LMP-GC independiente."}
+          </p>
         </div>
         <button className="ghost" onClick={refresh}>Actualizar</button>
       </div>
-      <div className="module-row">
-        {modulesForCountry(country).map((item) => (
-          <button key={item} className={module === item ? "selected" : ""} onClick={() => setModule(item)}>
-            {item}
-          </button>
-        ))}
-      </div>
-      {module === "Contratos Menores a 8 UIT" || module === "Ambos modulos" ? <div className="notice info">Menores a 8 UIT queda visible para el flujo, pendiente de estabilizacion del conector.</div> : null}
-      {module === "Grandes Compras" ? <div className="notice info">Grandes Compras queda visible para Chile, pendiente de estabilizar el formulario de busqueda de Mercado Publico.</div> : null}
+      {variant !== "ocds" ? (
+        <>
+          <div className="module-row">
+            {modulesForCountry(country).map((item) => (
+              <button key={item} className={module === item ? "selected" : ""} onClick={() => setModule(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+          {module === "Contratos Menores a 8 UIT" || module === "Ambos modulos" ? <div className="notice info">Menores a 8 UIT queda visible para el flujo, pendiente de estabilizacion del conector.</div> : null}
+        </>
+      ) : null}
       <div className="active-keywords">
         <span>Vista activa:</span>
         {activeKeywords.map((item) => <b key={item}>{item}</b>)}
       </div>
+      {usesPeriodFilters ? (
+        <div className="ocds-period-picker">
+          <div className="multi-filter">
+            <span>Anios</span>
+            <div>
+              {yearOptions.map((item) => (
+                <button key={item} type="button" className={ocdsYears.includes(item) ? "selected" : ""} onClick={() => setOcdsYears((current) => toggleSelected(current, item))}>
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="multi-filter">
+            <span>Meses</span>
+            <div>
+              {monthOptions.map(([value, label]) => (
+                <button key={value} type="button" className={ocdsMonths.includes(value) ? "selected" : ""} onClick={() => setOcdsMonths((current) => toggleSelected(current, value))}>
+                  {label.slice(0, 3)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <div className="keyword-grid">
+        <label>Keyword 1<input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="satelital" /></label>
+        <label>Keyword 2<input value={keyword2} onChange={(event) => setKeyword2(event.target.value)} placeholder="internet" /></label>
+        <label>Keyword 3<input value={keyword3} onChange={(event) => setKeyword3(event.target.value)} placeholder="conectividad" /></label>
+      </div>
       <div className="form-grid">
-        <label>Keyword<input value={keyword} onChange={(event) => setKeyword(event.target.value)} /></label>
+        <label className="nomenclature-filter">Busqueda por Nomenclatura del Proceso<input value={nomenclatureFilter} onChange={(event) => setNomenclatureFilter(event.target.value)} placeholder="Ej. CP-ABR-2-2026-UGEL-A-1" /></label>
+        {false && variant === "ocds" ? (
+          <>
+            <label>Año<select value={ocdsYear} onChange={(event) => setOcdsYear(event.target.value)}>
+              {Array.from({ length: 5 }, (_, index) => String(new Date().getFullYear() - index)).map((item) => <option key={item}>{item}</option>)}
+            </select></label>
+            <label>Mes<select value={ocdsMonth} onChange={(event) => setOcdsMonth(event.target.value)}>
+              {monthOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select></label>
+          </>
+        ) : null}
         <label>Prioridad<select value={priority} onChange={(event) => setPriority(event.target.value)}><option>Todas</option><option>A</option><option>B</option><option>C</option></select></label>
-        <label>Max resultados<input type="number" min={1} max={150} value={maxResults} onChange={(event) => setMaxResults(Number(event.target.value))} /></label>
-        <label className="check"><input type="checkbox" checked={readDetails} onChange={(event) => setReadDetails(event.target.checked)} /> Leer detalle</label>
-        <label>Procesos a revisar detalle<input type="number" min={0} max={maxResults} value={readDetails ? maxDetails : 0} disabled={!readDetails} onChange={(event) => setMaxDetails(Number(event.target.value))} /></label>
-        <button className="primary" onClick={execute} disabled={starting || module === "Contratos Menores a 8 UIT" || module === "Ambos modulos" || module === "Grandes Compras"}>
+        <label>Max resultados
+          <div className="max-results-control">
+            <select value={maxResultsMode} onChange={(event) => setMaxResultsMode(event.target.value as MaxResultsMode)}>
+              <option value="active">Vigentes</option>
+              <option value="custom">Cantidad</option>
+              <option value="all">Todos</option>
+            </select>
+            <input type="number" min={1} max={500} value={maxResults} disabled={maxResultsMode !== "custom"} onChange={(event) => setMaxResults(Number(event.target.value))} />
+          </div>
+        </label>
+        <button className="primary" onClick={execute} disabled={starting || (variant === "radar" && (module === "Contratos Menores a 8 UIT" || module === "Ambos modulos"))}>
           {starting ? "Iniciando..." : "Ejecutar radar"}
         </button>
       </div>
+      {maxResultsMode === "all" ? (
+        <p className="filter-warning">*Tu seleccion incluye procesos ya cerrados y puede tardar mas de lo usual.</p>
+      ) : null}
       <div className="search-mode-row" role="radiogroup" aria-label="Modo de busqueda">
         <button className={searchMode === "append" ? "selected" : ""} onClick={() => setSearchMode("append")} type="button">
           Agregar a la busqueda actual
@@ -682,7 +1106,14 @@ function Opportunities({
         </button>
       </div>
       {activeRun ? <RunProgress run={activeRun} /> : visibleRuns[0] ? <RunProgress run={visibleRuns[0]} /> : null}
-      <OpportunityTable rows={filtered} token={token} />
+      <OpportunityTable
+        rows={filtered}
+        token={token}
+        resetKey={`${storageScope}:${activeKeywords.join("|")}:${activeRunIds.join(",")}:${nomenclatureFilter}`}
+        onRevalidateProposal={revalidateProposalDate}
+        highlightTerms={activeKeywords}
+        onRequestClearFields={() => setConfirmClearFields(true)}
+      />
       {confirmNewSearch ? (
         <ConfirmModal
           title="Iniciar nueva busqueda"
@@ -691,6 +1122,16 @@ function Opportunities({
           cancelLabel="No"
           onConfirm={() => executeConfirmed("replace")}
           onCancel={() => setConfirmNewSearch(false)}
+        />
+      ) : null}
+      {confirmClearFields ? (
+        <ConfirmModal
+          title="Limpiar campos"
+          message="Esta seguro de limpiar? Para obtener los datos tendras que aplicar filtros y busquedas nuevamente."
+          confirmLabel="Si, limpiar"
+          cancelLabel="No"
+          onConfirm={clearFields}
+          onCancel={() => setConfirmClearFields(false)}
         />
       ) : null}
     </section>
@@ -704,8 +1145,20 @@ function addKeyword(current: string[], keyword: string) {
   return exists ? current : [...current, normalized];
 }
 
+function uniqueKeywords(values: string[]) {
+  return values.reduce<string[]>((items, value) => addKeyword(items, value), []);
+}
+
+function addKeywords(current: string[], keywords: string[]) {
+  return keywords.reduce((items, keyword) => addKeyword(items, keyword), current);
+}
+
 function addRunId(current: number[], runId: number) {
   return current.includes(runId) ? current : [...current, runId];
+}
+
+function addRunIds(current: number[], runIds: number[]) {
+  return runIds.reduce((items, runId) => addRunId(items, runId), current);
 }
 
 function mergeOpportunities(left: Opportunity[], right: Opportunity[]) {
@@ -714,9 +1167,13 @@ function mergeOpportunities(left: Opportunity[], right: Opportunity[]) {
   return [...byId.values()];
 }
 
-function loadActiveSearchState(): { keywords: string[]; runIds: number[] } {
+function activeSearchStorageKey(scope: string) {
+  return `${activeSearchStoragePrefix}.${scope}`;
+}
+
+function loadActiveSearchState(scope: string): { keywords: string[]; runIds: number[] } {
   try {
-    const raw = window.localStorage.getItem(activeSearchStorageKey);
+    const raw = window.localStorage.getItem(activeSearchStorageKey(scope));
     if (!raw) return { keywords: ["satelital"], runIds: [] };
     const parsed = JSON.parse(raw) as { keywords?: unknown; runIds?: unknown };
     const keywords = Array.isArray(parsed.keywords)
@@ -731,9 +1188,9 @@ function loadActiveSearchState(): { keywords: string[]; runIds: number[] } {
   }
 }
 
-function saveActiveSearchState(keywords: string[], runIds: number[]) {
+function saveActiveSearchState(scope: string, keywords: string[], runIds: number[]) {
   try {
-    window.localStorage.setItem(activeSearchStorageKey, JSON.stringify({ keywords, runIds }));
+    window.localStorage.setItem(activeSearchStorageKey(scope), JSON.stringify({ keywords, runIds }));
   } catch {
     // Local persistence is a convenience; the backend remains the source of truth.
   }
@@ -773,15 +1230,41 @@ function ConfirmModal({
   );
 }
 
-function OpportunityTable({ rows, token }: { rows: Opportunity[]; token: string }) {
+function OpportunityTable({
+  rows,
+  token,
+  resetKey,
+  onRevalidateProposal,
+  highlightTerms,
+  onRequestClearFields,
+}: {
+  rows: Opportunity[];
+  token: string;
+  resetKey: string;
+  onRevalidateProposal: (item: Opportunity) => Promise<boolean>;
+  highlightTerms: string[];
+  onRequestClearFields: () => void;
+}) {
   const [commercialFilter, setCommercialFilter] = useState<CommercialClass | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "publication_date",
     direction: "desc",
   });
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
+  const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
+  const [pendingRemoval, setPendingRemoval] = useState<Opportunity | null>(null);
+  const [revalidatingIds, setRevalidatingIds] = useState<Set<number>>(new Set());
+  const [unavailableProposalIds, setUnavailableProposalIds] = useState<Set<number>>(new Set());
+  const [manualProposalUpdates, setManualProposalUpdates] = useState<Map<number, string>>(new Map());
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setRemovedIds(new Set());
+    setPendingRemoval(null);
+    setUnavailableProposalIds(new Set());
+    setManualProposalUpdates(new Map());
+  }, [resetKey]);
 
   const rowsWithSignals = useMemo(
     () => rows.map((item) => ({ item, signal: commercialSignal(item) })),
@@ -789,8 +1272,8 @@ function OpportunityTable({ rows, token }: { rows: Opportunity[]; token: string 
   );
 
   const filteredRows = useMemo(() => {
-    return rowsWithSignals.filter(({ signal }) => !commercialFilter || signal.className === commercialFilter);
-  }, [rowsWithSignals, commercialFilter]);
+    return rowsWithSignals.filter(({ item, signal }) => !removedIds.has(item.id) && (!commercialFilter || signal.className === commercialFilter));
+  }, [rowsWithSignals, commercialFilter, removedIds]);
 
   const sortedRows = useMemo(() => {
     return [...filteredRows].sort((left, right) => {
@@ -828,19 +1311,63 @@ function OpportunityTable({ rows, token }: { rows: Opportunity[]; token: string 
     { green: 0, amber: 0, red: 0 },
   );
 
+  function confirmRemove(item: Opportunity) {
+    setPendingRemoval(item);
+  }
+
+  function removePendingRow() {
+    if (!pendingRemoval) return;
+    setRemovedIds((current) => new Set(current).add(pendingRemoval.id));
+    setPendingRemoval(null);
+  }
+
+  async function revalidateRow(item: Opportunity) {
+    setRevalidatingIds((current) => new Set(current).add(item.id));
+    setUnavailableProposalIds((current) => {
+      const next = new Set(current);
+      next.delete(item.id);
+      return next;
+    });
+    try {
+      const found = await onRevalidateProposal(item);
+      if (!found) {
+        setUnavailableProposalIds((current) => new Set(current).add(item.id));
+      } else {
+        setManualProposalUpdates((current) => new Map(current).set(item.id, new Date().toISOString()));
+      }
+    } finally {
+      setRevalidatingIds((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
+
   return (
     <>
-      <div className="commercial-filter-row">
-        {commercialFilters.map((filter) => (
-          <button
-            className={`commercial-filter ${filter.className} ${commercialFilter === filter.className ? "active" : ""}`}
-            key={filter.className}
-            onClick={() => setCommercialFilter((current) => current === filter.className ? null : filter.className)}
-          >
-            <span>{filter.label}</span>
-            <b>{counts[filter.className]}</b>
+      <div className="table-toolbar">
+        <div className="commercial-filter-row">
+          {commercialFilters.map((filter) => (
+            <button
+              className={`commercial-filter ${filter.className} ${commercialFilter === filter.className ? "active" : ""}`}
+              key={filter.className}
+              onClick={() => setCommercialFilter((current) => current === filter.className ? null : filter.className)}
+            >
+              <span>{filter.label}</span>
+              <b>{counts[filter.className]}</b>
+            </button>
+          ))}
+        </div>
+        <div className="table-action-buttons">
+          <button className="clear-fields-button" type="button" onClick={onRequestClearFields}>
+            Limpiar Campos
           </button>
-        ))}
+          <button className="export-excel-button" type="button" onClick={() => exportOpportunitiesToExcel(sortedRows, "Oportunidades GovRadar")}>
+            <img src={excelLogoUrl} alt="" aria-hidden="true" />
+            <span>Exportar a Excel</span>
+          </button>
+        </div>
       </div>
       <div className="table-scroll-top" ref={topScrollRef} onScroll={() => syncTableScroll("top")} aria-label="Desplazamiento horizontal de oportunidades">
         <div />
@@ -850,22 +1377,33 @@ function OpportunityTable({ rows, token }: { rows: Opportunity[]; token: string 
           <thead>
             <tr>
               <SortableTh label="Prioridad" sortKey="priority" sort={sort} onSort={updateSort} />
-              <SortableTh label="Semáforo\ncomercial" sortKey="commercial" sort={sort} onSort={updateSort} />
+              <SortableTh label="Semaforo\ncomercial" sortKey="commercial" sort={sort} onSort={updateSort} />
               <SortableTh label="Entidad" sortKey="entity" sort={sort} onSort={updateSort} />
               <SortableTh label="Proceso" sortKey="nomenclature" sort={sort} onSort={updateSort} />
               <th><span className="plain-header">Documentos</span></th>
-              <SortableTh label="Descripción" sortKey="description" sort={sort} onSort={updateSort} />
+              <SortableTh label="Descripcion" sortKey="description" sort={sort} onSort={updateSort} />
               <SortableTh label="Fecha de\nconvocatoria" sortKey="publication_date" sort={sort} onSort={updateSort} />
               <SortableTh label="Fin\nConsultas" sortKey="consultation_deadline" sort={sort} onSort={updateSort} />
-              <SortableTh label="Días\nConsultas" sortKey="days_consultation" sort={sort} onSort={updateSort} />
+              <SortableTh label="Dias\nConsultas" sortKey="days_consultation" sort={sort} onSort={updateSort} />
               <SortableTh label="Fin\nPropuesta" sortKey="proposal_deadline" sort={sort} onSort={updateSort} />
-              <SortableTh label="Días\nPropuesta" sortKey="days_proposal" sort={sort} onSort={updateSort} />
+              <SortableTh label="Dias\nPropuesta" sortKey="days_proposal" sort={sort} onSort={updateSort} />
               <SortableTh label="Monto" sortKey="amount" sort={sort} onSort={updateSort} />
             </tr>
           </thead>
           <tbody>
             {sortedRows.slice(0, 100).map(({ item, signal }) => (
-              <OpportunityRow item={item} signal={signal} key={item.id} onOpenDocuments={setSelectedOpportunity} />
+              <OpportunityRow
+                item={item}
+                signal={signal}
+                key={item.id}
+                onOpenDocuments={setSelectedOpportunity}
+                onRemove={confirmRemove}
+                onRevalidateProposal={revalidateRow}
+                isRevalidating={revalidatingIds.has(item.id)}
+                proposalUnavailable={unavailableProposalIds.has(item.id)}
+                highlightTerms={highlightTerms}
+                manualProposalUpdatedAt={manualProposalUpdates.get(item.id) || null}
+              />
             ))}
           </tbody>
         </table>
@@ -876,6 +1414,16 @@ function OpportunityTable({ rows, token }: { rows: Opportunity[]; token: string 
           opportunity={selectedOpportunity}
           token={token}
           onClose={() => setSelectedOpportunity(null)}
+        />
+      ) : null}
+      {pendingRemoval ? (
+        <ConfirmModal
+          title="Retirar de esta vista"
+          message="Estas seguro de retirar? Para recuperar tendras que filtrar nuevamente o ingresar la nomenclatura."
+          confirmLabel="Si, retirar"
+          cancelLabel="No"
+          onConfirm={removePendingRow}
+          onCancel={() => setPendingRemoval(null)}
         />
       ) : null}
     </>
@@ -916,10 +1464,22 @@ function OpportunityRow({
   item,
   signal,
   onOpenDocuments,
+  onRemove,
+  onRevalidateProposal,
+  isRevalidating,
+  proposalUnavailable,
+  highlightTerms,
+  manualProposalUpdatedAt,
 }: {
   item: Opportunity;
   signal: ReturnType<typeof commercialSignal>;
   onOpenDocuments: (item: Opportunity) => void;
+  onRemove: (item: Opportunity) => void;
+  onRevalidateProposal: (item: Opportunity) => Promise<void>;
+  isRevalidating: boolean;
+  proposalUnavailable: boolean;
+  highlightTerms: string[];
+  manualProposalUpdatedAt: string | null;
 }) {
   const proposalDeadline = presentationDeadline(item);
   return (
@@ -935,17 +1495,46 @@ function OpportunityRow({
         </span>
       </td>
       <td>{item.entity}</td>
-      <td>{item.nomenclature}</td>
+      <td>
+        <div className="process-cell">
+          <span>{item.nomenclature}</span>
+          <button className="remove-view-button" type="button" onClick={() => onRemove(item)}>Retirar de esta vista</button>
+        </div>
+      </td>
       <td>
         <button className="pdf-button" onClick={() => onOpenDocuments(item)} title="Ver detalle y documentos">
           <span>PDF</span>
         </button>
       </td>
-      <td>{item.description}</td>
+      <td><HighlightedText text={item.description} terms={highlightTerms} /></td>
       <td>{formatDate(item.publication_date)}</td>
       <td>{formatDate(item.consultation_deadline)}</td>
       <td>{formatDays(daysUntil(item.consultation_deadline))}</td>
-      <td>{formatDate(proposalDeadline)}</td>
+      <td>
+        {proposalDeadline ? (
+          manualProposalUpdatedAt ? (
+            <span className="manual-proposal-date">
+              <b>{formatDate(proposalDeadline)}</b>
+              <small>*Actualizado manual desde Seace ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
+            </span>
+          ) : (
+            formatDate(proposalDeadline)
+          )
+        ) : proposalUnavailable ? (
+          <span className="proposal-unavailable">Fecha no Disponible en Seace</span>
+        ) : (
+          <button className="revalidate-button" type="button" disabled={isRevalidating} onClick={() => onRevalidateProposal(item)}>
+            {isRevalidating ? (
+              <>
+                <span className="button-spinner compact" aria-hidden="true" />
+                <span>Procesando en SV3</span>
+              </>
+            ) : (
+              "Revalidar fecha de fin propuesta en SV3"
+            )}
+          </button>
+        )}
+      </td>
       <td>{formatDays(daysUntil(proposalDeadline))}</td>
       <td>{formatMoney(item.amount)}</td>
     </tr>
@@ -1060,6 +1649,14 @@ function OpportunityDetailModal({
 
 function formatDays(value: number | null) {
   if (value === null) return "-";
+  if (value < 0) {
+    return (
+      <span className="overdue-days">
+        <span>Vencido hace</span>
+        <b>{Math.abs(value)} dias</b>
+      </span>
+    );
+  }
   return `${value}`;
 }
 

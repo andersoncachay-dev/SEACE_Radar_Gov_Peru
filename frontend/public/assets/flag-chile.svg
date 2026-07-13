@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Chile">
+  <defs>
+    <clipPath id="circle">
+      <circle cx="48" cy="48" r="44"/>
+    </clipPath>
+    <radialGradient id="shine" cx="30%" cy="18%" r="75%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".72"/>
+      <stop offset=".36" stop-color="#ffffff" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#000000" stop-opacity=".2"/>
+    </radialGradient>
+  </defs>
+  <circle cx="48" cy="48" r="44" fill="#fff"/>
+  <g clip-path="url(#circle)">
+    <rect width="96" height="48" fill="#fff"/>
+    <rect y="48" width="96" height="48" fill="#d52b1e"/>
+    <rect width="48" height="48" fill="#0039a6"/>
+    <path d="M24 12l4.4 13.4h14.1L31.1 33.6l4.4 13.4L24 38.8 12.5 47l4.4-13.4L5.5 25.4h14.1Z" fill="#fff"/>
+    <rect width="96" height="96" fill="url(#shine)"/>
+  </g>
+  <circle cx="48" cy="48" r="44" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="2"/>
+</svg>

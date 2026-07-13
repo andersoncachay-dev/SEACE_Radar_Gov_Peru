@@ -132,7 +132,11 @@ export const api = {
     payload: {
       source: string;
       keyword: string;
+      nomenclature?: string;
       year: string;
+      month?: string;
+      years?: string[];
+      months?: string[];
       version: string;
       max_results: number;
       max_details: number;
