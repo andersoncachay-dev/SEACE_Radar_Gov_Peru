@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, AccessProfile, Alert, AlertRule, confirmPasswordReset, DocumentRecord, LegalDocumentKey, LegalDocumentRecord, login, Opportunity, RadarKeyword, requestPasswordReset, Run, Stats, UserCreatePayload, UserRecord } from "./api";
+import { api, AccessProfile, Alert, AlertRule, confirmPasswordReset, DocumentRecord, LegalDocumentKey, LegalDocumentRecord, login, Opportunity, RadarKeyword, requestPasswordReset, Run, SchedulerIntervalConfig, SchedulerStatus, Stats, UserCreatePayload, UserRecord } from "./api";
 import chileRegionsSvg from "./assets_mapa/chile.svg?raw";
 import peruRegionsSvg from "./assets_mapa/peru-regions.svg?raw";
 import "./styles.css";
 
-type Page = "Inicio Peru" | "Inicio Chile" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Oportunidades OCDS Peru" | "Alertas" | "Usuarios" | "Sistema";
+type Page = "Inicio Peru" | "Inicio Chile" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Alertas" | "Usuarios" | "Sistema";
 type Country = "Peru" | "Chile";
 type Module = "SEACE Publico" | "Contratos Menores a 8 UIT" | "Oportunidades Chile LMP-GC" | "Ambos modulos";
 type CommercialClass = "green" | "amber" | "red";
@@ -13,14 +13,35 @@ type HomeStatusFilter = "all" | "priority-a" | "vigentes" | "cerrados";
 type SortDirection = "asc" | "desc";
 type SearchMode = "append" | "replace";
 type OpportunityVariant = "radar" | "ocds";
+type TableColumnFilters = {
+  priority: string; entity: string; process: string; description: string;
+  publicationFrom: string; publicationTo: string;
+  consultationFrom: string; consultationTo: string;
+  consultationDaysMin: string; consultationDaysMax: string;
+  proposalFrom: string; proposalTo: string;
+  proposalDaysMin: string; proposalDaysMax: string;
+  amountMin: string; amountMax: string; amountReserved: boolean;
+};
+
+const emptyTableColumnFilters: TableColumnFilters = {
+  priority: "", entity: "", process: "", description: "",
+  publicationFrom: "", publicationTo: "",
+  consultationFrom: "", consultationTo: "",
+  consultationDaysMin: "", consultationDaysMax: "",
+  proposalFrom: "", proposalTo: "",
+  proposalDaysMin: "", proposalDaysMax: "",
+  amountMin: "", amountMax: "", amountReserved: false,
+};
 type MaxResultsMode = "all" | "active";
 type ActivePeriodKeywordGroup = {
   year: string;
   months: string[];
   keywords: string[];
   commercialMode: MaxResultsMode;
+  processCount?: number;
+  opportunityIds?: number[];
 };
-type PendingSearch = { mode: SearchMode; keywords: string[]; runIds: number[]; appliedState: SavedOpportunityViewState };
+type PendingSearch = { mode: SearchMode; keywords: string[]; runIds: number[]; appliedState: SavedOpportunityViewState; kind?: "required" | "additional" };
 type SavedOpportunityViewState = {
   keywords: string[];
   runIds: number[];
@@ -29,6 +50,9 @@ type SavedOpportunityViewState = {
   keyword3: string;
   nomenclatureFilter: string;
   entityFilter: string;
+  entityKeyword: string;
+  entityKeyword2: string;
+  entityKeyword3: string;
   publicationDateFrom: string;
   publicationDateTo: string;
   years: string[];
@@ -36,6 +60,7 @@ type SavedOpportunityViewState = {
   appliedYears: string[];
   appliedMonths: string[];
   periodKeywordGroups: ActivePeriodKeywordGroup[];
+  additionalPeriodKeywordGroups: ActivePeriodKeywordGroup[];
   maxResultsMode: MaxResultsMode;
   searchMode: SearchMode;
 };
@@ -54,9 +79,9 @@ type SortKey =
   | "amount";
 
 const profilePages: Record<AccessProfile, Page[]> = {
-  peru: ["Inicio Peru", "Oportunidades OCDS Peru", "Alertas"],
-  chile: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Alertas"],
-  both: ["Inicio Peru", "Inicio Chile", "Oportunidades Chile LMP-GC", "Oportunidades OCDS Peru", "Alertas"],
+  peru: ["Inicio Peru", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Alertas"],
+  chile: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Alertas"],
+  both: ["Inicio Peru", "Inicio Chile", "Oportunidades Chile LMP-GC", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Histórico Procesos Eliminados CL", "Alertas"],
 };
 const commercialFilters = [
   { label: "Vigente para Consultas y Propuesta", className: "green" },
@@ -64,6 +89,7 @@ const commercialFilters = [
   { label: "Proceso Culminado", className: "red" },
 ] as const;
 const activeSearchStoragePrefix = "govradar.opportunities.activeSearch";
+const retiredRadarKeywords = new Set(["radio enlace"]);
 const unmappedRegionKey = "__sin_region__";
 const monthOptions = [
   ["1", "Enero"],
@@ -92,7 +118,6 @@ const homeKeywordHints = [
   { label: "internet", terms: ["internet"] },
   { label: "conectividad", terms: ["conectividad"] },
   { label: "telecomunicaciones", terms: ["telecomunicaciones"] },
-  { label: "radio enlace", terms: ["radio enlace"] },
   { label: "GEO", terms: ["geo"] },
   { label: "LEO", terms: ["leo"] },
   { label: "\u00f3rbita", terms: ["\u00f3rbita", "orbita"] },
@@ -103,13 +128,15 @@ const navIcons: Record<Page, NavIconName> = {
   Oportunidades: "money",
   "Oportunidades Chile LMP-GC": "money",
   "Oportunidades OCDS Peru": "money",
+  "Histórico Procesos Eliminados PE": "database",
+  "Histórico Procesos Eliminados CL": "database",
   Alertas: "bell",
   Usuarios: "users",
   Sistema: "settings",
 };
 const launcherNavGroups: Array<{ label: string; pages: Page[] }> = [
-  { label: "Perú", pages: ["Inicio Peru", "Oportunidades OCDS Peru", "Oportunidades"] },
-  { label: "Chile", pages: ["Inicio Chile", "Oportunidades Chile LMP-GC"] },
+  { label: "Perú", pages: ["Inicio Peru", "Oportunidades OCDS Peru", "Oportunidades", "Histórico Procesos Eliminados PE"] },
+  { label: "Chile", pages: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL"] },
   { label: "Operación", pages: ["Alertas"] },
   { label: "Administración", pages: ["Usuarios", "Sistema"] },
 ];
@@ -119,6 +146,8 @@ const launcherDescriptions: Record<Page, string> = {
   Oportunidades: "Radar de oportunidades de Perú",
   "Oportunidades Chile LMP-GC": "Licitaciones y Grandes Compras",
   "Oportunidades OCDS Peru": "Contrataciones abiertas OECE/OCDS",
+  "Histórico Procesos Eliminados PE": "Respaldo de procesos retirados de Perú",
+  "Histórico Procesos Eliminados CL": "Respaldo de procesos retirados de Chile",
   Alertas: "Reglas, canales y notificaciones",
   Usuarios: "Accesos, perfiles y permisos",
   Sistema: "Ejecuciones y configuración",
@@ -163,6 +192,13 @@ function sourceBelongsToCountry(source: string, country: Country) {
   return normalized.startsWith("seace") || normalized.includes("menor8") || normalized.startsWith("oece_ocds");
 }
 
+function sourceBelongsToCountryRadar(source: string, country: Country) {
+  const normalized = source.trim().toLowerCase();
+  return country === "Chile"
+    ? normalized === "mercado_publico_lmp_gc"
+    : normalized === "oece_ocds_api";
+}
+
 function sourceBelongsToView(source: string, country: Country, variant: OpportunityVariant) {
   const normalized = source.toLowerCase();
   if (variant === "ocds") return country === "Peru" && normalized.startsWith("oece_ocds");
@@ -195,6 +231,34 @@ function formatManualTimestamp(value: string) {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+function backendRunDate(value: string | null) {
+  if (!value) return null;
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const date = new Date(hasTimezone ? value : `${value}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function limaDateKey(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Lima",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function formatRunTime(value: string | null) {
+  const date = backendRunDate(value);
+  if (!date) return "--:--";
+  return new Intl.DateTimeFormat("es-PE", {
+    timeZone: "America/Lima",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function parseDate(value: string | null) {
@@ -656,7 +720,7 @@ function daysText(value: number | null) {
   return String(value);
 }
 
-function exportOpportunitiesToExcel(rows: Array<{ item: Opportunity; signal: ReturnType<typeof commercialSignal> }>, title: string) {
+async function exportOpportunitiesToExcel(token: string, rows: Array<{ item: Opportunity; signal: ReturnType<typeof commercialSignal> }>, title: string, country: Country) {
   const headers = [
     "Prioridad",
     "Semaforo comercial",
@@ -686,16 +750,11 @@ function exportOpportunitiesToExcel(rows: Array<{ item: Opportunity; signal: Ret
       moneyText(item.amount),
     ];
   });
-  const html = `<!doctype html><html><head><meta charset="utf-8" /></head><body><table><caption>${escapeHtml(title)}</caption><thead><tr>${headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("")}</tr></thead><tbody>${body
-    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`)
-    .join("")}</tbody></table></body></html>`;
-  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const blob = await api.exportOpportunitiesXlsx(token, { title, country: country.toLowerCase() as "peru" | "chile", headers, rows: body });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `oportunidades-${new Date().toISOString().slice(0, 10)}.xls`;
+  link.download = `oportunidades-${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -1216,9 +1275,9 @@ function AppShell({
   }, [currentUser, page, visibleNav]);
 
   useEffect(() => {
-    if (page === "Inicio Chile" || page === "Oportunidades Chile LMP-GC") {
+    if (page === "Inicio Chile" || page === "Oportunidades Chile LMP-GC" || page === "Histórico Procesos Eliminados CL") {
       setCountry("Chile");
-    } else if (page === "Inicio Peru" || page === "Oportunidades" || page === "Oportunidades OCDS Peru") {
+    } else if (page === "Inicio Peru" || page === "Oportunidades" || page === "Oportunidades OCDS Peru" || page === "Histórico Procesos Eliminados PE") {
       setCountry("Peru");
     }
   }, [page]);
@@ -1366,11 +1425,13 @@ function AppShell({
         </header>
         {sessionError ? <div className="notice danger">{sessionError}</div> : null}
         {backend.error ? <div className="notice danger">{backend.error}</div> : null}
-        {page === "Inicio Peru" ? <Home country="Peru" token={token} isAdmin={currentUser?.role === "admin"} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} onSearchKeyword={(keyword) => openKeywordSearch("Peru", keyword)} onOpenLegal={setLegalView} /> : null}
-        {page === "Inicio Chile" ? <Home country="Chile" token={token} isAdmin={currentUser?.role === "admin"} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} onSearchKeyword={(keyword) => openKeywordSearch("Chile", keyword)} onOpenLegal={setLegalView} /> : null}
+        {page === "Inicio Peru" ? <Home country="Peru" token={token} isAdmin={currentUser?.role === "admin"} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} onSearchKeyword={(keyword) => openKeywordSearch("Peru", keyword)} onOpenLegal={setLegalView} /> : null}
+        {page === "Inicio Chile" ? <Home country="Chile" token={token} isAdmin={currentUser?.role === "admin"} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} onSearchKeyword={(keyword) => openKeywordSearch("Chile", keyword)} onOpenLegal={setLegalView} /> : null}
         {page === "Oportunidades" ? <Opportunities country="Peru" token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} /> : null}
         {page === "Oportunidades Chile LMP-GC" ? <Opportunities country="Chile" token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} prefillKeyword={keywordSearchHandoff?.country === "Chile" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
         {page === "Oportunidades OCDS Peru" ? <Opportunities country="Peru" token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} variant="ocds" prefillKeyword={keywordSearchHandoff?.country === "Peru" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
+        {page === "Histórico Procesos Eliminados PE" ? <ArchivedProcesses country="Peru" token={token} onRestored={backend.refresh} /> : null}
+        {page === "Histórico Procesos Eliminados CL" ? <ArchivedProcesses country="Chile" token={token} onRestored={backend.refresh} /> : null}
         {page === "Alertas" ? <Alerts token={token} rules={backend.rules} alerts={backend.alerts} refresh={backend.refresh} /> : null}
         {page === "Usuarios" && currentUser?.role === "admin" ? <Users token={token} currentUserId={currentUser.id} /> : null}
         {page === "Sistema" ? (
@@ -1509,6 +1570,7 @@ function Home({
   runs,
   alerts,
   opportunities,
+  refresh,
   onSearchKeyword,
   onOpenLegal,
 }: {
@@ -1518,6 +1580,7 @@ function Home({
   runs: Run[];
   alerts: Alert[];
   opportunities: Opportunity[];
+  refresh: () => Promise<void>;
   onSearchKeyword: (keyword: string) => void;
   onOpenLegal: (view: LegalView) => void;
 }) {
@@ -1529,10 +1592,15 @@ function Home({
   const [newKeyword, setNewKeyword] = useState("");
   const [keywordSaving, setKeywordSaving] = useState(false);
   const [keywordNotice, setKeywordNotice] = useState("");
-  const [removedHomeIds, setRemovedHomeIds] = useState<Set<number>>(new Set());
   const [pendingHomeRemoval, setPendingHomeRemoval] = useState<Opportunity | null>(null);
+  const [archiveError, setArchiveError] = useState("");
   const [copyNotice, setCopyNotice] = useState("");
+  const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const copyNoticeTimerRef = useRef<number | null>(null);
+  const refreshRef = useRef(refresh);
+  const schedulerWasRunningRef = useRef(false);
+  refreshRef.current = refresh;
   const radarKeywordState = useRadarKeywords(token, country);
   const keywordHints = useMemo(
     () => radarKeywordState.keywords.map((item) => ({ label: item.keyword, terms: [item.keyword] })),
@@ -1570,18 +1638,56 @@ function Home({
     [countryOpportunities, homeFilter, selectedYear],
   );
   const countryRuns = useMemo(
-    () => runs.filter((run) => sourceBelongsToCountry(run.source, country)),
+    () => runs.filter((run) => sourceBelongsToCountryRadar(run.source, country)),
     [runs, country],
   );
   const homeStats = useMemo(() => summarizeOpportunities(countryOpportunities), [countryOpportunities]);
   const filteredHomeStats = useMemo(() => summarizeOpportunities(filteredHomeOpportunities), [filteredHomeOpportunities]);
   const lastRun = countryRuns[0];
+  const todayKey = limaDateKey(new Date(countdownNow));
+  const todayRuns = countryRuns
+    .filter((run) => {
+      const date = backendRunDate(run.started_at || run.finished_at);
+      return date ? limaDateKey(date) === todayKey : false;
+    })
+    .sort((left, right) => {
+      const leftTime = backendRunDate(left.started_at || left.finished_at)?.getTime() || 0;
+      const rightTime = backendRunDate(right.started_at || right.finished_at)?.getTime() || 0;
+      return rightTime - leftTime;
+    });
+  const nextUpdateSeconds = schedulerStatus?.next_update_at
+    ? Math.max(0, Math.ceil((new Date(schedulerStatus.next_update_at).getTime() - countdownNow) / 1000))
+    : null;
   const regionRows = regionSummary(filteredHomeStats, filteredHomeOpportunities);
   const countryLabel = country === "Chile" ? "Chile" : "Peru";
-  const homeContextLabel = country === "Chile"
-    ? `Palabras detectadas: ${displayedHomeKeywordTerms.join(", ")}. Vigentes + cerrados se calculan con los plazos de consultas y cierre de ofertas.`
-    : `Palabras detectadas: ${displayedHomeKeywordTerms.join(", ")}. Vigentes + cerrados se calculan con el semaforo comercial.`;
+  const homeContextLabel = `PALABRAS CLAVE PARA EL UPDATE AUTOMÁTICO: ${displayedHomeKeywordTerms.join(", ")}.`;
   const selectedRegionRow = selectedRegion ? regionRows.items.find((item) => item.key === selectedRegion) : null;
+
+  useEffect(() => {
+    let active = true;
+    async function loadSchedulerStatus() {
+      try {
+        const status = await api.schedulerStatus(token, country === "Chile" ? "chile" : "peru");
+        if (active) {
+          setSchedulerStatus(status);
+          if (status.is_running || schedulerWasRunningRef.current) {
+            void refreshRef.current();
+          }
+          schedulerWasRunningRef.current = status.is_running;
+        }
+      } catch {
+        if (active) setSchedulerStatus(null);
+      }
+    }
+    void loadSchedulerStatus();
+    const syncTimer = window.setInterval(loadSchedulerStatus, 5_000);
+    const countdownTimer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
+    return () => {
+      active = false;
+      window.clearInterval(syncTimer);
+      window.clearInterval(countdownTimer);
+    };
+  }, [token, country]);
   const selectedRegionProcesses = useMemo(() => {
     const filtered = selectedRegion === unmappedRegionKey
       ? filteredHomeOpportunities.filter((item) => !normalizeRegionName(item.region))
@@ -1589,7 +1695,6 @@ function Home({
         ? filteredHomeOpportunities.filter((item) => normalizeRegionName(item.region) === selectedRegion)
         : filteredHomeOpportunities;
     return filtered
-      .filter((item) => !removedHomeIds.has(item.id))
       .slice()
       .sort((left, right) => {
         const rightDate = parseDate(right.publication_date) || parseDate(right.proposal_deadline) || parseDate(right.quote_deadline) || 0;
@@ -1597,7 +1702,7 @@ function Home({
         return rightDate - leftDate;
       })
       .slice(0, 8);
-  }, [filteredHomeOpportunities, selectedRegion, removedHomeIds]);
+  }, [filteredHomeOpportunities, selectedRegion]);
 
   async function copyProcessNomenclature(item: Opportunity) {
     const nomenclature = item.nomenclature.trim();
@@ -1608,10 +1713,16 @@ function Home({
     copyNoticeTimerRef.current = window.setTimeout(() => setCopyNotice(""), 3200);
   }
 
-  function removeHomeProcess() {
+  async function removeHomeProcess() {
     if (!pendingHomeRemoval) return;
-    setRemovedHomeIds((current) => new Set(current).add(pendingHomeRemoval.id));
-    setPendingHomeRemoval(null);
+    setArchiveError("");
+    try {
+      await api.archiveOpportunity(token, pendingHomeRemoval.id);
+      setPendingHomeRemoval(null);
+      await refresh();
+    } catch (error) {
+      setArchiveError(error instanceof Error ? error.message : "No se pudo retirar el proceso");
+    }
   }
 
   async function addRadarKeyword(event: React.FormEvent) {
@@ -1655,8 +1766,8 @@ function Home({
     setHomeFilter("all");
     setSelectedYear(null);
     setYearBreakdownOpen(false);
-    setRemovedHomeIds(new Set());
     setPendingHomeRemoval(null);
+    setArchiveError("");
     setCopyNotice("");
   }, [country]);
 
@@ -1677,6 +1788,9 @@ function Home({
     <>
       <section className="hero-panel">
         <div>
+          <div className="hero-update-banner" role="note">
+            <span>Update Automático del sistema cada {updateIntervalLabel(schedulerStatus?.interval_seconds)} para detectar nuevas oportunidades.</span>
+          </div>
           <p className="overline">{country === "Peru" ? "Modulo Peru" : "Modulo Chile"}</p>
           <h2>{country === "Peru" ? "SEACE operativo, monitoreo automatico y alertas accionables." : "Mercado Público bajo vigilancia comercial y regional."}</h2>
           <p>
@@ -1827,18 +1941,17 @@ function Home({
                         type="button"
                         aria-label={`Copiar nomenclatura ${item.nomenclature || "del proceso"}`}
                         onClick={() => copyProcessNomenclature(item)}
-                      >
+                      />
+                      <div className="map-opportunity-top">
                         <span className="map-opportunity-heading">
                           <strong>{item.nomenclature || "Proceso sin nomenclatura"}</strong>
                           <span>{item.entity || "Entidad no informada"}</span>
                         </span>
-                        <span className="map-opportunity-description"><HighlightedText text={item.description} terms={homeKeywordTerms} /></span>
-                      </button>
-                      <div className="map-opportunity-actions">
                         <button className="map-opportunity-remove" type="button" onClick={() => setPendingHomeRemoval(item)}>
-                          Retirar de la Vista
+                          Retirar de esta vista
                         </button>
                       </div>
+                      <span className="map-opportunity-description"><HighlightedText text={item.description} terms={homeKeywordTerms} /></span>
                     </article>
                   ))}
                 </div>
@@ -1870,11 +1983,15 @@ function Home({
       </section>
       <section className="two-col">
         <article className="panel">
-          <div className="panel-title">
+          <div className="panel-title execution-panel-title">
             <h3>Ultima ejecucion</h3>
-            <span className={`status ${lastRun?.status || "queued"}`}>{lastRun?.status || "Sin datos"}</span>
+            <div className="execution-title-actions">
+              <UpdateCountdown status={schedulerStatus} seconds={nextUpdateSeconds} />
+              <span className={`status ${lastRun?.status || "queued"}`}>{lastRun?.status || "Sin datos"}</span>
+            </div>
           </div>
           {lastRun ? <RunProgress run={lastRun} /> : <Empty text="Aun no hay ejecuciones registradas." />}
+          <RunHistoryToday runs={todayRuns} />
         </article>
         <article className="panel">
           <div className="panel-title">
@@ -1898,17 +2015,77 @@ function Home({
           {copyNotice}
         </div>
       ) : null}
+      {archiveError ? <div className="notice danger archive-action-notice" role="alert">{archiveError}</div> : null}
       {pendingHomeRemoval ? (
         <ConfirmModal
           title="Retirar de la Vista"
-          message="¿Está seguro de retirar este detalle de proceso?"
-          confirmLabel="Sí"
+          message="¿Está seguro de retirar este detalle de proceso? Se moverá al histórico y no será reincorporado por las actualizaciones automáticas."
+          confirmLabel="Sí, retirar"
           cancelLabel="No"
           onConfirm={removeHomeProcess}
           onCancel={() => setPendingHomeRemoval(null)}
         />
       ) : null}
     </>
+  );
+}
+
+function UpdateCountdown({ status, seconds }: { status: SchedulerStatus | null; seconds: number | null }) {
+  let message = "Consultando próximo update...";
+  if (status && !status.enabled) {
+    message = "Update automático pausado";
+  } else if (status?.is_running) {
+    message = "Update en ejecución...";
+  } else if (seconds !== null) {
+    const days = Math.floor(seconds / 86_400);
+    const hours = Math.floor((seconds % 86_400) / 3_600);
+    const minutes = Math.floor((seconds % 3_600) / 60);
+    const remainingSeconds = seconds % 60;
+    const parts = [days ? `${days} d` : "", hours ? `${hours} h` : "", `${minutes} m`, `${String(remainingSeconds).padStart(2, "0")} s`].filter(Boolean);
+    message = seconds === 0
+      ? "Update iniciando..."
+      : `Update se ejecutará en ${parts.join(" ")}`;
+  }
+  return <span className={`update-countdown ${status?.is_running ? "running" : ""}`} role="timer" aria-live="off">{message}</span>;
+}
+
+function updateIntervalLabel(intervalSeconds: number | null | undefined) {
+  const totalSeconds = intervalSeconds ?? 15 * 60;
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const parts = [
+    days ? `${days} ${days === 1 ? "día" : "días"}` : "",
+    hours ? `${hours} ${hours === 1 ? "hora" : "horas"}` : "",
+    minutes ? `${minutes} ${minutes === 1 ? "minuto" : "minutos"}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ").replace(/, ([^,]*)$/, " y $1") : "0 minutos";
+}
+
+function RunHistoryToday({ runs }: { runs: Run[] }) {
+  return (
+    <section className="run-history" aria-labelledby="run-history-title">
+      <div className="run-history-heading">
+        <h4 id="run-history-title">Historial de updates de hoy</h4>
+        <span>{runs.length}</span>
+      </div>
+      <div className="run-history-scroll" tabIndex={0} aria-label="Historial desplazable de actualizaciones de hoy">
+        {runs.map((run) => {
+          const keyword = keywordFromRun(run) || "Actualización automática";
+          return (
+            <article className="run-history-row" key={run.id}>
+              <time dateTime={run.started_at || run.finished_at || undefined}>{formatRunTime(run.started_at || run.finished_at)}</time>
+              <div>
+                <strong>{keyword}</strong>
+                <small>Run #{run.id} · {run.rows_found} {run.rows_found === 1 ? "proceso" : "procesos"}</small>
+              </div>
+              <span className={`status ${run.status}`}>{run.status}</span>
+            </article>
+          );
+        })}
+        {!runs.length ? <Empty text="Aún no hay updates registrados hoy." /> : null}
+      </div>
+    </section>
   );
 }
 
@@ -2004,7 +2181,7 @@ function regionSummary(stats: Stats | null, opportunities: Opportunity[]) {
   };
 }
 
-function RunProgress({ run, batchRuns = [], batchKeywords = [] }: { run: Run; batchRuns?: Run[]; batchKeywords?: string[] }) {
+function RunProgress({ run, batchRuns = [], batchKeywords = [], resultRows = [], resultsFocused = false, onToggleResults }: { run: Run; batchRuns?: Run[]; batchKeywords?: string[]; resultRows?: Opportunity[]; resultsFocused?: boolean; onToggleResults?: () => void }) {
   const detail = parseRunDetails(run);
   const runs = batchRuns.length > 1 ? batchRuns : [run];
   const isBatch = runs.length > 1;
@@ -2020,6 +2197,7 @@ function RunProgress({ run, batchRuns = [], batchKeywords = [] }: { run: Run; ba
     : estimateRunProgress(run);
   const currentRun = runs.find((item) => item.status === "running") || runs.find((item) => item.status === "queued");
   const currentKeyword = currentRun ? keywordFromRun(currentRun) : "";
+  const resultKeywords = uniqueKeywords(runs.map(keywordFromRun).filter(Boolean));
   const heading = isBatch
     ? isLive
       ? `Procesando búsqueda ${Math.min(terminalCount + 1, runs.length)} de ${runs.length}`
@@ -2057,6 +2235,22 @@ function RunProgress({ run, batchRuns = [], batchKeywords = [] }: { run: Run; ba
         </div>
       )}
       {isLive ? <div className="progress-current">{currentRun?.progress_message || (currentKeyword ? `Procesando “${currentKeyword}”` : "Procesando búsqueda")}</div> : null}
+      {!isLive && resultRows.length ? (
+        <div className="run-result-detail">
+          <div className="run-result-list">
+            <strong>{resultRows.length === 1 ? "Proceso identificado" : "Procesos identificados"}</strong>
+            {resultRows.map((item) => (
+              <div className="run-result-item" key={item.id}>
+                <b>{item.nomenclature || "Sin nomenclatura"}</b>
+                <span><strong>Palabra clave:</strong> {resultKeywords.join(", ") || "No disponible"}</span>
+                <span><strong>Entidad:</strong> {item.entity || "No disponible"}</span>
+                <span><strong>Fecha de convocatoria:</strong> {formatDate(item.publication_date)}</span>
+              </div>
+            ))}
+          </div>
+          {onToggleResults ? <button className="ghost" type="button" onClick={onToggleResults}>{resultsFocused ? "Mostrar búsqueda completa" : "Ver en la tabla"}</button> : null}
+        </div>
+      ) : null}
       {isBatch && failedCount ? <div className="notice danger">{failedCount} de {runs.length} búsquedas no pudieron completarse. Los resultados de las búsquedas terminadas se conservaron.</div> : null}
       {!isBatch && run.error_message ? <div className="notice danger">{run.error_message}</div> : null}
     </div>
@@ -2094,6 +2288,9 @@ function Opportunities({
   const [keyword3, setKeyword3] = useState(initialSearchState.keyword3);
   const [nomenclatureFilter, setNomenclatureFilter] = useState(initialSearchState.nomenclatureFilter);
   const [entityFilter, setEntityFilter] = useState(initialSearchState.entityFilter);
+  const [entityKeyword, setEntityKeyword] = useState(initialSearchState.entityKeyword);
+  const [entityKeyword2, setEntityKeyword2] = useState(initialSearchState.entityKeyword2);
+  const [entityKeyword3, setEntityKeyword3] = useState(initialSearchState.entityKeyword3);
   const [publicationDateFrom, setPublicationDateFrom] = useState(initialSearchState.publicationDateFrom);
   const [publicationDateTo, setPublicationDateTo] = useState(initialSearchState.publicationDateTo);
   const [ocdsYears, setOcdsYears] = useState<string[]>(initialSearchState.years);
@@ -2101,6 +2298,7 @@ function Opportunities({
   const [appliedPeriodYears, setAppliedPeriodYears] = useState<string[]>(initialSearchState.appliedYears);
   const [appliedPeriodMonths, setAppliedPeriodMonths] = useState<string[]>(initialSearchState.appliedMonths);
   const [appliedPeriodKeywordGroups, setAppliedPeriodKeywordGroups] = useState<ActivePeriodKeywordGroup[]>(initialSearchState.periodKeywordGroups);
+  const [additionalPeriodKeywordGroups, setAdditionalPeriodKeywordGroups] = useState<ActivePeriodKeywordGroup[]>(initialSearchState.additionalPeriodKeywordGroups);
   const usesPeriodFilters = variant === "ocds" || country === "Chile";
   const [maxResultsMode, setMaxResultsMode] = useState<MaxResultsMode>(initialSearchState.maxResultsMode);
   const [activeRun, setActiveRun] = useState<Run | null>(null);
@@ -2115,11 +2313,23 @@ function Opportunities({
   const [pendingRunStatuses, setPendingRunStatuses] = useState<Run[]>([]);
   const [batchKeywords, setBatchKeywords] = useState<string[]>([]);
   const [confirmNewSearch, setConfirmNewSearch] = useState(false);
-  const [confirmClearFields, setConfirmClearFields] = useState(false);
+  const [pendingKeywordRemoval, setPendingKeywordRemoval] = useState<string | null>(null);
+  const [removingKeyword, setRemovingKeyword] = useState(false);
+  const [keywordRemovalNotice, setKeywordRemovalNotice] = useState("");
+  const [keywordRemovalError, setKeywordRemovalError] = useState("");
   const [prefillNotice, setPrefillNotice] = useState("");
   const [periodValidationError, setPeriodValidationError] = useState("");
+  const [runResultRows, setRunResultRows] = useState<Opportunity[]>([]);
+  const [focusedRunResultIds, setFocusedRunResultIds] = useState<Set<number> | null>(null);
   const visibleRuns = useMemo(() => runs.filter((run) => sourceBelongsToView(run.source, country, variant)), [runs, country, variant]);
   const invalidPublicationDateRange = Boolean(publicationDateFrom && publicationDateTo && publicationDateFrom > publicationDateTo);
+  const entitySearchKeywords = uniqueKeywords([entityKeyword, entityKeyword2, entityKeyword3]);
+  const additionalSearchReady = Boolean(
+    publicationDateFrom
+    && publicationDateTo
+    && !invalidPublicationDateRange
+    && (nomenclatureFilter.trim() || (entityFilter.trim() && entitySearchKeywords.length)),
+  );
   const activePeriodKeywordGroups = useMemo(
     () => {
       const runGroups = periodKeywordGroupsFromRuns(visibleRuns, activeRunIds);
@@ -2138,18 +2348,79 @@ function Opportunities({
     },
     [visibleRuns, activeRunIds, appliedPeriodYears, appliedPeriodMonths, appliedPeriodKeywordGroups, activeKeywords, maxResultsMode],
   );
+  const visibleRequiredPeriodGroups = useMemo(() => {
+    const optionalTerms = [nomenclatureFilter, entityFilter].map((item) => item.trim().toLowerCase()).filter(Boolean);
+    const additionalTerms = new Set(additionalPeriodKeywordGroups.flatMap((group) => group.keywords).map(normalizedSearchTerm));
+    const processTerms = new Set(
+      data
+        .filter((item) => sourceBelongsToView(item.source, country, variant))
+        .flatMap((item) => [item.nomenclature, item.description])
+        .map(normalizedSearchTerm)
+        .filter(Boolean),
+    );
+    const cleanedGroups = activePeriodKeywordGroups.flatMap((group) => {
+      const keywords = group.keywords.filter((item) => {
+        const normalized = normalizedSearchTerm(item);
+        return normalized
+          && !optionalTerms.includes(normalized)
+          && !additionalTerms.has(normalized)
+          && !processTerms.has(normalized)
+          && item.trim().length <= 80;
+      });
+      return keywords.length ? [{ ...group, keywords }] : [];
+    });
+    return mergePeriodKeywordGroups(cleanedGroups);
+  }, [activePeriodKeywordGroups, additionalPeriodKeywordGroups, nomenclatureFilter, entityFilter, data, country, variant]);
+  const displayedSearchKeywords = useMemo(
+    () => uniqueKeywords(visibleRequiredPeriodGroups.flatMap((group) => group.keywords)),
+    [visibleRequiredPeriodGroups],
+  );
+  const periodProcessCounts = useMemo(() => {
+    const viewRows = data.filter((item) => sourceBelongsToView(item.source, country, variant));
+    const requiredCounts = visibleRequiredPeriodGroups.map((group) => [
+      periodGroupKey(group),
+      new Set(viewRows.filter((item) => opportunityMatchesPeriodGroup(item, group)).map((item) => item.id)).size,
+    ] as const);
+    const additionalCounts = additionalPeriodKeywordGroups.map((group) => [
+      periodGroupKey(group),
+      group.processCount ?? inferAdditionalRunCount(group, visibleRuns),
+    ] as const);
+    return new Map([...requiredCounts, ...additionalCounts]);
+  }, [data, country, variant, visibleRuns, visibleRequiredPeriodGroups, additionalPeriodKeywordGroups]);
 
   useEffect(() => {
-    const latest = visibleRuns.find((run) => run.id === activeRun?.id) || activeRun;
-    setActiveRun(latest || null);
-  }, [visibleRuns]);
-
-  useEffect(() => {
-    if (!activeRun && visibleRuns[0]) {
-      const latestAppliedRun = visibleRuns.find((run) => activeRunIds.includes(run.id));
-      setActiveRun(latestAppliedRun || visibleRuns[0]);
-    }
+    const currentVisibleRun = visibleRuns.find((run) => run.id === activeRun?.id);
+    if (currentVisibleRun) return;
+    const latestAppliedRun = visibleRuns.find((run) => activeRunIds.includes(run.id));
+    setActiveRun(latestAppliedRun || visibleRuns[0] || null);
   }, [activeRun, activeRunIds, visibleRuns]);
+
+  const visiblePendingRunStatuses = useMemo(
+    () => pendingRunStatuses.filter((run) => sourceBelongsToView(run.source, country, variant)),
+    [pendingRunStatuses, country, variant],
+  );
+  const isRadarProcessing = starting
+    || visiblePendingRunStatuses.some((run) => run.status === "queued" || run.status === "running")
+    || Boolean(activeRun && (activeRun.status === "queued" || activeRun.status === "running"));
+  const displayedRunIds = useMemo(() => {
+    const candidates = visiblePendingRunStatuses.length > 1 ? visiblePendingRunStatuses : activeRun ? [activeRun] : [];
+    return candidates.filter((run) => run.status === "completed").map((run) => run.id);
+  }, [visiblePendingRunStatuses, activeRun]);
+
+  useEffect(() => {
+    if (!displayedRunIds.length) {
+      setRunResultRows([]);
+      setFocusedRunResultIds(null);
+      return;
+    }
+    let cancelled = false;
+    api.opportunities(token, { runIds: displayedRunIds }).then((rows) => {
+      if (cancelled) return;
+      setRunResultRows(rows.filter((item) => sourceBelongsToView(item.source, country, variant)));
+      setFocusedRunResultIds(null);
+    }).catch(() => { if (!cancelled) setRunResultRows([]); });
+    return () => { cancelled = true; };
+  }, [token, country, variant, displayedRunIds.join(",")]);
 
   useEffect(() => {
     if (activeKeywords.length) return;
@@ -2167,6 +2438,9 @@ function Opportunities({
       keyword3,
       nomenclatureFilter,
       entityFilter,
+      entityKeyword,
+      entityKeyword2,
+      entityKeyword3,
       publicationDateFrom,
       publicationDateTo,
       years: [...ocdsYears],
@@ -2174,6 +2448,7 @@ function Opportunities({
       appliedYears: [...appliedPeriodYears],
       appliedMonths: [...appliedPeriodMonths],
       periodKeywordGroups: appliedPeriodKeywordGroups,
+      additionalPeriodKeywordGroups,
       maxResultsMode,
       searchMode,
     });
@@ -2186,6 +2461,9 @@ function Opportunities({
     keyword3,
     nomenclatureFilter,
     entityFilter,
+    entityKeyword,
+    entityKeyword2,
+    entityKeyword3,
     publicationDateFrom,
     publicationDateTo,
     ocdsYears,
@@ -2193,6 +2471,7 @@ function Opportunities({
     appliedPeriodYears,
     appliedPeriodMonths,
     appliedPeriodKeywordGroups,
+    additionalPeriodKeywordGroups,
     maxResultsMode,
     searchMode,
   ]);
@@ -2232,6 +2511,29 @@ function Opportunities({
     await refresh();
     const completedIds = statuses.filter((run) => run.status === "completed").map((run) => run.id);
     const completedKeywords = search.keywords.filter((_, index) => statuses[index]?.status === "completed");
+    if (search.kind === "additional") {
+      const runRows = completedIds.length ? await api.opportunities(token, { runIds: completedIds }) : [];
+      const displayedTerms = uniqueKeywords(runRows.map((item) => item.nomenclature).filter(Boolean));
+      const additionalGroups = search.appliedState.additionalPeriodKeywordGroups.map((group) => ({
+        ...group,
+        keywords: displayedTerms.length ? displayedTerms : group.keywords,
+        processCount: runRows.length,
+        opportunityIds: runRows.map((item) => item.id),
+      }));
+      const nextRunIds = addRunIds(activeRunIds, completedIds);
+      setActiveRunIds(nextRunIds);
+      setAdditionalPeriodKeywordGroups(additionalGroups);
+      setScopedRows((current) => mergeOpportunities(current ?? filtered, runRows));
+      saveActiveSearchState(storageScope, {
+        ...search.appliedState,
+        keywords: activeKeywords,
+        runIds: nextRunIds,
+        additionalPeriodKeywordGroups: additionalGroups,
+      });
+      setPendingSearch(null);
+      setActiveRun(statuses[statuses.length - 1] || null);
+      return true;
+    }
     const nextKeywords = search.mode === "append" ? addKeywords(activeKeywords, completedKeywords) : completedKeywords;
     const nextRunIds = search.mode === "append" ? addRunIds(activeRunIds, completedIds) : completedIds;
     const runRows = nextRunIds.length ? await api.opportunities(token, { runIds: nextRunIds }) : [];
@@ -2258,6 +2560,9 @@ function Opportunities({
     setKeyword3(nextInitialState.keyword3);
     setNomenclatureFilter(nextInitialState.nomenclatureFilter);
     setEntityFilter(nextInitialState.entityFilter);
+    setEntityKeyword(nextInitialState.entityKeyword);
+    setEntityKeyword2(nextInitialState.entityKeyword2);
+    setEntityKeyword3(nextInitialState.entityKeyword3);
     setPublicationDateFrom(nextInitialState.publicationDateFrom);
     setPublicationDateTo(nextInitialState.publicationDateTo);
     setOcdsYears(nextInitialState.years);
@@ -2265,6 +2570,7 @@ function Opportunities({
     setAppliedPeriodYears(nextInitialState.appliedYears);
     setAppliedPeriodMonths(nextInitialState.appliedMonths);
     setAppliedPeriodKeywordGroups(nextInitialState.periodKeywordGroups);
+    setAdditionalPeriodKeywordGroups(nextInitialState.additionalPeriodKeywordGroups);
     setMaxResultsMode(nextInitialState.maxResultsMode);
     setSearchMode(nextInitialState.searchMode);
     setActiveRun(null);
@@ -2275,8 +2581,9 @@ function Opportunities({
     setPendingSearch(null);
     setPendingRunStatuses([]);
     setBatchKeywords([]);
+    setRunResultRows([]);
+    setFocusedRunResultIds(null);
     setConfirmNewSearch(false);
-    setConfirmClearFields(false);
   }, [country, storageScope]);
 
   useEffect(() => {
@@ -2343,29 +2650,20 @@ function Opportunities({
   const baseRows = usesPeriodFilters ? data : scopedRows ?? data;
   const filtered = useMemo(() => {
     const normalizedActiveKeywords = activeKeywords.map((item) => item.toLowerCase()).filter(Boolean);
-    const normalizedNomenclature = nomenclatureFilter.trim().toLowerCase();
-    const normalizedEntity = stripAccents(entityFilter.trim()).toLowerCase();
-    const publicationFromTime = dateFilterBoundary(publicationDateFrom, false);
-    const publicationToTime = dateFilterBoundary(publicationDateTo, true);
     const activeOnly = maxResultsMode === "active";
     return baseRows.filter((item) => {
       if (!sourceBelongsToView(item.source, country, variant)) return false;
+      if (focusedRunResultIds && !focusedRunResultIds.has(item.id)) return false;
       const haystack = `${item.entity} ${item.nomenclature} ${item.description}`.toLowerCase();
       const keywordMatch = !normalizedActiveKeywords.length || normalizedActiveKeywords.some((item) => matchesCompletePhrase(haystack, item));
-      const nomenclatureMatch = !normalizedNomenclature || item.nomenclature.toLowerCase().includes(normalizedNomenclature);
-      const entityMatch = !normalizedEntity || stripAccents(item.entity).toLowerCase().includes(normalizedEntity);
       const activeMatch = !activeOnly || commercialSignal(item).className !== "red";
-      const publicationTime = parseDate(item.publication_date);
-      const publicationDateMatch = publicationFromTime === null && publicationToTime === null
-        || publicationTime !== null
-          && (publicationFromTime === null || publicationTime >= publicationFromTime)
-          && (publicationToTime === null || publicationTime <= publicationToTime);
-      const periodCombinationMatch = !usesPeriodFilters || !activePeriodKeywordGroups.length
+      const periodCombinationMatch = !usesPeriodFilters || (!activePeriodKeywordGroups.length && !additionalPeriodKeywordGroups.length)
         ? keywordMatch && activeMatch
-        : activePeriodKeywordGroups.some((group) => opportunityMatchesPeriodGroup(item, group));
-      return nomenclatureMatch && entityMatch && publicationDateMatch && periodCombinationMatch;
+        : activePeriodKeywordGroups.some((group) => opportunityMatchesPeriodGroup(item, group))
+          || additionalPeriodKeywordGroups.some((group) => opportunityMatchesAdditionalGroup(item, group, visibleRuns));
+      return periodCombinationMatch;
     });
-  }, [baseRows, activeKeywords, nomenclatureFilter, entityFilter, publicationDateFrom, publicationDateTo, maxResultsMode, country, variant, usesPeriodFilters, activePeriodKeywordGroups]);
+  }, [baseRows, activeKeywords, maxResultsMode, country, variant, usesPeriodFilters, visibleRuns, activePeriodKeywordGroups, additionalPeriodKeywordGroups, focusedRunResultIds]);
 
   useEffect(() => {
     if (!activeRun || activeRun.status !== "completed" || !pendingSearch?.runIds.includes(activeRun.id)) return;
@@ -2383,30 +2681,7 @@ function Opportunities({
     };
   }, [activeRun, pendingSearch, activeKeywords, activeRunIds, pinnedRows, token]);
 
-  useEffect(() => {
-    if (!activeRun || activeRun.status !== "completed" || activeRun.rows_found <= 0 || activeRunIds.length || pendingSearch) return;
-    const recoveredKeyword = keywordFromRun(activeRun);
-    if (!recoveredKeyword || activeKeywords.some((item) => item.toLowerCase() === recoveredKeyword.toLowerCase())) return;
-    let cancelled = false;
-    api.opportunities(token, { runIds: [activeRun.id] })
-      .then((rows) => {
-        if (cancelled) return;
-        const nextKeywords = addKeyword(activeKeywords, recoveredKeyword);
-        setActiveKeywords(nextKeywords);
-        setActiveRunIds([activeRun.id]);
-        setPinnedRows(filtered);
-        setScopedRows(mergeOpportunities(filtered, rows));
-      })
-      .catch(() => {
-        // The user can rerun or refresh if recovery is interrupted.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeRun, activeRunIds.length, pendingSearch, token, activeKeywords, filtered]);
-
   async function execute() {
-    if (invalidPublicationDateRange) return;
     const nextPeriodError = usesPeriodFilters
       ? futurePeriodValidationMessage(ocdsYears, ocdsMonths)
       : "";
@@ -2420,20 +2695,14 @@ function Opportunities({
   }
 
   async function executeConfirmed(mode: SearchMode) {
-    if (invalidPublicationDateRange) return;
     const nextPeriodError = usesPeriodFilters
       ? futurePeriodValidationMessage(ocdsYears, ocdsMonths)
       : "";
     setPeriodValidationError(nextPeriodError);
     if (nextPeriodError) return;
-    const cleanNomenclature = nomenclatureFilter.trim();
-    const cleanKeywords = cleanNomenclature
-      ? [cleanNomenclature]
-      : uniqueKeywords([keyword, keyword2, keyword3]).length
-        ? uniqueKeywords([keyword, keyword2, keyword3])
-        : ["satelital"];
-    const forceDetailByNomenclature = Boolean(cleanNomenclature);
-    const effectiveMaxDetails = forceDetailByNomenclature ? 1 : 0;
+    const cleanKeywords = uniqueKeywords([keyword, keyword2, keyword3]).length
+      ? uniqueKeywords([keyword, keyword2, keyword3])
+      : ["satelital"];
     const nextAppliedYears = mode === "append"
       ? uniqueDefined([...appliedPeriodYears, ...ocdsYears])
       : [...ocdsYears];
@@ -2464,15 +2733,14 @@ function Opportunities({
         const run = await api.startRun(token, {
           source: variant === "ocds" ? "oece_ocds_api" : sourceForModule(module),
           keyword: searchKeyword,
-          nomenclature: cleanNomenclature || undefined,
           year: usesPeriodFilters ? ocdsYears.join(",") : country === "Peru" ? "2026" : "",
           month: usesPeriodFilters ? ocdsMonths.join(",") : "",
           years: usesPeriodFilters ? ocdsYears : undefined,
           months: usesPeriodFilters ? ocdsMonths : undefined,
           version: variant === "ocds" ? "OCDS OECE" : country === "Peru" ? "Seace 3" : "Mercado Publico",
           max_results: 0,
-          max_details: effectiveMaxDetails,
-          enrich_details: forceDetailByNomenclature,
+          max_details: 0,
+          enrich_details: false,
           commercial_mode: maxResultsMode,
         });
         startedRuns.push(run);
@@ -2489,6 +2757,9 @@ function Opportunities({
         keyword3,
         nomenclatureFilter,
         entityFilter,
+        entityKeyword,
+        entityKeyword2,
+        entityKeyword3,
         publicationDateFrom,
         publicationDateTo,
         years: [...ocdsYears],
@@ -2496,6 +2767,7 @@ function Opportunities({
         appliedYears: nextAppliedYears,
         appliedMonths: nextAppliedMonths,
         periodKeywordGroups: nextPeriodKeywordGroups,
+        additionalPeriodKeywordGroups,
         maxResultsMode,
         searchMode: mode,
       };
@@ -2503,11 +2775,73 @@ function Opportunities({
       setAppliedPeriodMonths(nextAppliedMonths);
       setAppliedPeriodKeywordGroups(nextPeriodKeywordGroups);
       setActiveRun(runningRun);
-      setPendingSearch({ mode, keywords: cleanKeywords, runIds: startedRunIds, appliedState });
+      setPendingSearch({ mode, keywords: cleanKeywords, runIds: startedRunIds, appliedState, kind: "required" });
       setPendingRunStatuses(startedRuns);
       setBatchKeywords(cleanKeywords);
       saveActiveSearchState(storageScope, appliedState);
       await refresh();
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function executeAdditionalSearch() {
+    if (!additionalSearchReady) return;
+    const cleanNomenclature = nomenclatureFilter.trim();
+    const cleanEntity = entityFilter.trim();
+    const searchTerms = cleanNomenclature ? [cleanNomenclature] : entitySearchKeywords;
+    const start = new Date(`${publicationDateFrom}T00:00:00`);
+    const end = new Date(`${publicationDateTo}T00:00:00`);
+    const years: string[] = [];
+    const months: string[] = [];
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cursor <= end) {
+      const year = String(cursor.getFullYear());
+      const month = String(cursor.getMonth() + 1);
+      if (!years.includes(year)) years.push(year);
+      if (!months.includes(month)) months.push(month);
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    const groups = years.map((year) => ({ year, months: [...months], keywords: [...searchTerms], commercialMode: "all" as MaxResultsMode }));
+    setStarting(true);
+    try {
+      const startedRuns = await Promise.all(searchTerms.map((searchTerm) => api.startRun(token, {
+        source: variant === "ocds" ? "oece_ocds_api" : sourceForModule(module),
+        keyword: searchTerm,
+        nomenclature: cleanNomenclature || undefined,
+        entity_filter: cleanNomenclature ? undefined : cleanEntity,
+        year: years.join(","),
+        month: months.join(","),
+        years,
+        months,
+        publication_date_from: publicationDateFrom,
+        publication_date_to: publicationDateTo,
+        version: variant === "ocds" ? "OCDS OECE" : country === "Peru" ? "Seace 3" : "Mercado Publico",
+        max_results: 0,
+        max_details: cleanNomenclature ? 1 : 0,
+        enrich_details: Boolean(cleanNomenclature),
+        commercial_mode: "all",
+      })));
+      const run = startedRuns[0];
+      const startedRunIds = startedRuns.map((item) => item.id);
+      const appliedState: SavedOpportunityViewState = {
+        ...loadActiveSearchState(storageScope),
+        keywords: activeKeywords,
+        runIds: addRunIds(activeRunIds, startedRunIds),
+        nomenclatureFilter,
+        entityFilter,
+        entityKeyword,
+        entityKeyword2,
+        entityKeyword3,
+        publicationDateFrom,
+        publicationDateTo,
+        additionalPeriodKeywordGroups: groups,
+      };
+      setAdditionalPeriodKeywordGroups(groups);
+      setActiveRun(run);
+      setPendingRunStatuses(startedRuns);
+      setBatchKeywords(searchTerms);
+      setPendingSearch({ mode: "append", keywords: searchTerms, runIds: startedRunIds, appliedState, kind: "additional" });
     } finally {
       setStarting(false);
     }
@@ -2563,9 +2897,6 @@ function Opportunities({
       const runRows = await api.opportunities(token, { runIds: [run.id] });
       const updatedRow = runRows.find((row) => row.nomenclature.toLowerCase() === cleanNomenclature.toLowerCase())
         || runRows.find((row) => row.nomenclature.toLowerCase().includes(cleanNomenclature.toLowerCase()) || cleanNomenclature.toLowerCase().includes(row.nomenclature.toLowerCase()));
-      const nextRunIds = addRunId(activeRunIds, run.id);
-      setActiveRunIds(nextRunIds);
-      setActiveKeywords((current) => addKeyword(current, cleanNomenclature));
       setScopedRows((current) => mergeOpportunities(current ?? filtered, runRows));
       return Boolean(updatedRow && presentationDeadline(updatedRow));
     } finally {
@@ -2591,27 +2922,75 @@ function Opportunities({
   function clearRequiredFilters() {
     setOcdsYears([String(currentYear)]);
     setOcdsMonths([String(new Date().getMonth() + 1)]);
+    setKeyword("");
+    setKeyword2("");
+    setKeyword3("");
     setMaxResultsMode("active");
+    setPeriodValidationError("");
+    setConfirmNewSearch(false);
   }
 
   function clearOptionalFilters() {
     setNomenclatureFilter("");
     setEntityFilter("");
+    setEntityKeyword("");
+    setEntityKeyword2("");
+    setEntityKeyword3("");
     setPublicationDateFrom("");
     setPublicationDateTo("");
   }
 
-  function clearFields() {
-    setConfirmClearFields(false);
-    setPrefillNotice("");
-    setKeyword("");
-    setKeyword2("");
-    setKeyword3("");
-    setNomenclatureFilter("");
-    setEntityFilter("");
-    setPublicationDateFrom("");
-    setPublicationDateTo("");
-    setSearchMode("append");
+  async function archiveProcess(item: Opportunity) {
+    await api.archiveOpportunity(token, item.id);
+    setScopedRows((current) => current ? current.filter((row) => row.id !== item.id) : current);
+    setPinnedRows((current) => current.filter((row) => row.id !== item.id));
+    await refresh();
+  }
+
+  async function removeActiveKeyword() {
+    if (!pendingKeywordRemoval || removingKeyword) return;
+    const removedKeyword = pendingKeywordRemoval;
+    const normalizedRemovedKeyword = normalizedSearchTerm(removedKeyword);
+    setRemovingKeyword(true);
+    setKeywordRemovalError("");
+    setKeywordRemovalNotice("");
+    try {
+      const remainingKeywords = displayedSearchKeywords.filter(
+        (item) => normalizedSearchTerm(item) !== normalizedRemovedKeyword,
+      );
+      const result = await api.archiveOpportunitiesByKeyword(
+        token,
+        country.toLowerCase() as "peru" | "chile",
+        removedKeyword,
+        remainingKeywords,
+      );
+      const archivedIds = new Set(result.opportunity_ids);
+      const withoutKeyword = (groups: ActivePeriodKeywordGroup[]) => groups.flatMap((group) => {
+        const keywords = group.keywords.filter((item) => normalizedSearchTerm(item) !== normalizedRemovedKeyword);
+        return keywords.length ? [{ ...group, keywords }] : [];
+      });
+      setActiveKeywords((current) => current.filter((item) => normalizedSearchTerm(item) !== normalizedRemovedKeyword));
+      setActiveRunIds((current) => current.filter((runId) => {
+        const run = visibleRuns.find((item) => item.id === runId);
+        return !run || normalizedSearchTerm(keywordFromRun(run)) !== normalizedRemovedKeyword;
+      }));
+      setAppliedPeriodKeywordGroups((current) => withoutKeyword(current));
+      setAdditionalPeriodKeywordGroups((current) => withoutKeyword(current));
+      if (normalizedSearchTerm(keyword) === normalizedRemovedKeyword) setKeyword("");
+      if (normalizedSearchTerm(keyword2) === normalizedRemovedKeyword) setKeyword2("");
+      if (normalizedSearchTerm(keyword3) === normalizedRemovedKeyword) setKeyword3("");
+      setScopedRows((current) => current ? current.filter((item) => !archivedIds.has(item.id)) : current);
+      setPinnedRows((current) => current.filter((item) => !archivedIds.has(item.id)));
+      setPendingKeywordRemoval(null);
+      setKeywordRemovalNotice(result.archived
+        ? `${result.archived} ${result.archived === 1 ? "proceso fue enviado" : "procesos fueron enviados"} al histórico al eliminar “${removedKeyword}”.`
+        : `Se eliminó “${removedKeyword}” de la búsqueda activa. No había procesos asociados para archivar.`);
+      await refresh();
+    } catch (error) {
+      setKeywordRemovalError(error instanceof Error ? error.message : "No se pudo eliminar la palabra clave");
+    } finally {
+      setRemovingKeyword(false);
+    }
   }
 
   return (
@@ -2625,7 +3004,6 @@ function Opportunities({
             <p>Ejecuta SEACE en backend headless y revisa avance sin abrir Chrome al usuario.</p>
           )}
         </div>
-        <button className="ghost" onClick={refresh}>Actualizar</button>
       </div>
       <div className="module-row">
         {variant === "ocds" ? (
@@ -2643,17 +3021,29 @@ function Opportunities({
       <div className="active-search-context">
         <div className="active-keywords">
           <span>Búsqueda activa:</span>
-          {activeKeywords.length
-            ? activeKeywords.map((item) => <b key={item}>{item}</b>)
+          {displayedSearchKeywords.length
+            ? displayedSearchKeywords.map((item) => (
+                <b className="active-keyword-chip" key={item}>
+                  <span>{item}</span>
+                  <button
+                    type="button"
+                    aria-label={`Eliminar ${item} de la búsqueda activa`}
+                    title={`Eliminar ${item}`}
+                    onClick={() => setPendingKeywordRemoval(item)}
+                  >×</button>
+                </b>
+              ))
             : <b>Todos los procesos</b>}
         </div>
+        {keywordRemovalNotice ? <div className="notice success keyword-removal-notice" role="status">{keywordRemovalNotice}</div> : null}
+        {keywordRemovalError ? <div className="notice danger keyword-removal-notice" role="alert">{keywordRemovalError}</div> : null}
         {usesPeriodFilters ? (
           <div className="active-period-summary">
             <span title="Filtros de período aplicados actualmente a la tabla de procesos">
               Períodos activos:
             </span>
             <div className="active-period-list">
-              {activePeriodKeywordGroups.map((group) => (
+              {visibleRequiredPeriodGroups.map((group) => (
                 <div className="active-period-row" key={`${group.year}-${group.commercialMode}-${group.months.join("-")}-${group.keywords.join("-")}`}>
                   <div className="active-period-box">
                     <strong>{group.year}</strong>
@@ -2661,6 +3051,9 @@ function Opportunities({
                       {group.commercialMode === "all" ? "Todos" : "Vigentes"}
                     </em>
                     <span>{group.months.length ? monthLabels(group.months).join(", ") : "Todos los meses"}</span>
+                    <span className={`active-period-count ${(periodProcessCounts.get(periodGroupKey(group)) || 0) === 0 ? "zero" : ""}`}>
+                      {processCountLabel(periodProcessCounts.get(periodGroupKey(group)) || 0)}
+                    </span>
                   </div>
                   <span className="active-period-arrow" aria-hidden="true">→</span>
                   <div className="active-period-keywords">
@@ -2675,6 +3068,30 @@ function Opportunities({
             <p className="active-period-help">
               Cada período activo conserva su semáforo y sus keywords; esta combinación define los datos de la tabla “Detalle de procesos” que podrás ver en la parte inferior.
             </p>
+            {additionalPeriodKeywordGroups.length ? (
+              <div className="additional-search-summary">
+                <span>Búsquedas adicionales:</span>
+                <div className="active-period-list">
+                  {additionalPeriodKeywordGroups.map((group) => (
+                    <div className="active-period-row" key={`additional-${group.year}-${group.months.join("-")}-${group.keywords.join("-")}`}>
+                      <div className="active-period-box">
+                        <strong>{group.year}</strong>
+                        <em className="active-period-mode all">Todos</em>
+                        <span>{group.months.length ? monthLabels(group.months).join(", ") : "Todos los meses"}</span>
+                        <span className={`active-period-count ${(periodProcessCounts.get(periodGroupKey(group)) || 0) === 0 ? "zero" : ""}`}>
+                          {processCountLabel(periodProcessCounts.get(periodGroupKey(group)) || 0)}
+                        </span>
+                      </div>
+                      <span className="active-period-arrow" aria-hidden="true">→</span>
+                      <div className="active-period-keywords">
+                        <span>Keywords aplicadas:</span>
+                        {group.keywords.map((item) => <b key={item}>{item}</b>)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -2682,7 +3099,7 @@ function Opportunities({
         <section className="radar-filter-section required" aria-labelledby={`${storageScope}-required-title`}>
           <div className="radar-filter-heading">
             <div>
-              <h3 id={`${storageScope}-required-title`}>Filtros Obligatorios - Búsqueda de Procesos</h3>
+              <h3 id={`${storageScope}-required-title`}>Búsqueda de Procesos - Filtros generales</h3>
               <p>Define el periodo, las palabras clave y el estado comercial de la búsqueda.</p>
             </div>
             <div className="filter-heading-actions">
@@ -2706,7 +3123,21 @@ function Opportunities({
                 </div>
               </div>
               <div className="multi-filter">
-                <span>Meses</span>
+                <div className="multi-filter-heading">
+                  <span>Meses</span>
+                  <label className="all-months-switch">
+                    <span>Todos los meses</span>
+                    <input
+                      type="checkbox"
+                      checked={ocdsMonths.length === monthOptions.length}
+                      onChange={(event) => {
+                        setOcdsMonths(event.target.checked ? monthOptions.map(([value]) => value) : []);
+                        setPeriodValidationError("");
+                      }}
+                    />
+                    <span className="all-months-switch-track" aria-hidden="true"><span /></span>
+                  </label>
+                </div>
                 <div>
                   {monthOptions.map(([value, label]) => (
                     <button key={value} type="button" className={ocdsMonths.includes(value) ? "selected" : ""} onClick={() => {
@@ -2760,9 +3191,15 @@ function Opportunities({
                 </button>
               ) : null}
             </div>
-            <button className="primary execute-radar-button" type="button" onClick={execute} disabled={invalidPublicationDateRange || starting || (variant === "radar" && (module === "Contratos Menores a 8 UIT" || module === "Ambos modulos"))}>
+            <button
+              className="primary execute-radar-button"
+              type="button"
+              onClick={execute}
+              disabled={isRadarProcessing || (variant === "radar" && (module === "Contratos Menores a 8 UIT" || module === "Ambos modulos"))}
+              aria-busy={isRadarProcessing}
+            >
               <RadarActionIcon />
-              <span>{starting ? "Iniciando Radar..." : "Ejecutar Radar"}</span>
+              <span>{isRadarProcessing ? "Procesando" : "Ejecutar Radar"}</span>
             </button>
           </div>
         </section>
@@ -2770,8 +3207,8 @@ function Opportunities({
         <section className="radar-filter-section optional" aria-labelledby={`${storageScope}-optional-title`}>
           <div className="radar-filter-heading">
             <div>
-              <h3 id={`${storageScope}-optional-title`}>Filtros opcionales</h3>
-              <p>Acota los resultados cuando conoces datos específicos del proceso.</p>
+              <h3 id={`${storageScope}-optional-title`}>Búsqueda Específica</h3>
+              <p>Devuelve los resultados cuando conoces datos específicos del proceso. Si no se logra visualizar el proceso en la tabla inferior, puedes generar una búsqueda adicional.</p>
             </div>
             <div className="filter-heading-actions">
               <span className="filter-type-badge">Opcionales</span>
@@ -2779,8 +3216,21 @@ function Opportunities({
             </div>
           </div>
           <div className="optional-filter-grid">
-            <label>Búsqueda por Nomenclatura del Proceso<input value={nomenclatureFilter} onChange={(event) => setNomenclatureFilter(event.target.value)} placeholder={country === "Chile" ? "Ej. 2422-122-L126" : "Ej. CP-ABR-2-2026-UGEL-A-1"} /></label>
-            <label>Búsqueda por Nombre de Entidad<input value={entityFilter} onChange={(event) => setEntityFilter(event.target.value)} placeholder={country === "Chile" ? "Ej. Municipalidad de Santiago" : "Ej. Gobierno Regional de Lima"} /></label>
+            <label>Búsqueda por Nomenclatura del Proceso <small className="exact-match-hint">Coincidencia exacta</small><input value={nomenclatureFilter} onChange={(event) => setNomenclatureFilter(event.target.value)} placeholder={country === "Chile" ? "Ej. 2422-122-L126" : "Ej. CP-ABR-2-2026-UGEL-A-1"} /></label>
+            <div className="entity-search-field">
+              <label>Búsqueda por Nombre de Entidad <small className="exact-match-hint">Coincidencia exacta</small><input value={entityFilter} onChange={(event) => setEntityFilter(event.target.value)} placeholder={country === "Chile" ? "Ej. Municipalidad de Santiago" : "Ej. Gobierno Regional de Lima"} /></label>
+              {entityFilter.trim() && !nomenclatureFilter.trim() ? (
+                <div className="entity-keyword-fields" role="group" aria-label="Keywords obligatorias para la búsqueda por entidad">
+                  <span>Keywords de negocio <small>Ingresa de 1 a 3</small></span>
+                  <div>
+                    <label>Keyword 1<input list={keywordSuggestionListId} value={entityKeyword} onChange={(event) => setEntityKeyword(event.target.value)} placeholder="Ej. conectividad" /></label>
+                    <label>Keyword 2<input list={keywordSuggestionListId} value={entityKeyword2} onChange={(event) => setEntityKeyword2(event.target.value)} placeholder="Ej. internet" /></label>
+                    <label>Keyword 3<input list={keywordSuggestionListId} value={entityKeyword3} onChange={(event) => setEntityKeyword3(event.target.value)} placeholder="Ej. satelital" /></label>
+                  </div>
+                  {!entitySearchKeywords.length ? <small className="entity-keyword-error" role="status">Debes ingresar al menos una keyword para buscar por entidad.</small> : null}
+                </div>
+              ) : null}
+            </div>
             <div className="date-range-field" role="group" aria-labelledby={`${storageScope}-publication-date-label`}>
               <span id={`${storageScope}-publication-date-label`}>Búsqueda Fecha de Convocatoria</span>
               <div className="date-range-inputs">
@@ -2790,17 +3240,24 @@ function Opportunities({
               {invalidPublicationDateRange ? <small className="date-range-error" role="alert">La fecha de inicio debe ser anterior o igual a la fecha de fin.</small> : null}
             </div>
           </div>
+          <p className="additional-search-requirements">Completa la fecha de convocatoria y, además, la nomenclatura, el nombre de la entidad o ambos. Si ingresas nomenclatura, tendrá prioridad. Una búsqueda solo por entidad requiere entre una y tres keywords de negocio.</p>
+          <div className="radar-action-row optional-action-row">
+            <button className="primary additional-search-button" type="button" onClick={executeAdditionalSearch} disabled={!additionalSearchReady || isRadarProcessing}>
+              {isRadarProcessing ? "Procesando..." : "Ejecutar búsqueda adicional"}
+            </button>
+          </div>
         </section>
 
       </div>
-      {activeRun ? <RunProgress run={activeRun} batchRuns={pendingRunStatuses} batchKeywords={batchKeywords} /> : visibleRuns[0] ? <RunProgress run={visibleRuns[0]} /> : null}
+      {activeRun ? <RunProgress run={activeRun} batchRuns={visiblePendingRunStatuses} batchKeywords={batchKeywords} resultRows={runResultRows} resultsFocused={Boolean(focusedRunResultIds)} onToggleResults={runResultRows.length ? () => setFocusedRunResultIds((current) => current ? null : new Set(runResultRows.map((item) => item.id))) : undefined} /> : visibleRuns[0] ? <RunProgress run={visibleRuns[0]} resultRows={runResultRows} resultsFocused={Boolean(focusedRunResultIds)} onToggleResults={runResultRows.length ? () => setFocusedRunResultIds((current) => current ? null : new Set(runResultRows.map((item) => item.id))) : undefined} /> : null}
       <OpportunityTable
         rows={filtered}
+        country={country}
         token={token}
-        resetKey={`${storageScope}:${activeKeywords.join("|")}:${activeRunIds.join(",")}:${nomenclatureFilter}:${entityFilter}:${publicationDateFrom}:${publicationDateTo}`}
+        resetKey={`${storageScope}:${activeKeywords.join("|")}:${activeRunIds.join(",")}`}
         onRevalidateProposal={revalidateProposalDate}
         highlightTerms={activeKeywords}
-        onRequestClearFields={() => setConfirmClearFields(true)}
+        onProcessAction={archiveProcess}
       />
       {confirmNewSearch ? (
         <ConfirmModal
@@ -2812,14 +3269,14 @@ function Opportunities({
           onCancel={() => setConfirmNewSearch(false)}
         />
       ) : null}
-      {confirmClearFields ? (
+      {pendingKeywordRemoval ? (
         <ConfirmModal
-          title="Limpiar campos"
-          message="Se limpiarán los campos de preparación. La búsqueda activa y los resultados actuales de la tabla se conservarán."
-          confirmLabel="Sí, limpiar campos"
+          title="Eliminar palabra clave"
+          message="¿Está seguro de eliminar la palabra clave? Se enviarán todos los procesos asociados al módulo Histórico de Procesos Eliminados."
+          confirmLabel={removingKeyword ? "Eliminando..." : "Sí"}
           cancelLabel="No"
-          onConfirm={clearFields}
-          onCancel={() => setConfirmClearFields(false)}
+          onConfirm={removeActiveKeyword}
+          onCancel={() => { if (!removingKeyword) setPendingKeywordRemoval(null); }}
         />
       ) : null}
     </section>
@@ -2834,7 +3291,9 @@ function addKeyword(current: string[], keyword: string) {
 }
 
 function uniqueKeywords(values: string[]) {
-  return values.reduce<string[]>((items, value) => addKeyword(items, value), []);
+  return values
+    .filter((value) => !retiredRadarKeywords.has(normalizedSearchTerm(value)))
+    .reduce<string[]>((items, value) => addKeyword(items, value), []);
 }
 
 function addKeywords(current: string[], keywords: string[]) {
@@ -2868,6 +3327,9 @@ function defaultOpportunityViewState(): SavedOpportunityViewState {
     keyword3: "",
     nomenclatureFilter: "",
     entityFilter: "",
+    entityKeyword: "",
+    entityKeyword2: "",
+    entityKeyword3: "",
     publicationDateFrom: "",
     publicationDateTo: "",
     years: [String(currentYear)],
@@ -2880,6 +3342,7 @@ function defaultOpportunityViewState(): SavedOpportunityViewState {
       keywords: ["satelital"],
       commercialMode: "active",
     }],
+    additionalPeriodKeywordGroups: [],
     maxResultsMode: "active",
     searchMode: "append",
   };
@@ -2893,7 +3356,7 @@ function loadActiveSearchState(scope: string): SavedOpportunityViewState {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const hasSavedKeywords = Array.isArray(parsed.keywords);
     const rawKeywords: unknown[] = hasSavedKeywords ? parsed.keywords as unknown[] : [];
-    const keywords = rawKeywords.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    const keywords = uniqueKeywords(rawKeywords.filter((item): item is string => typeof item === "string" && item.trim().length > 0));
     const runIds = Array.isArray(parsed.runIds)
       ? parsed.runIds.filter((item): item is number => typeof item === "number" && Number.isFinite(item))
       : [];
@@ -2935,7 +3398,7 @@ function loadActiveSearchState(scope: string): SavedOpportunityViewState {
               ? group.months.filter((value): value is string => typeof value === "string")
               : [],
             keywords: Array.isArray(group.keywords)
-              ? group.keywords.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+              ? uniqueKeywords(group.keywords.filter((value): value is string => typeof value === "string" && value.trim().length > 0))
               : [],
             commercialMode: ["active", "all"].includes(String(group.commercialMode))
               ? group.commercialMode as MaxResultsMode
@@ -2948,17 +3411,37 @@ function loadActiveSearchState(scope: string): SavedOpportunityViewState {
         ? savedPeriodKeywordGroups
         : periodKeywordGroupsForSelection(appliedYears, appliedMonths, activeKeywords, maxResultsMode),
     );
+    const savedAdditionalPeriodKeywordGroups = Array.isArray(parsed.additionalPeriodKeywordGroups)
+      ? parsed.additionalPeriodKeywordGroups.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const group = item as Record<string, unknown>;
+          if (typeof group.year !== "string") return [];
+          return [{
+            year: group.year,
+            months: Array.isArray(group.months) ? group.months.filter((value): value is string => typeof value === "string") : [],
+            keywords: Array.isArray(group.keywords) ? uniqueKeywords(group.keywords.filter((value): value is string => typeof value === "string")) : [],
+            commercialMode: "all" as MaxResultsMode,
+            processCount: typeof group.processCount === "number" && Number.isFinite(group.processCount) ? group.processCount : undefined,
+            opportunityIds: Array.isArray(group.opportunityIds)
+              ? group.opportunityIds.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+              : undefined,
+          }];
+        })
+      : [];
     const searchMode = ["append", "replace"].includes(String(parsed.searchMode))
       ? parsed.searchMode as SearchMode
       : defaults.searchMode;
     return {
       keywords: activeKeywords,
       runIds,
-      keyword: typeof parsed.keyword === "string" ? parsed.keyword : activeKeywords[0] || defaults.keyword,
-      keyword2: typeof parsed.keyword2 === "string" ? parsed.keyword2 : activeKeywords[1] || "",
-      keyword3: typeof parsed.keyword3 === "string" ? parsed.keyword3 : activeKeywords[2] || "",
+      keyword: savedDraftKeywords[0] || activeKeywords[0] || defaults.keyword,
+      keyword2: savedDraftKeywords[1] || activeKeywords[1] || "",
+      keyword3: savedDraftKeywords[2] || activeKeywords[2] || "",
       nomenclatureFilter: typeof parsed.nomenclatureFilter === "string" ? parsed.nomenclatureFilter : "",
       entityFilter: typeof parsed.entityFilter === "string" ? parsed.entityFilter : "",
+      entityKeyword: typeof parsed.entityKeyword === "string" ? parsed.entityKeyword : "",
+      entityKeyword2: typeof parsed.entityKeyword2 === "string" ? parsed.entityKeyword2 : "",
+      entityKeyword3: typeof parsed.entityKeyword3 === "string" ? parsed.entityKeyword3 : "",
       publicationDateFrom: typeof parsed.publicationDateFrom === "string" ? parsed.publicationDateFrom : "",
       publicationDateTo: typeof parsed.publicationDateTo === "string" ? parsed.publicationDateTo : "",
       years,
@@ -2966,6 +3449,7 @@ function loadActiveSearchState(scope: string): SavedOpportunityViewState {
       appliedYears,
       appliedMonths,
       periodKeywordGroups,
+      additionalPeriodKeywordGroups: savedAdditionalPeriodKeywordGroups,
       maxResultsMode,
       searchMode,
     };
@@ -2987,7 +3471,7 @@ function periodFiltersFromRuns(runs: Run[], runIds: number[]) {
   const years = new Set<string>();
   const months = new Set<string>();
   runs.forEach((run) => {
-    if (!selectedIds.has(run.id)) return;
+    if (!selectedIds.has(run.id) || isProcessActionRun(run)) return;
     const period = periodPartsFromRun(run);
     period.years.forEach((value) => years.add(value));
     period.months.forEach((value) => months.add(value));
@@ -3019,7 +3503,7 @@ function periodKeywordGroupsFromRuns(
   const selectedIds = new Set(runIds);
   const groups = new Map<string, ActivePeriodKeywordGroup>();
   runs.forEach((run) => {
-    if (!selectedIds.has(run.id)) return;
+    if (!selectedIds.has(run.id) || isProcessActionRun(run)) return;
     const period = periodPartsFromRun(run);
     const keyword = keywordFromRun(run);
     const commercialMode = commercialModeFromRun(run, fallbackMode);
@@ -3047,6 +3531,37 @@ function periodKeywordGroupsForSelection(
       keywords: uniqueKeywords(keywords),
       commercialMode,
     }));
+}
+
+function periodGroupKey(group: ActivePeriodKeywordGroup) {
+  return `${group.year}|${uniqueDefined(group.months).sort((left, right) => Number(left) - Number(right)).join(",")}|${group.commercialMode}|${uniqueKeywords(group.keywords).map(normalizedSearchTerm).sort().join(",")}`;
+}
+
+function processCountLabel(count: number) {
+  return `${count} ${count === 1 ? "Proceso" : "Procesos"}`;
+}
+
+function inferAdditionalRunCount(group: ActivePeriodKeywordGroup, runs: Run[]) {
+  const groupKeywords = new Set(group.keywords.map(normalizedSearchTerm));
+  const latestByKeyword = new Map<string, Run>();
+  runs
+    .filter((run) => commercialModeFromRun(run, "active") === "all")
+    .filter((run) => {
+      const period = periodPartsFromRun(run);
+      return period.years.includes(group.year) && group.months.some((month) => period.months.includes(month));
+    })
+    .sort((left, right) => right.id - left.id)
+    .forEach((run) => {
+      const keyword = normalizedSearchTerm(keywordFromRun(run));
+      if (groupKeywords.has(keyword) && !latestByKeyword.has(keyword)) latestByKeyword.set(keyword, run);
+    });
+  return [...latestByKeyword.values()].reduce((total, run) => total + Number(run.rows_found || 0), 0);
+}
+
+function opportunityMatchesAdditionalGroup(item: Opportunity, group: ActivePeriodKeywordGroup, runs: Run[]) {
+  if (group.opportunityIds) return group.opportunityIds.includes(item.id);
+  if ((group.processCount ?? inferAdditionalRunCount(group, runs)) === 0) return false;
+  return opportunityMatchesPeriodGroup(item, group);
 }
 
 function mergePeriodKeywordGroups(...collections: ActivePeriodKeywordGroup[][]) {
@@ -3128,7 +3643,11 @@ function opportunityMatchesPeriodGroup(item: Opportunity, group: ActivePeriodKey
 }
 
 function normalizedKeywordSet(keywords: string[]) {
-  return new Set(keywords.map((keyword) => keyword.trim().toLocaleLowerCase("es")));
+  return new Set(keywords.map(normalizedSearchTerm));
+}
+
+function normalizedSearchTerm(value: string) {
+  return value.trim().toLocaleLowerCase("es");
 }
 
 function isKeywordSubset(left: Set<string>, right: Set<string>) {
@@ -3142,6 +3661,10 @@ function monthLabels(months: string[]) {
 function keywordFromRun(run: Run) {
   const match = String(run.diagnostics || "").match(/keyword=([^|]+)/i);
   return match?.[1]?.trim() || "";
+}
+
+function isProcessActionRun(run: Run) {
+  return /max_detalles\s*=\s*12(?:\D|$)/i.test(String(run.diagnostics || ""));
 }
 
 function ConfirmModal({
@@ -3173,29 +3696,106 @@ function ConfirmModal({
   );
 }
 
+function ArchivedProcesses({
+  country,
+  token,
+  onRestored,
+}: {
+  country: Country;
+  token: string;
+  onRestored: () => Promise<void>;
+}) {
+  const [rows, setRows] = useState<Opportunity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const countryCode = country === "Chile" ? "chile" : "peru";
+
+  async function loadArchived() {
+    setLoading(true);
+    setError("");
+    try {
+      setRows(await api.archivedOpportunities(token, countryCode));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "No se pudo cargar el histórico");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadArchived();
+  }, [token, countryCode]);
+
+  async function restoreProcess(item: Opportunity) {
+    await api.restoreOpportunity(token, item.id);
+    setRows((current) => current.filter((row) => row.id !== item.id));
+    await onRestored();
+  }
+
+  return (
+    <section className="panel archived-processes-panel">
+      <div className="panel-title archived-processes-heading">
+        <div>
+          <h2>Histórico Procesos Eliminados {country === "Chile" ? "CL" : "PE"}</h2>
+          <p>Respaldo permanente de decisiones comerciales. Estas nomenclaturas no ingresarán en actualizaciones automáticas mientras permanezcan aquí.</p>
+        </div>
+        <button className="ghost" type="button" onClick={loadArchived} disabled={loading}>
+          {loading ? "Actualizando..." : "Actualizar"}
+        </button>
+      </div>
+      <div className="archive-summary" role="status">
+        <span className="archive-summary-icon" aria-hidden="true">↺</span>
+        <div>
+          <strong>{rows.length} {rows.length === 1 ? "proceso respaldado" : "procesos respaldados"}</strong>
+          <span>Usa “Regresar al módulo Oportunidades” si el retiro fue un error.</span>
+        </div>
+      </div>
+      {error ? <div className="notice danger" role="alert">{error}</div> : null}
+      {loading && !rows.length ? <Empty text="Cargando procesos retirados..." /> : (
+        <OpportunityTable
+          rows={rows}
+          country={country}
+          token={token}
+          resetKey={`archived:${countryCode}`}
+          onRevalidateProposal={async () => false}
+          highlightTerms={[]}
+          actionMode="restore"
+          onProcessAction={restoreProcess}
+          allowRevalidation={false}
+        />
+      )}
+    </section>
+  );
+}
+
 function OpportunityTable({
   rows,
+  country,
   token,
   resetKey,
   onRevalidateProposal,
   highlightTerms,
-  onRequestClearFields,
+  actionMode = "archive",
+  onProcessAction,
+  allowRevalidation = true,
 }: {
   rows: Opportunity[];
+  country: Country;
   token: string;
   resetKey: string;
   onRevalidateProposal: (item: Opportunity) => Promise<boolean>;
   highlightTerms: string[];
-  onRequestClearFields: () => void;
+  actionMode?: "archive" | "restore";
+  onProcessAction: (item: Opportunity) => Promise<void>;
+  allowRevalidation?: boolean;
 }) {
   const [commercialFilter, setCommercialFilter] = useState<CommercialClass | null>(null);
-  const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
-    key: "publication_date",
-    direction: "desc",
-  });
+  const [columnFilters, setColumnFilters] = useState<TableColumnFilters>(emptyTableColumnFilters);
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
-  const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
   const [pendingRemoval, setPendingRemoval] = useState<Opportunity | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [actionPending, setActionPending] = useState(false);
   const [revalidatingIds, setRevalidatingIds] = useState<Set<number>>(new Set());
   const [unavailableProposalIds, setUnavailableProposalIds] = useState<Set<number>>(new Set());
   const [manualProposalUpdates, setManualProposalUpdates] = useState<Map<number, string>>(new Map());
@@ -3203,11 +3803,17 @@ function OpportunityTable({
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setRemovedIds(new Set());
     setPendingRemoval(null);
+    setActionError("");
     setUnavailableProposalIds(new Set());
     setManualProposalUpdates(new Map());
+    setColumnFilters(emptyTableColumnFilters);
   }, [resetKey]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const rowsWithSignals = useMemo(
     () => rows.map((item) => ({ item, signal: commercialSignal(item) })),
@@ -3215,8 +3821,34 @@ function OpportunityTable({
   );
 
   const filteredRows = useMemo(() => {
-    return rowsWithSignals.filter(({ item, signal }) => !removedIds.has(item.id) && (!commercialFilter || signal.className === commercialFilter));
-  }, [rowsWithSignals, commercialFilter, removedIds]);
+    const numericMatch = (value: number | null, minimum: string, maximum: string) => value !== null
+      && (!minimum || value >= Number(minimum)) && (!maximum || value <= Number(maximum));
+    const dateMatch = (value: string | null, from: string, to: string) => {
+      if (!from && !to) return true;
+      const timestamp = parseDate(value);
+      if (timestamp === null) return false;
+      const start = from ? new Date(`${from}T00:00:00`).getTime() : null;
+      const end = to ? new Date(`${to}T23:59:59.999`).getTime() : null;
+      return (start === null || timestamp >= start) && (end === null || timestamp <= end);
+    };
+    const entityNeedle = normalizedSearchTerm(columnFilters.entity);
+    const processNeedle = normalizedSearchTerm(columnFilters.process);
+    const descriptionNeedle = normalizedSearchTerm(columnFilters.description);
+    return rowsWithSignals.filter(({ item, signal }) => {
+      if (commercialFilter && signal.className !== commercialFilter) return false;
+      if (columnFilters.priority && item.priority.toUpperCase() !== columnFilters.priority) return false;
+      if (entityNeedle && !normalizedSearchTerm(item.entity).includes(entityNeedle)) return false;
+      if (processNeedle && !normalizedSearchTerm(item.nomenclature).includes(processNeedle)) return false;
+      if (descriptionNeedle && !normalizedSearchTerm(item.description).includes(descriptionNeedle)) return false;
+      if (!dateMatch(item.publication_date, columnFilters.publicationFrom, columnFilters.publicationTo)) return false;
+      if (!dateMatch(item.consultation_deadline, columnFilters.consultationFrom, columnFilters.consultationTo)) return false;
+      if ((columnFilters.consultationDaysMin || columnFilters.consultationDaysMax) && !numericMatch(remainingWholeDays(item.consultation_deadline, countdownNow), columnFilters.consultationDaysMin, columnFilters.consultationDaysMax)) return false;
+      if (!dateMatch(presentationDeadline(item), columnFilters.proposalFrom, columnFilters.proposalTo)) return false;
+      if ((columnFilters.proposalDaysMin || columnFilters.proposalDaysMax) && !numericMatch(remainingWholeDays(presentationDeadline(item), countdownNow), columnFilters.proposalDaysMin, columnFilters.proposalDaysMax)) return false;
+      if (columnFilters.amountReserved) return !Number.isFinite(item.amount) || item.amount <= 0;
+      return !(columnFilters.amountMin || columnFilters.amountMax) || numericMatch(item.amount, columnFilters.amountMin, columnFilters.amountMax);
+    });
+  }, [rowsWithSignals, commercialFilter, columnFilters, countdownNow]);
 
   const sortedRows = useMemo(() => {
     return [...filteredRows].sort((left, right) => {
@@ -3224,18 +3856,12 @@ function OpportunityTable({
       if (commercialResult !== 0) return commercialResult;
       const dateResult = compareValues(parseDate(left.item.publication_date), parseDate(right.item.publication_date));
       if (dateResult !== 0) return -dateResult;
-      const leftValue = sortValue(left.item, left.signal, sort.key);
-      const rightValue = sortValue(right.item, right.signal, sort.key);
-      const result = compareValues(leftValue, rightValue);
-      return sort.direction === "asc" ? result : -result;
+      return right.item.id - left.item.id;
     });
-  }, [filteredRows, sort]);
+  }, [filteredRows]);
 
-  function updateSort(key: SortKey) {
-    setSort((current) => ({
-      key,
-      direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
-    }));
+  function updateColumnFilter(key: keyof TableColumnFilters, value: string | boolean) {
+    setColumnFilters((current) => ({ ...current, [key]: value }));
   }
 
   function syncTableScroll(source: "top" | "table") {
@@ -3258,10 +3884,18 @@ function OpportunityTable({
     setPendingRemoval(item);
   }
 
-  function removePendingRow() {
+  async function removePendingRow() {
     if (!pendingRemoval) return;
-    setRemovedIds((current) => new Set(current).add(pendingRemoval.id));
-    setPendingRemoval(null);
+    setActionPending(true);
+    setActionError("");
+    try {
+      await onProcessAction(pendingRemoval);
+      setPendingRemoval(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "No se pudo completar la acción");
+    } finally {
+      setActionPending(false);
+    }
   }
 
   async function revalidateRow(item: Opportunity) {
@@ -3303,10 +3937,7 @@ function OpportunityTable({
           ))}
         </div>
         <div className="table-action-buttons">
-          <button className="clear-fields-button" type="button" onClick={onRequestClearFields}>
-            Limpiar Campos
-          </button>
-          <button className="export-excel-button" type="button" onClick={() => exportOpportunitiesToExcel(sortedRows, "Oportunidades GovRadar")}>
+          <button className="export-excel-button" type="button" onClick={() => void exportOpportunitiesToExcel(token, sortedRows, "Oportunidades GovRadar", country)}>
             <img src={excelLogoUrl} alt="" aria-hidden="true" />
             <span>Exportar a Excel</span>
           </button>
@@ -3319,18 +3950,39 @@ function OpportunityTable({
         <table>
           <thead>
             <tr>
-              <SortableTh label="Prioridad" sortKey="priority" sort={sort} onSort={updateSort} />
-              <SortableTh label="Semaforo\ncomercial" sortKey="commercial" sort={sort} onSort={updateSort} />
-              <SortableTh label="Entidad" sortKey="entity" sort={sort} onSort={updateSort} />
-              <SortableTh label="Proceso" sortKey="nomenclature" sort={sort} onSort={updateSort} />
+              <FilterTh label="Prioridad" active={Boolean(columnFilters.priority)} onClear={() => updateColumnFilter("priority", "")}>
+                <label>Prioridad<select value={columnFilters.priority} onChange={(event) => updateColumnFilter("priority", event.target.value)}><option value="">Todas</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></label>
+              </FilterTh>
+              <th><span className="plain-header">Semaforo<br />comercial</span></th>
+              <FilterTh label="Entidad" active={Boolean(columnFilters.entity)} onClear={() => updateColumnFilter("entity", "")}>
+                <label>Nombre de entidad<input value={columnFilters.entity} onChange={(event) => updateColumnFilter("entity", event.target.value)} placeholder="Escribir entidad" /></label>
+              </FilterTh>
+              <FilterTh label="Proceso" active={Boolean(columnFilters.process)} onClear={() => updateColumnFilter("process", "")}>
+                <label>Nomenclatura<input value={columnFilters.process} onChange={(event) => updateColumnFilter("process", event.target.value)} placeholder="Escribir proceso" /></label>
+              </FilterTh>
               <th><span className="plain-header">Documentos</span></th>
-              <SortableTh label="Descripcion" sortKey="description" sort={sort} onSort={updateSort} />
-              <SortableTh label="Fecha de\nconvocatoria" sortKey="publication_date" sort={sort} onSort={updateSort} />
-              <SortableTh label="Fin\nConsultas" sortKey="consultation_deadline" sort={sort} onSort={updateSort} />
-              <SortableTh label="Dias\nConsultas" sortKey="days_consultation" sort={sort} onSort={updateSort} />
-              <SortableTh label="Fin\nPropuesta" sortKey="proposal_deadline" sort={sort} onSort={updateSort} />
-              <SortableTh label="Dias\nPropuesta" sortKey="days_proposal" sort={sort} onSort={updateSort} />
-              <SortableTh label="Monto" sortKey="amount" sort={sort} onSort={updateSort} />
+              <FilterTh label="Descripcion" active={Boolean(columnFilters.description)} onClear={() => updateColumnFilter("description", "")}>
+                <label>Descripción<input value={columnFilters.description} onChange={(event) => updateColumnFilter("description", event.target.value)} placeholder="Escribir descripción" /></label>
+              </FilterTh>
+              <FilterTh label="Fecha de\nconvocatoria" active={Boolean(columnFilters.publicationFrom || columnFilters.publicationTo)} onClear={() => setColumnFilters((current) => ({ ...current, publicationFrom: "", publicationTo: "" }))}>
+                <DateRangeFilter from={columnFilters.publicationFrom} to={columnFilters.publicationTo} onFromChange={(value) => updateColumnFilter("publicationFrom", value)} onToChange={(value) => updateColumnFilter("publicationTo", value)} />
+              </FilterTh>
+              <FilterTh label="Fin\nConsultas" active={Boolean(columnFilters.consultationFrom || columnFilters.consultationTo)} onClear={() => setColumnFilters((current) => ({ ...current, consultationFrom: "", consultationTo: "" }))}>
+                <DateRangeFilter from={columnFilters.consultationFrom} to={columnFilters.consultationTo} onFromChange={(value) => updateColumnFilter("consultationFrom", value)} onToChange={(value) => updateColumnFilter("consultationTo", value)} />
+              </FilterTh>
+              <FilterTh label="Dias\nConsultas" active={Boolean(columnFilters.consultationDaysMin || columnFilters.consultationDaysMax)} onClear={() => setColumnFilters((current) => ({ ...current, consultationDaysMin: "", consultationDaysMax: "" }))}>
+                <NumberRangeFilter unit="días" minimum={columnFilters.consultationDaysMin} maximum={columnFilters.consultationDaysMax} onMinimumChange={(value) => updateColumnFilter("consultationDaysMin", value)} onMaximumChange={(value) => updateColumnFilter("consultationDaysMax", value)} />
+              </FilterTh>
+              <FilterTh label="Fin\nPropuesta" active={Boolean(columnFilters.proposalFrom || columnFilters.proposalTo)} onClear={() => setColumnFilters((current) => ({ ...current, proposalFrom: "", proposalTo: "" }))}>
+                <DateRangeFilter from={columnFilters.proposalFrom} to={columnFilters.proposalTo} onFromChange={(value) => updateColumnFilter("proposalFrom", value)} onToChange={(value) => updateColumnFilter("proposalTo", value)} />
+              </FilterTh>
+              <FilterTh label="Dias\nPropuesta" active={Boolean(columnFilters.proposalDaysMin || columnFilters.proposalDaysMax)} onClear={() => setColumnFilters((current) => ({ ...current, proposalDaysMin: "", proposalDaysMax: "" }))}>
+                <NumberRangeFilter unit="días" minimum={columnFilters.proposalDaysMin} maximum={columnFilters.proposalDaysMax} onMinimumChange={(value) => updateColumnFilter("proposalDaysMin", value)} onMaximumChange={(value) => updateColumnFilter("proposalDaysMax", value)} />
+              </FilterTh>
+              <FilterTh label="Monto" align="right" active={Boolean(columnFilters.amountMin || columnFilters.amountMax || columnFilters.amountReserved)} onClear={() => setColumnFilters((current) => ({ ...current, amountMin: "", amountMax: "", amountReserved: false }))}>
+                <NumberRangeFilter unit="soles o pesos" minimum={columnFilters.amountMin} maximum={columnFilters.amountMax} disabled={columnFilters.amountReserved} onMinimumChange={(value) => updateColumnFilter("amountMin", value)} onMaximumChange={(value) => updateColumnFilter("amountMax", value)} />
+                <label className="reserved-amount-filter"><input type="checkbox" checked={columnFilters.amountReserved} onChange={(event) => setColumnFilters((current) => ({ ...current, amountReserved: event.target.checked, amountMin: event.target.checked ? "" : current.amountMin, amountMax: event.target.checked ? "" : current.amountMax }))} /><span>Monto reservado</span></label>
+              </FilterTh>
             </tr>
           </thead>
           <tbody>
@@ -3341,11 +3993,14 @@ function OpportunityTable({
                 key={item.id}
                 onOpenDocuments={setSelectedOpportunity}
                 onRemove={confirmRemove}
+                actionMode={actionMode}
+                allowRevalidation={allowRevalidation}
                 onRevalidateProposal={revalidateRow}
                 isRevalidating={revalidatingIds.has(item.id)}
                 proposalUnavailable={unavailableProposalIds.has(item.id)}
                 highlightTerms={highlightTerms}
                 manualProposalUpdatedAt={manualProposalUpdates.get(item.id) || null}
+                countdownNow={countdownNow}
               />
             ))}
           </tbody>
@@ -3361,14 +4016,17 @@ function OpportunityTable({
       ) : null}
       {pendingRemoval ? (
         <ConfirmModal
-          title="Retirar de esta vista"
-          message="Estas seguro de retirar? Para recuperar tendras que filtrar nuevamente o ingresar la nomenclatura."
-          confirmLabel="Si, retirar"
+          title={actionMode === "archive" ? "Retirar de esta vista" : "Regresar al módulo Oportunidades"}
+          message={actionMode === "archive"
+            ? "¿Está seguro de retirar este proceso? Se moverá al histórico y quedará excluido de las actualizaciones automáticas."
+            : "¿Está seguro de regresar este proceso al módulo Oportunidades? Volverá a participar en las actualizaciones automáticas."}
+          confirmLabel={actionPending ? "Procesando..." : actionMode === "archive" ? "Sí, retirar" : "Sí, regresar"}
           cancelLabel="No"
           onConfirm={removePendingRow}
           onCancel={() => setPendingRemoval(null)}
         />
       ) : null}
+      {actionError ? <div className="notice danger archive-action-notice" role="alert">{actionError}</div> : null}
     </>
   );
 }
@@ -3403,6 +4061,49 @@ function SortableTh({
   );
 }
 
+function FilterTh({ label, active, onClear, align = "left", children }: {
+  label: string;
+  active: boolean;
+  onClear: () => void;
+  align?: "left" | "right";
+  children: React.ReactNode;
+}) {
+  const labelParts = label.split(/\\n|\n/);
+  return (
+    <th className="filter-table-header">
+      <div className="filter-header">
+        <span>{labelParts.map((part, index) => <React.Fragment key={`${part}-${index}`}>{part}{index < labelParts.length - 1 ? <br /> : null}</React.Fragment>)}</span>
+        <details className={`column-filter ${active ? "active" : ""} ${align === "right" ? "align-right" : ""}`}>
+          <summary
+            aria-label={`Filtrar por ${label.replace("\\n", " ")}`}
+            title={`Filtrar por ${label.replace("\\n", " ")}`}
+            onClick={(event) => {
+              const current = event.currentTarget.closest("details");
+              document.querySelectorAll<HTMLDetailsElement>("details.column-filter[open]").forEach((details) => {
+                if (details !== current) details.removeAttribute("open");
+              });
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.75" /><path d="m15 15 4.25 4.25" /></svg>
+          </summary>
+          <div className="column-filter-panel">
+            {children}
+            {active ? <button className="column-filter-clear" type="button" onClick={(event) => { onClear(); event.currentTarget.closest("details")?.removeAttribute("open"); }}>Limpiar filtro</button> : null}
+          </div>
+        </details>
+      </div>
+    </th>
+  );
+}
+
+function DateRangeFilter({ from, to, onFromChange, onToChange }: { from: string; to: string; onFromChange: (value: string) => void; onToChange: (value: string) => void }) {
+  return <div className="column-filter-fields"><label>Desde<input type="date" value={from} onChange={(event) => onFromChange(event.target.value)} /></label><label>Hasta<input type="date" value={to} min={from || undefined} onChange={(event) => onToChange(event.target.value)} /></label></div>;
+}
+
+function NumberRangeFilter({ unit, minimum, maximum, disabled = false, onMinimumChange, onMaximumChange }: { unit: string; minimum: string; maximum: string; disabled?: boolean; onMinimumChange: (value: string) => void; onMaximumChange: (value: string) => void }) {
+  return <div className="column-filter-fields"><span className="column-filter-unit">Rango en {unit}</span><label>Desde<input type="number" value={minimum} disabled={disabled} onChange={(event) => onMinimumChange(event.target.value)} placeholder="Mínimo" /></label><label>Hasta<input type="number" value={maximum} disabled={disabled} min={minimum || undefined} onChange={(event) => onMaximumChange(event.target.value)} placeholder="Máximo" /></label></div>;
+}
+
 function OpportunityRow({
   item,
   signal,
@@ -3413,6 +4114,9 @@ function OpportunityRow({
   proposalUnavailable,
   highlightTerms,
   manualProposalUpdatedAt,
+  countdownNow,
+  actionMode,
+  allowRevalidation,
 }: {
   item: Opportunity;
   signal: ReturnType<typeof commercialSignal>;
@@ -3423,8 +4127,12 @@ function OpportunityRow({
   proposalUnavailable: boolean;
   highlightTerms: string[];
   manualProposalUpdatedAt: string | null;
+  countdownNow: number;
+  actionMode: "archive" | "restore";
+  allowRevalidation: boolean;
 }) {
   const proposalDeadline = presentationDeadline(item);
+  const isLargePurchase = item.source.toLowerCase() === "mercado_publico_grandes_compras";
   return (
     <tr>
       <td><span className={`priority p${item.priority}`}>{item.priority}</span></td>
@@ -3440,8 +4148,13 @@ function OpportunityRow({
       <td>{item.entity}</td>
       <td>
         <div className="process-cell">
-          <span>{item.nomenclature}</span>
-          <button className="remove-view-button" type="button" onClick={() => onRemove(item)}>Retirar de esta vista</button>
+          <div className="process-identifier">
+            <span>{item.nomenclature}</span>
+            {isLargePurchase ? <span className="large-purchase-badge" title="Gran Compra">GC</span> : null}
+          </div>
+          <button className={`remove-view-button ${actionMode === "restore" ? "restore-view-button" : ""}`} type="button" onClick={() => onRemove(item)}>
+            {actionMode === "restore" ? "Regresar al módulo Oportunidades" : "Retirar de esta vista"}
+          </button>
         </div>
       </td>
       <td>
@@ -3452,7 +4165,7 @@ function OpportunityRow({
       <td><HighlightedText text={item.description} terms={highlightTerms} /></td>
       <td>{formatDate(item.publication_date)}</td>
       <td>{formatDate(item.consultation_deadline)}</td>
-      <td>{formatDays(daysUntil(item.consultation_deadline))}</td>
+      <td>{formatDeadlineCountdown(item.consultation_deadline, countdownNow)}</td>
       <td>
         {proposalDeadline ? (
           manualProposalUpdatedAt ? (
@@ -3463,6 +4176,8 @@ function OpportunityRow({
           ) : (
             formatDate(proposalDeadline)
           )
+        ) : !allowRevalidation ? (
+          "-"
         ) : proposalUnavailable ? (
           <span className="proposal-unavailable">Fecha no Disponible en Seace</span>
         ) : (
@@ -3478,8 +4193,8 @@ function OpportunityRow({
           </button>
         )}
       </td>
-      <td>{formatDays(daysUntil(proposalDeadline))}</td>
-      <td>{formatMoney(item.amount)}</td>
+      <td>{formatDeadlineCountdown(proposalDeadline, countdownNow)}</td>
+      <td>{formatMoney(item.amount, sourceBelongsToCountry(item.source, "Chile") ? "Chile" : "Peru")}</td>
     </tr>
   );
 }
@@ -3526,6 +4241,9 @@ function OpportunityDetailModal({
   }, [opportunity.id]);
 
   const proposalDeadline = presentationDeadline(opportunity);
+  const emptyDocumentsText = sourceBelongsToCountry(opportunity.source, "Chile")
+    ? "Aun no hay documentos registrados. Usa Buscar documentos para consultar MercadoPublico.cl desde backend."
+    : "Aun no hay documentos registrados. Usa Buscar documentos para consultar SEACE desde backend.";
   const ocdsMetadata = [
     ["RUC comprador", opportunity.buyer_ruc],
     ["Region", opportunity.region],
@@ -3607,7 +4325,7 @@ function OpportunityDetailModal({
                 );
               })}
               {!documents.length && !loading ? (
-                <Empty text="Aun no hay documentos registrados. Usa Buscar documentos para consultar SEACE desde backend." />
+                <Empty text={emptyDocumentsText} />
               ) : null}
             </div>
           </article>
@@ -3617,17 +4335,30 @@ function OpportunityDetailModal({
   );
 }
 
-function formatDays(value: number | null) {
-  if (value === null) return "-";
-  if (value < 0) {
-    return (
-      <span className="overdue-days">
-        <span>Vencido hace</span>
-        <b>{Math.abs(value)} dias</b>
-      </span>
-    );
-  }
-  return `${value}`;
+function remainingWholeDays(value: string | null, now: number) {
+  const timestamp = parseDate(value);
+  if (timestamp === null) return null;
+  return Math.max(0, Math.floor((timestamp - now) / (24 * 60 * 60 * 1000)));
+}
+
+function formatDeadlineCountdown(value: string | null, now: number) {
+  const timestamp = parseDate(value);
+  if (timestamp === null) return "-";
+  const difference = timestamp - now;
+  const expired = difference < 0;
+  const totalHours = Math.floor(Math.abs(difference) / (60 * 60 * 1000));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  const urgency = expired ? "expired" : days <= 3 ? "urgent" : days <= 7 ? "warning" : "safe";
+  const dayLabel = days === 1 ? "día" : "días";
+  const expiredLabel = totalHours < 24
+    ? `Fuera de Plazo hace ${totalHours} ${totalHours === 1 ? "hora" : "horas"}`
+    : `Fuera de Plazo hace ${days} ${dayLabel}`;
+  return (
+    <strong className={`deadline-countdown ${urgency}`} title={formatDate(value)}>
+      {expired ? expiredLabel : `${days} ${dayLabel} ${hours} h para fin`}
+    </strong>
+  );
 }
 
 function sortValue(item: Opportunity, signal: ReturnType<typeof commercialSignal>, key: SortKey) {
@@ -4252,6 +4983,90 @@ function Users({ token, currentUserId }: { token: string; currentUserId: number 
   );
 }
 
+function SchedulerScheduleAdmin({ token }: { token: string }) {
+  const [configs, setConfigs] = useState<Record<"peru" | "chile", SchedulerIntervalConfig | null>>({ peru: null, chile: null });
+  const [savingCountry, setSavingCountry] = useState<"peru" | "chile" | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    Promise.all((["peru", "chile"] as const).map((country) => api.schedulerIntervalConfig(token, country)))
+      .then(([peru, chile]) => { if (active) setConfigs({ peru, chile }); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "No se pudo cargar la programación automática"); });
+    return () => { active = false; };
+  }, [token]);
+
+  function updateValue(country: "peru" | "chile", field: "days" | "hours" | "minutes", value: number) {
+    setConfigs((current) => {
+      const existing = current[country];
+      if (!existing) return current;
+      const updated = { ...existing, [field]: value };
+      updated.interval_seconds = updated.days * 86_400 + updated.hours * 3_600 + updated.minutes * 60;
+      return { ...current, [country]: updated };
+    });
+    setNotice("");
+    setError("");
+  }
+
+  async function save(country: "peru" | "chile") {
+    const config = configs[country];
+    if (!config) return;
+    if (config.days === 0 && config.hours === 0 && config.minutes === 0) {
+      setError("El intervalo debe ser de al menos un minuto.");
+      return;
+    }
+    setSavingCountry(country);
+    setError("");
+    setNotice("");
+    try {
+      const updated = await api.updateSchedulerIntervalConfig(token, country, config);
+      setConfigs((current) => ({ ...current, [country]: updated }));
+      setNotice(`Programación de ${country === "peru" ? "Perú" : "Chile"} actualizada. La próxima ejecución ya usa el nuevo intervalo.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo actualizar la programación");
+    } finally {
+      setSavingCountry(null);
+    }
+  }
+
+  return (
+    <section className="panel scheduler-admin-panel" aria-labelledby="scheduler-admin-title">
+      <div className="scheduler-admin-heading">
+        <div>
+          <p className="overline">Automatización por país</p>
+          <h2 id="scheduler-admin-title">Configuración del rango de updates automáticos</h2>
+          <p>Define cada cuánto se ejecutará el radar. El cambio actualiza de inmediato Inicio y la cuenta regresiva de Última ejecución.</p>
+        </div>
+      </div>
+      <div className="scheduler-country-grid">
+        {(["peru", "chile"] as const).map((country) => {
+          const config = configs[country];
+          const label = country === "peru" ? "Perú" : "Chile";
+          return (
+            <article className="scheduler-country-config" key={country} aria-busy={!config}>
+              <div className="scheduler-country-heading"><strong>{label}</strong><span>{config ? `Cada ${updateIntervalLabel(config.interval_seconds)}` : "Cargando…"}</span></div>
+              {config ? <>
+                <div className="scheduler-duration-fields">
+                  <label>Días<input type="number" min="0" max="30" value={config.days} onChange={(event) => updateValue(country, "days", Math.max(0, Math.min(30, Number(event.target.value))))} /></label>
+                  <label>Horas<input type="number" min="0" max="23" value={config.hours} onChange={(event) => updateValue(country, "hours", Math.max(0, Math.min(23, Number(event.target.value))))} /></label>
+                  <label>Minutos<input type="number" min="0" max="59" value={config.minutes} onChange={(event) => updateValue(country, "minutes", Math.max(0, Math.min(59, Number(event.target.value))))} /></label>
+                </div>
+                <div className="scheduler-country-actions">
+                  <small>{config.next_update_at ? `Próximo update: ${new Date(config.next_update_at).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })}` : "El scheduler se encuentra pausado"}</small>
+                  <button className="primary" type="button" onClick={() => save(country)} disabled={savingCountry !== null}>{savingCountry === country ? "Guardando…" : `Guardar ${label}`}</button>
+                </div>
+              </> : <p>Cargando configuración…</p>}
+            </article>
+          );
+        })}
+      </div>
+      {error ? <div className="notice danger" role="alert">{error}</div> : null}
+      {notice ? <div className="notice success" role="status">{notice}</div> : null}
+    </section>
+  );
+}
+
 function System({
   token,
   runs,
@@ -4274,6 +5089,11 @@ function System({
   onVersionUpdated: (versionLabel: string) => void;
 }) {
   const [versionDraft, setVersionDraft] = useState(versionLabel);
+  const [scoringCountry, setScoringCountry] = useState<"peru" | "chile">("peru");
+  const [scoringConfig, setScoringConfig] = useState<import("./api").ScoringConfig | null>(null);
+  const [scoringSaving, setScoringSaving] = useState(false);
+  const [scoringError, setScoringError] = useState("");
+  const [scoringNotice, setScoringNotice] = useState("");
   const [versionSaving, setVersionSaving] = useState(false);
   const [versionError, setVersionError] = useState("");
   const [versionNotice, setVersionNotice] = useState("");
@@ -4292,6 +5112,63 @@ function System({
   ];
 
   useEffect(() => setVersionDraft(versionLabel), [versionLabel]);
+
+  useEffect(() => {
+    setScoringConfig(null);
+    setScoringError("");
+    setScoringNotice("");
+    api.scoringConfig(token, scoringCountry)
+      .then(setScoringConfig)
+      .catch((err) => setScoringError(err instanceof Error ? err.message : "No se pudo cargar la configuración"));
+  }, [token, scoringCountry]);
+
+  function updateScoringField(field: "priority_a_min" | "priority_b_min" | "attractive_amount_min", value: number) {
+    setScoringConfig((current) => current ? { ...current, [field]: value } : current);
+    setScoringNotice("");
+  }
+
+  function updateScoringFactor(key: string, changes: { points?: number; enabled?: boolean; value?: string; label?: string; value_type?: "list" | "number" | "text"; field?: "description" | "entity" | "region" | "amount" | "origin" | "status" }) {
+    setScoringConfig((current) => current ? {
+      ...current,
+      factors: { ...current.factors, [key]: { ...current.factors[key], ...changes } },
+    } : current);
+    setScoringNotice("");
+  }
+
+  async function saveScoring(event: React.FormEvent) {
+    event.preventDefault();
+    if (!scoringConfig) return;
+    setScoringSaving(true); setScoringError(""); setScoringNotice("");
+    try {
+      const updated = await api.updateScoringConfig(token, scoringCountry, scoringConfig);
+      setScoringConfig(updated);
+      setScoringNotice(`Configuración de ${scoringCountry === "peru" ? "Perú" : "Chile"} actualizada. Se aplicará en las próximas corridas.`);
+    } catch (err) {
+      setScoringError(err instanceof Error ? err.message : "No se pudo guardar la configuración");
+    } finally { setScoringSaving(false); }
+  }
+
+  const scoringMaximum = scoringConfig ? (() => {
+    const statusKeys = new Set(["queries_and_proposal", "proposal_only", "evaluation"]);
+    const additive = Object.entries(scoringConfig.factors).filter(([key, factor]) => factor.enabled && factor.points > 0 && !statusKeys.has(key)).reduce((sum, [, factor]) => sum + factor.points, 0);
+    const statusMaximum = Math.max(0, ...Object.entries(scoringConfig.factors).filter(([key, factor]) => statusKeys.has(key) && factor.enabled).map(([, factor]) => factor.points));
+    return additive + statusMaximum;
+  })() : 0;
+  const fixedSystemFactorKeys = new Set(["quick_purchase", "queries_and_proposal", "proposal_only", "evaluation", "closed"]);
+
+  function addScoringFactor() {
+    const key = `custom_${Date.now()}`;
+    setScoringConfig((current) => current ? { ...current, factors: { ...current.factors, [key]: { label: "Nuevo factor", value: "valor", points: 0, enabled: true, value_type: "list", field: "description" } } } : current);
+    setScoringNotice("");
+  }
+
+  function removeScoringFactor(key: string) {
+    setScoringConfig((current) => {
+      if (!current) return current;
+      const factors = { ...current.factors }; delete factors[key];
+      return { ...current, factors };
+    });
+  }
 
   async function saveVersionLabel(event: React.FormEvent) {
     event.preventDefault();
@@ -4340,6 +5217,43 @@ function System({
 
   return (
     <div className="system-module">
+      <SchedulerScheduleAdmin token={token} />
+      <section className="panel scoring-admin-panel" aria-labelledby="scoring-admin-title">
+        <div className="scoring-admin-heading">
+          <div>
+            <p className="overline">Priorización comercial</p>
+            <h2 id="scoring-admin-title">Configuración del score</h2>
+            <p>Define los pesos y umbrales por país. Los cambios se aplican a las próximas búsquedas y actualizaciones automáticas.</p>
+          </div>
+          <div className="country-config-tabs" role="tablist" aria-label="País a configurar">
+            {(["peru", "chile"] as const).map((country) => <button key={country} type="button" role="tab" aria-selected={scoringCountry === country} className={scoringCountry === country ? "active" : ""} onClick={() => setScoringCountry(country)}>{country === "peru" ? "Perú" : "Chile"}</button>)}
+          </div>
+        </div>
+        {scoringConfig ? <form onSubmit={saveScoring}>
+          <div className="scoring-thresholds">
+            <label>Prioridad A desde<input type="number" min="1" max="100" value={scoringConfig.priority_a_min} onChange={(e) => updateScoringField("priority_a_min", Number(e.target.value))} /></label>
+            <label>Prioridad B desde<input type="number" min="0" max="99" value={scoringConfig.priority_b_min} onChange={(e) => updateScoringField("priority_b_min", Number(e.target.value))} /></label>
+            <label>Prioridad C desde<input type="number" value="0" disabled /></label>
+          </div>
+          <div className={`scoring-sum ${scoringMaximum === 100 ? "valid" : "invalid"}`} role="status"><span>Máximo score positivo alcanzable</span><strong>{scoringMaximum} / 100 puntos</strong><small>Los estados comerciales son excluyentes; se considera únicamente el mayor puntaje del grupo.</small></div>
+          <div className="scoring-factor-list">
+            <div className="scoring-factor-header"><span>Factor</span><span>Valor considerado</span><span>Puntos</span><span>Aplicar</span></div>
+            {Object.entries(scoringConfig.factors).map(([key, factor]) => <div className={`scoring-factor-row ${factor.enabled ? "" : "disabled"} ${fixedSystemFactorKeys.has(key) ? "has-locked-value" : ""}`} key={key}>
+              <div className="score-factor-identity">{key.startsWith("custom_") ? <input value={factor.label} aria-label="Nombre del factor" onChange={(e) => updateScoringFactor(key, { label: e.target.value })} /> : <label htmlFor={`score-${scoringCountry}-${key}`}>{factor.label}</label>}{fixedSystemFactorKeys.has(key) ? <span className="locked-value-badge">Bloqueado</span> : null}{key.startsWith("custom_") ? <><select value={factor.field} aria-label={`Campo para ${factor.label}`} onChange={(e) => { const field = e.target.value as "description" | "entity" | "region" | "amount" | "origin" | "status"; updateScoringFactor(key, { field, value_type: field === "amount" ? "number" : field === "origin" ? "text" : "list" }); }}><option value="description">Descripción/objeto</option><option value="entity">Entidad</option><option value="region">Región</option><option value="amount">Monto mínimo</option><option value="origin">Origen</option><option value="status">Estado comercial</option></select><button className="text-action score-remove-factor" type="button" onClick={() => removeScoringFactor(key)}>Eliminar</button></> : null}</div>
+              <input className="score-factor-value" type={factor.value_type === "number" ? "number" : "text"} min={factor.value_type === "number" ? 0 : undefined} step={factor.value_type === "number" ? 1000 : undefined} value={factor.value} disabled={!factor.enabled} readOnly={fixedSystemFactorKeys.has(key)} aria-readonly={fixedSystemFactorKeys.has(key)} title={fixedSystemFactorKeys.has(key) ? "Valor definido por la lógica del sistema" : undefined} onChange={(e) => {
+                updateScoringFactor(key, { value: e.target.value });
+                if (key === "attractive_amount") updateScoringField("attractive_amount_min", Number(e.target.value));
+              }} />
+              <input id={`score-${scoringCountry}-${key}`} type="number" min="-100" max="100" value={factor.points} disabled={!factor.enabled} onChange={(e) => updateScoringFactor(key, { points: Number(e.target.value) })} />
+              <label className="score-toggle"><input type="checkbox" checked={factor.enabled} onChange={(e) => updateScoringFactor(key, { enabled: e.target.checked })} /><span>{factor.enabled ? "Activo" : "No aplica"}</span></label>
+            </div>)}
+          </div>
+          <button className="ghost add-score-factor" type="button" onClick={addScoringFactor}>+ Agregar factor</button>
+          <div className="scoring-actions"><p>{scoringMaximum !== 100 ? "Ajusta los puntos hasta alcanzar exactamente 100 antes de guardar." : scoringCountry === "chile" ? "En Chile, Entidad objetivo y Compra rápida están desactivados por defecto." : "Configuración independiente para procesos de Perú."}</p><button className="primary" type="submit" disabled={scoringSaving || scoringConfig.priority_b_min >= scoringConfig.priority_a_min || scoringMaximum !== 100}>{scoringSaving ? "Guardando…" : `Guardar configuración de ${scoringCountry === "peru" ? "Perú" : "Chile"}`}</button></div>
+          {scoringError ? <div className="notice danger" role="alert">{scoringError}</div> : null}
+          {scoringNotice ? <div className="notice success" role="status">{scoringNotice}</div> : null}
+        </form> : scoringError ? <div className="notice danger" role="alert">{scoringError}</div> : <p>Cargando configuración…</p>}
+      </section>
       <section className="panel version-admin-panel" aria-labelledby="version-admin-title">
         <div className="version-admin-heading">
           <div>

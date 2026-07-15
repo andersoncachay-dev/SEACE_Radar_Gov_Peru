@@ -13,7 +13,7 @@ from src.keyword_matching import contains_complete_phrase
 
 from ..config import settings
 from ..database import SessionLocal
-from ..models import ScrapeRun, SearchProfile
+from ..models import Opportunity, ScrapeRun, SearchProfile
 from .ingestion_service import upsert_opportunities
 from .notification_service import evaluate_alerts, evaluate_new_opportunity_alerts, send_pending_alerts
 
@@ -87,7 +87,7 @@ def _filter_dataframe_period(rows: Any, payload: dict):
         return rows
     years = _period_values(payload, "years", "year")
     months = _period_values(payload, "months", "month")
-    if not years and not months:
+    if not years and not months and not payload.get("publication_date_from") and not payload.get("publication_date_to"):
         return rows
     date_column = "fecha_publicacion" if "fecha_publicacion" in rows.columns else "Fecha y Hora de Publicacion"
     if date_column not in rows.columns:
@@ -101,7 +101,96 @@ def _filter_dataframe_period(rows: Any, payload: dict):
     if months:
         month_mask = dates.dt.month.isin(months)
         mask = month_mask if mask is True else mask & month_mask
+    publication_from = payload.get("publication_date_from")
+    publication_to = payload.get("publication_date_to")
+    if publication_from:
+        from_mask = dates.dt.normalize() >= datetime.strptime(publication_from, "%Y-%m-%d")
+        mask = from_mask if mask is True else mask & from_mask
+    if publication_to:
+        to_mask = dates.dt.normalize() <= datetime.strptime(publication_to, "%Y-%m-%d")
+        mask = to_mask if mask is True else mask & to_mask
     return rows[mask].copy()
+
+
+def _terminal_status(value: Any) -> bool:
+    normalized = str(value or "").strip().casefold()
+    return any(term in normalized for term in ("cerrad", "culminad", "adjudicad", "desiert", "revocad", "seleccionad"))
+
+
+def _active_row_mask(rows: Any):
+    status_columns = [column for column in ("estado_comercial", "vigencia") if column in rows.columns]
+    terminal_mask = False
+    for column in status_columns:
+        column_mask = rows[column].fillna("").map(_terminal_status)
+        terminal_mask = column_mask if terminal_mask is False else terminal_mask | column_mask
+    active_mask = ~terminal_mask if terminal_mask is not False else rows.index.to_series().map(lambda _: True)
+    if "propuesta_fin" in rows.columns:
+        deadlines = rows["propuesta_fin"]
+        deadline_mask = deadlines.isna() | (deadlines > datetime.now())
+        active_mask = active_mask & deadline_mask
+    return active_mask
+
+
+def _existing_active_nomenclatures(db: Session, source: str) -> set[str]:
+    now = datetime.utcnow()
+    items = db.scalars(
+        select(Opportunity).where(
+            Opportunity.source == source,
+            Opportunity.is_archived.is_(False),
+        )
+    ).all()
+    return {
+        str(item.nomenclature or item.external_id).strip().casefold()
+        for item in items
+        if not _terminal_status(item.status)
+        and (item.proposal_deadline is None or item.proposal_deadline > now)
+        and str(item.nomenclature or item.external_id).strip()
+    }
+
+
+def _finalize_expired_opportunities(db: Session, source: str) -> int:
+    now = datetime.utcnow()
+    items = db.scalars(
+        select(Opportunity).where(
+            Opportunity.source == source,
+            Opportunity.is_archived.is_(False),
+            Opportunity.proposal_deadline.is_not(None),
+            Opportunity.proposal_deadline <= now,
+        )
+    ).all()
+    changed = 0
+    for item in items:
+        if not _terminal_status(item.status):
+            item.status = "Proceso Culminado"
+            changed += 1
+    if changed:
+        db.commit()
+    return changed
+
+
+def _filter_incremental_rows(rows: Any, payload: dict, existing_active: set[str], diagnostics: list[str]):
+    if rows is None or getattr(rows, "empty", True):
+        return rows
+    if not payload.get("automatic_incremental"):
+        return _filter_dataframe_period(rows, payload)
+    if "automatic_discovery" in rows.columns:
+        discovery = rows[rows["automatic_discovery"].fillna(False).astype(bool)].copy()
+    else:
+        discovery = _filter_dataframe_period(rows, payload)
+    if discovery is not None and not discovery.empty:
+        discovery = discovery[_active_row_mask(discovery)].copy()
+    nomenclature_column = "nomenclatura" if "nomenclatura" in rows.columns else "Nomenclatura"
+    if nomenclature_column in rows.columns and existing_active:
+        existing_mask = rows[nomenclature_column].fillna("").astype(str).str.strip().str.casefold().isin(existing_active)
+        revalidated = rows[existing_mask].copy()
+    else:
+        revalidated = rows.iloc[0:0].copy()
+    combined = rows.loc[discovery.index.union(revalidated.index)].copy()
+    diagnostics.append(
+        f"Incremental: {len(discovery)} nuevos/vigentes en ventana + "
+        f"{len(revalidated)} vigentes existentes revalidados; {len(combined)} filas unicas"
+    )
+    return combined
 
 
 def _filter_dataframe_keyword(rows: Any, keyword: str):
@@ -120,6 +209,28 @@ def _filter_dataframe_keyword(rows: Any, keyword: str):
         ),
         axis=1,
     )
+    return rows[mask].copy()
+
+
+def _filter_dataframe_entity(rows: Any, entity_filter: str | None):
+    if rows is None or getattr(rows, "empty", True) or not str(entity_filter or "").strip():
+        return rows
+    entity_column = "entidad" if "entidad" in rows.columns else "Entidad" if "Entidad" in rows.columns else None
+    if entity_column is None:
+        return rows.iloc[0:0].copy()
+    normalized_entity = str(entity_filter).strip().casefold()
+    mask = rows[entity_column].fillna("").astype(str).str.strip().str.casefold().eq(normalized_entity)
+    return rows[mask].copy()
+
+
+def _filter_dataframe_nomenclature(rows: Any, nomenclature: str | None):
+    if rows is None or getattr(rows, "empty", True) or not str(nomenclature or "").strip():
+        return rows
+    nomenclature_column = "nomenclatura" if "nomenclatura" in rows.columns else "Nomenclatura" if "Nomenclatura" in rows.columns else None
+    if nomenclature_column is None:
+        return rows.iloc[0:0].copy()
+    normalized_nomenclature = str(nomenclature).strip().casefold()
+    mask = rows[nomenclature_column].fillna("").astype(str).str.strip().str.casefold().eq(normalized_nomenclature)
     return rows[mask].copy()
 
 
@@ -143,11 +254,13 @@ def _schedule_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
-def _recent_consultation_rows(raw: Any, days: int = 30) -> int:
+def _recent_consultation_mask(raw: Any, days: int = 30) -> list[bool]:
     if raw is None or getattr(raw, "empty", True) or "consulta_fin" not in raw.columns:
-        return 0
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    count = 0
+        return []
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days)
+    ceiling = now + timedelta(days=days)
+    mask: list[bool] = []
     for value in raw["consulta_fin"]:
         parsed = None
         try:
@@ -162,9 +275,12 @@ def _recent_consultation_rows(raw: Any, days: int = 30) -> int:
                 parsed = None if pd.isna(parsed_value) else parsed_value.to_pydatetime()
             except Exception:
                 parsed = None
-        if isinstance(parsed, datetime) and parsed >= cutoff:
-            count += 1
-    return count
+        mask.append(isinstance(parsed, datetime) and cutoff <= parsed <= ceiling)
+    return mask
+
+
+def _recent_consultation_rows(raw: Any, days: int = 30) -> int:
+    return sum(_recent_consultation_mask(raw, days))
 
 
 def _merge_seace_schedule(raw, seace_raw, diagnostics: list[str]):
@@ -226,6 +342,13 @@ def _merge_seace_schedule(raw, seace_raw, diagnostics: list[str]):
     return merged
 
 
+def _mercado_publico_modes(include_grandes_compras: bool) -> list[tuple[str, str]]:
+    modes = [("licitaciones", "mercado_publico_browser")]
+    if include_grandes_compras:
+        modes.append(("grandes_compras", "mercado_publico_grandes_compras"))
+    return modes
+
+
 def execute_scrape_run(run_id: int, payload: dict) -> None:
     db: Session = SessionLocal()
     run = db.get(ScrapeRun, run_id)
@@ -259,6 +382,13 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
         period_text = ""
         if payload.get("year") or payload.get("month") or payload.get("years") or payload.get("months"):
             period_text = f" | anos={payload.get('years') or payload.get('year') or '-'} | meses={payload.get('months') or payload.get('month') or '-'}"
+        if payload.get("publication_date_from") or payload.get("publication_date_to"):
+            period_text += (
+                f" | publicados={payload.get('publication_date_from') or '-'}.."
+                f"{payload.get('publication_date_to') or '-'}"
+            )
+        if payload.get("active_only"):
+            period_text += " | solo_vigentes=True"
         commercial_mode = "all" if str(payload.get("commercial_mode", "active")).lower() == "all" else "active"
         config_line = (
             f"Configuracion: keyword={keyword} | max_resultados={max_results} | "
@@ -302,8 +432,11 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
             )
             update_progress(82, "Procesando resultados de SEACE")
             normalized = normalize_columns(raw) if raw is not None and not raw.empty else raw
+            normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
+            normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
             normalized = _filter_dataframe_keyword(normalized, keyword)
-            enriched = enriquecer_oportunidades(normalized) if normalized is not None and not normalized.empty else normalized
+            from .scoring_config_service import get_scoring_config
+            enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "peru")) if normalized is not None and not normalized.empty else normalized
             if enriched is not None and not enriched.empty and max_results:
                 enriched = enriched.head(max_results).copy()
             rows_found = upsert_opportunities(db, enriched, source, run_id=run.id)
@@ -315,11 +448,19 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
             rows_found = 0
             all_diagnostics = []
             mode_failures = []
-            for mode_index, (mode, persisted_source) in enumerate([
-                ("licitaciones", "mercado_publico_browser"),
-                ("grandes_compras", "mercado_publico_grandes_compras"),
-            ]):
+            modes = _mercado_publico_modes(settings.enable_chile_grandes_compras)
+            if not settings.enable_chile_grandes_compras:
+                all_diagnostics.append(
+                    "Mercado Publico grandes_compras: deshabilitado temporalmente; se consultaron solo licitaciones."
+                )
+            for mode_index, (mode, persisted_source) in enumerate(modes):
                 stage_start = 5 + mode_index * 40
+                existing_active = _existing_active_nomenclatures(db, persisted_source)
+                expired_count = _finalize_expired_opportunities(db, persisted_source)
+                if expired_count:
+                    all_diagnostics.append(
+                        f"Mercado Publico {mode}: {expired_count} procesos vencidos cerrados localmente"
+                    )
                 try:
                     raw, mode_diagnostics = search_mercado_publico(
                         keyword=keyword,
@@ -327,6 +468,10 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                         headless=True,
                         max_results=max_results,
                         enrich_details=bool(payload.get("enrich_details", False)) and mode == "licitaciones",
+                        enrich_closed_details=not bool(payload.get("skip_detail_enrichment", False)),
+                        publication_date_from=payload.get("publication_date_from"),
+                        publication_date_to=payload.get("publication_date_to"),
+                        include_active_revalidation=bool(payload.get("automatic_incremental")) and mode == "licitaciones",
                         max_details=max_details,
                         years=sorted(_period_values(payload, "years", "year")),
                         months=sorted(_period_values(payload, "months", "month")),
@@ -340,9 +485,12 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                     all_diagnostics.append(f"Mercado Publico {mode}: fallo parcial ({type(exc).__name__}: {exc})")
                     continue
                 normalized = normalize_columns(raw) if raw is not None and not raw.empty else raw
-                normalized = _filter_dataframe_period(normalized, payload)
+                normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
+                normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
+                normalized = _filter_incremental_rows(normalized, payload, existing_active, all_diagnostics)
                 normalized = _filter_dataframe_keyword(normalized, keyword)
-                enriched = enriquecer_oportunidades(normalized) if normalized is not None and not normalized.empty else normalized
+                from .scoring_config_service import get_scoring_config
+                enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "chile")) if normalized is not None and not normalized.empty else normalized
                 if enriched is not None and not enriched.empty and max_results:
                     enriched = enriched.head(max_results).copy()
                 rows_found += upsert_opportunities(db, enriched, persisted_source, run_id=run.id)
@@ -363,6 +511,10 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                 headless=True,
                 max_results=max_results,
                 enrich_details=bool(payload.get("enrich_details", False)),
+                enrich_closed_details=not bool(payload.get("skip_detail_enrichment", False)),
+                publication_date_from=payload.get("publication_date_from"),
+                publication_date_to=payload.get("publication_date_to"),
+                include_active_revalidation=bool(payload.get("automatic_incremental")) and mode == "licitaciones",
                 max_details=max_details,
                 years=sorted(_period_values(payload, "years", "year")),
                 months=sorted(_period_values(payload, "months", "month")),
@@ -371,10 +523,17 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
             )
             update_progress(82, "Procesando resultados de Mercado Público")
             normalized = normalize_columns(raw) if raw is not None and not raw.empty else raw
+            normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
+            normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
             if source.startswith("mercado_publico"):
-                normalized = _filter_dataframe_period(normalized, payload)
+                existing_active = _existing_active_nomenclatures(db, source)
+                expired_count = _finalize_expired_opportunities(db, source)
+                if expired_count:
+                    diagnostics.append(f"Mercado Publico {mode}: {expired_count} procesos vencidos cerrados localmente")
+                normalized = _filter_incremental_rows(normalized, payload, existing_active, diagnostics)
             normalized = _filter_dataframe_keyword(normalized, keyword)
-            enriched = enriquecer_oportunidades(normalized) if normalized is not None and not normalized.empty else normalized
+            from .scoring_config_service import get_scoring_config
+            enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "chile")) if normalized is not None and not normalized.empty else normalized
             if enriched is not None and not enriched.empty and max_results:
                 enriched = enriched.head(max_results).copy()
             rows_found = upsert_opportunities(db, enriched, source, run_id=run.id)
@@ -399,9 +558,22 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                 progress_callback=lambda value, message: update_progress(5 + value * 45, message),
                 cancel_callback=check_cancelled,
             )
+            existing_active = _existing_active_nomenclatures(db, source)
+            expired_count = _finalize_expired_opportunities(db, source)
+            if expired_count:
+                diagnostics.append(f"OCDS: {expired_count} procesos vencidos cerrados localmente")
+            raw = _filter_incremental_rows(raw, payload, existing_active, diagnostics)
             update_progress(55, f"{len(raw)} coincidencias encontradas en OCDS")
-            recent_rows = _recent_consultation_rows(raw, days=30)
-            should_enrich_details = bool(payload.get("enrich_details", False)) or recent_rows > 0
+            recent_mask = _recent_consultation_mask(raw, days=30)
+            recent_rows = sum(recent_mask)
+            target_nomenclatures = (
+                raw.loc[recent_mask, "Nomenclatura"].dropna().astype(str).tolist()
+                if recent_mask and "Nomenclatura" in raw.columns
+                else []
+            )
+            should_enrich_details = bool(payload.get("enrich_details", False)) or (
+                recent_rows > 0 and not bool(payload.get("skip_detail_enrichment", False))
+            )
             effective_max_details = max(max_details, recent_rows)
             if should_enrich_details and raw is not None and not raw.empty and effective_max_details > 0:
                 from src.seace_browser_scraper import search_seace_public_browser
@@ -409,11 +581,13 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                 details_year = str(selected_years[0] if selected_years else year or datetime.utcnow().year)
                 seace_raw, seace_diagnostics = search_seace_public_browser(
                     keyword=keyword,
+                    nomenclature=str(payload.get("nomenclature") or ""),
                     year=details_year,
                     version="Seace 3",
                     headless=True,
                     enrich_details=True,
                     max_details=effective_max_details,
+                    target_nomenclatures=target_nomenclatures,
                     progress_callback=lambda value, message: update_progress(58 + value * 27, message),
                     cancel_callback=check_cancelled,
                 )
@@ -423,8 +597,11 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                 raw = _merge_seace_schedule(raw, seace_raw, diagnostics)
             update_progress(86, "Priorizando oportunidades Perú")
             normalized = normalize_columns(raw) if raw is not None and not raw.empty else raw
+            normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
+            normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
             normalized = _filter_dataframe_keyword(normalized, ocds_keyword)
-            enriched = enriquecer_oportunidades(normalized) if normalized is not None and not normalized.empty else normalized
+            from .scoring_config_service import get_scoring_config
+            enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "peru")) if normalized is not None and not normalized.empty else normalized
             if enriched is not None and not enriched.empty and max_results:
                 enriched = enriched.head(max_results).copy()
             rows_found = upsert_opportunities(db, enriched, source, run_id=run.id)

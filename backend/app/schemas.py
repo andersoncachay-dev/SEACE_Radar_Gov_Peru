@@ -144,6 +144,64 @@ class AppSettingsOut(BaseModel):
     updated_at: datetime | None = None
 
 
+class SchedulerIntervalUpdate(BaseModel):
+    days: int = Field(ge=0, le=30)
+    hours: int = Field(ge=0, le=23)
+    minutes: int = Field(ge=0, le=59)
+
+    @model_validator(mode="after")
+    def validate_interval(self):
+        if self.days == 0 and self.hours == 0 and self.minutes == 0:
+            raise ValueError("El intervalo debe ser de al menos un minuto")
+        return self
+
+
+class SchedulerIntervalOut(SchedulerIntervalUpdate):
+    country: str
+    interval_seconds: int
+    next_update_at: datetime | None = None
+    enabled: bool = False
+
+
+class ScoringFactorIn(BaseModel):
+    points: int = Field(ge=-100, le=100)
+    enabled: bool = True
+    value: str = Field(min_length=1, max_length=4000)
+    label: str = Field(min_length=2, max_length=100)
+    value_type: str = Field(pattern="^(list|number|text)$")
+    field: str = Field(pattern="^(description|entity|region|amount|origin|status)$")
+
+
+class ScoringConfigUpdate(BaseModel):
+    priority_a_min: int = Field(ge=1, le=100)
+    priority_b_min: int = Field(ge=0, le=99)
+    attractive_amount_min: int = Field(ge=0, le=1_000_000_000)
+    factors: dict[str, ScoringFactorIn]
+
+    @model_validator(mode="after")
+    def validate_thresholds(self):
+        if self.priority_b_min >= self.priority_a_min:
+            raise ValueError("El umbral B debe ser menor que el umbral A")
+        positive = [factor.points for key, factor in self.factors.items() if factor.enabled and factor.points > 0 and key not in {"queries_and_proposal", "proposal_only", "evaluation"}]
+        status_max = max([self.factors[key].points for key in ("queries_and_proposal", "proposal_only", "evaluation") if key in self.factors and self.factors[key].enabled] or [0])
+        if sum(positive) + status_max != 100:
+            raise ValueError("El máximo score positivo alcanzable debe sumar exactamente 100 puntos")
+        return self
+
+
+class ScoringFactorOut(ScoringFactorIn):
+    pass
+
+
+class ScoringConfigOut(BaseModel):
+    country: str
+    priority_a_min: int
+    priority_b_min: int
+    attractive_amount_min: int
+    score_target: int = 100
+    factors: dict[str, ScoringFactorOut]
+
+
 class RunStart(BaseModel):
     search_profile_id: int | None = None
     source: str = "seace_public_browser"
@@ -152,6 +210,10 @@ class RunStart(BaseModel):
     month: str | None = None
     years: list[str] | None = None
     months: list[str] | None = None
+    nomenclature: str | None = None
+    entity_filter: str | None = None
+    publication_date_from: str | None = None
+    publication_date_to: str | None = None
     version: str = "Seace 3"
     max_results: int = 25
     max_details: int = 15
@@ -201,6 +263,10 @@ class OpportunityOut(ORMModel):
     consultation_deadline: datetime | None
     quote_deadline: datetime | None
     proposal_deadline: datetime | None
+    is_archived: bool
+    archived_at: datetime | None
+    archived_by_id: int | None
+    archive_country: str
 
 
 class OpportunitySnapshotOut(ORMModel):
@@ -220,6 +286,24 @@ class OpportunityImportIn(BaseModel):
 
 class OpportunityImportResult(BaseModel):
     imported: int
+
+
+class OpportunityKeywordArchiveIn(BaseModel):
+    country: str
+    keyword: str = Field(min_length=1, max_length=120)
+    remaining_keywords: list[str] = Field(default_factory=list)
+
+
+class OpportunityKeywordArchiveOut(BaseModel):
+    archived: int
+    opportunity_ids: list[int]
+
+
+class OpportunityExcelExportIn(BaseModel):
+    title: str = Field(default="Oportunidades GovRadar", max_length=100)
+    country: str = Field(default="peru", pattern="^(peru|chile)$")
+    headers: list[str] = Field(max_length=40)
+    rows: list[list[str | int | float | None]] = Field(max_length=10000)
 
 
 class DocumentOut(ORMModel):

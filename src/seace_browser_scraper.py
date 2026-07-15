@@ -18,6 +18,10 @@ SEACE_PUBLIC_URL = "https://prod2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico
 BASE_URL = "https://prod2.seace.gob.pe"
 PROCESS_FORM = "tbBuscador:idFormBuscarProceso"
 
+SELECTION_TYPE_VALUES = {
+    "CP-ABR": "Concurso Público Abreviado",
+}
+
 STAGE_MAP = {
     'convocatoria': ('convocatoria_inicio','convocatoria_fin'),
     'registro de participantes': ('registro_inicio','registro_fin'),
@@ -37,6 +41,16 @@ def _version_value(version: str) -> str:
     if '3' in text: return '3'
     if '2' in text: return '2'
     return str(version or '')
+
+
+def _selection_parts(nomenclature: str) -> tuple[str, str]:
+    """Split SEACE nomenclature into selection number and call number."""
+    value = _clean_text(nomenclature)
+    match = re.match(r"^[A-Z]+(?:-[A-Z]+)+-(\d+)-\d{4}-.+-(\d+)$", value, re.IGNORECASE)
+    if match:
+        return match.group(1), match.group(2)
+    match = re.match(r"^(.*)-(\d+)$", value)
+    return (match.group(1), match.group(2)) if match else (value, "")
 
 
 def _clean_text(value: str) -> str:
@@ -73,11 +87,46 @@ def _click_like_user(driver, element_id: str) -> bool:
     except Exception: return False
 
 
+def _set_select_value(driver, element_id: str, value: str) -> bool:
+    try:
+        return bool(driver.execute_script("""
+            const el=document.getElementById(arguments[0]);
+            if(!el) return false;
+            el.value=arguments[1];
+            el.dispatchEvent(new Event('change',{bubbles:true}));
+            return el.value===arguments[1];
+        """, element_id, str(value)))
+    except Exception:
+        return False
+
+
+def _set_select_option_by_text(driver, form_id: str, option_text: str) -> bool:
+    try:
+        return bool(driver.execute_script("""
+            const form=document.getElementById(arguments[0]);
+            const wanted=(arguments[1]||'').trim().toLowerCase();
+            if(!form) return false;
+            for(const el of form.querySelectorAll('select')){
+              const option=Array.from(el.options).find(o => (o.textContent||'').trim().toLowerCase()===wanted);
+              if(option){
+                el.value=option.value;
+                el.dispatchEvent(new Event('change',{bubbles:true}));
+                return el.value===option.value;
+              }
+            }
+            return false;
+        """, form_id, option_text))
+    except Exception:
+        return False
+
+
 def _looks_like_data_row(cells: List[str]) -> bool:
     if not cells or len(cells)<8: return False
     if not re.fullmatch(r"\d{1,3}", cells[0]): return False
-    text=_norm(' '.join(cells))
-    return any(t in text for t in ['satelital','san gaban','marina de guerra','bcrp','fuerza aerea','geofisico','ejercito','ucayali','apurimac'])
+    # Result rows are identified by their ordinal and shape.  The previous
+    # implementation also required one of a handful of customer keywords,
+    # silently discarding valid procedures (for example connectivity tenders).
+    return len(cells) >= 8
 
 
 def _extract_url_from_html_fragment(html: str):
@@ -122,7 +171,7 @@ def _parse_primefaces_grid(html: str):
         cells=[_clean_text(td.get_text(' ',strip=True)) for td in tr.find_all(['td','th'])]
         cells=[c for c in cells if c]
         if _looks_like_data_row(cells): rows.append((cells,_extract_url_from_tr(tr)))
-    clean_rows=[r for r in rows if 8<=len(r[0])<=13 and re.fullmatch(r"\d{1,3}",r[0][0])]
+    clean_rows=[r for r in rows if len(r[0])>=8 and re.fullmatch(r"\d{1,3}",r[0][0])]
     if clean_rows: rows=clean_rows
     data=[]
     for cells,url in rows:
@@ -323,9 +372,15 @@ def _apply_if_valid(df,idx,row,info,diagnostics):
     return True
 
 
-def _enrich_details(driver,df,max_details,diagnostics,progress_callback=None,cancel_callback=None):
+def _enrich_details(driver,df,max_details,diagnostics,progress_callback=None,cancel_callback=None,target_nomenclatures=None):
     reviewed=0; applied=0
-    detail_rows=df.head(max_details)
+    detail_rows=df
+    target_keys={_norm(value) for value in (target_nomenclatures or []) if _norm(value)}
+    if target_keys:
+        matching=df[df['Nomenclatura'].map(_norm).isin(target_keys)]
+        remaining=df.drop(index=matching.index)
+        detail_rows=pd.concat([matching,remaining])
+    detail_rows=detail_rows.head(max_details)
     total_details=max(1,len(detail_rows))
     for position,(idx,row) in enumerate(detail_rows.iterrows(),start=1):
         if cancel_callback: cancel_callback()
@@ -370,7 +425,7 @@ def _enrich_details(driver,df,max_details,diagnostics,progress_callback=None,can
     return df
 
 
-def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2026',version='Seace 3',headless=False,max_wait=45,enrich_details=False,max_details=10,progress_callback: Callable[[float,str],None] | None=None,cancel_callback: Callable[[],None] | None=None)->Tuple[pd.DataFrame,List[str]]:
+def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',nomenclature='',year='2026',version='Seace 3',headless=False,max_wait=45,enrich_details=False,max_details=10,target_nomenclatures=None,progress_callback: Callable[[float,str],None] | None=None,cancel_callback: Callable[[],None] | None=None)->Tuple[pd.DataFrame,List[str]]:
     diagnostics=[]; options=Options()
     if headless: options.add_argument('--headless=new')
     options.add_argument('--start-maximized'); options.add_argument('--disable-notifications'); options.add_argument('--disable-popup-blocking'); options.add_argument('--ignore-certificate-errors')
@@ -384,11 +439,34 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2
         if tabs: driver.execute_script("arguments[0].click();",tabs[0]); diagnostics.append('Pestaña Procedimientos seleccionada'); time.sleep(3)
         desc_id=f"{PROCESS_FORM}:descripcionObjeto"; wait.until(EC.presence_of_element_located((By.ID,desc_id)))
         driver.execute_script("const active=document.getElementById('tbBuscador_activeIndex'); if(active) active.value='1';")
-        ok_desc=_set_input_like_user(driver,desc_id,keyword); ok_year=_set_input_like_user(driver,f"{PROCESS_FORM}:anioConvocatoria_input",str(year)); _set_input_like_user(driver,f"{PROCESS_FORM}:anioConvocatoria_focus",str(year)); ok_ver=_set_input_like_user(driver,f"{PROCESS_FORM}:j_idt247_input",_version_value(version))
-        diagnostics += [f"Descripción seteada: {ok_desc} -> {keyword}", f"Año seteado: {ok_year} -> {year}", f"Versión seteada: {ok_ver} -> {_version_value(version)}"]
+        search_nomen=_clean_text(nomenclature)
+        selection_number, call_number=_selection_parts(search_nomen)
+        selection_prefix="-".join(search_nomen.split("-")[:2]).upper() if search_nomen else ""
+        selection_type=SELECTION_TYPE_VALUES.get(selection_prefix, "")
+        ok_type=_set_select_option_by_text(driver,PROCESS_FORM,selection_type) if selection_type else True
+        if selection_type:
+            # Changing procedure type triggers a PrimeFaces AJAX refresh.  Set
+            # text fields only after it has replaced the form controls.
+            time.sleep(2)
+        ok_desc=True if search_nomen else _set_input_like_user(driver,desc_id,keyword)
+        ok_nomen=_set_input_like_user(driver,f"{PROCESS_FORM}:numeroSeleccion",selection_number) if search_nomen else True
+        ok_call=_set_input_like_user(driver,f"{PROCESS_FORM}:numeroConvocatoria",call_number) if call_number else True
+        ok_year=_set_input_like_user(driver,f"{PROCESS_FORM}:anioConvocatoria_input",str(year)); _set_input_like_user(driver,f"{PROCESS_FORM}:anioConvocatoria_focus",str(year)); ok_ver=_set_input_like_user(driver,f"{PROCESS_FORM}:j_idt247_input",_version_value(version))
+        diagnostics += [f"Descripción seteada: {ok_desc} -> {'' if search_nomen else keyword}", f"Tipo de selección seteado: {ok_type} -> {selection_prefix}", f"Número de selección seteado: {ok_nomen} -> {selection_number}", f"Convocatoria seteada: {ok_call} -> {call_number}", f"Año seteado: {ok_year} -> {year}", f"Versión seteada: {ok_ver} -> {_version_value(version)}"]
         clicked=False
-        for bid in [f"{PROCESS_FORM}:btnBuscarSelToken",f"{PROCESS_FORM}:btnBuscarSel"]:
-            if _click_like_user(driver,bid): diagnostics.append(f"Click botón: {bid}"); clicked=True; break
+        # Use the visible token button so SEACE can populate its anti-bot token
+        # before invoking the hidden PrimeFaces submit action.
+        if _click_like_user(driver,f"{PROCESS_FORM}:btnBuscarSelToken"):
+            diagnostics.append(f"Click botón token: {PROCESS_FORM}:btnBuscarSelToken"); clicked=True
+        if not clicked:
+            submit_id=f"{PROCESS_FORM}:btnBuscarSel"
+            try:
+                submit=driver.find_element(By.ID,submit_id)
+                driver.execute_script("arguments[0].click();",submit)
+                diagnostics.append(f"Click botón PrimeFaces: {submit_id}")
+                clicked=True
+            except Exception:
+                pass
         if not clicked: diagnostics.append('No se encontró botón Buscar por ID; intentando submit del formulario'); driver.execute_script("document.getElementById(arguments[0]).submit();",PROCESS_FORM)
         if progress_callback: progress_callback(0.2,"Esperando resultados de SEACE")
         end=time.time()+max_wait; last_len=0; best_info=[]
@@ -421,7 +499,7 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2
                     if col not in df.columns: df[col]=''
                 if enrich_details:
                     diagnostics.append(f"Enriqueciendo cronogramas para máximo {max_details} procesos...")
-                    df=_enrich_details(driver,df,max_details,diagnostics,lambda value,message: progress_callback(0.4+value*0.55,message) if progress_callback else None,cancel_callback)
+                    df=_enrich_details(driver,df,max_details,diagnostics,lambda value,message: progress_callback(0.4+value*0.55,message) if progress_callback else None,cancel_callback,target_nomenclatures or ([search_nomen] if search_nomen else None))
                 for idx,row in df.iterrows():
                     estado,vig=_infer_estado_cron(row); df.at[idx,'Estado Comercial']=estado; df.at[idx,'Vigencia']=vig
                     dias_consulta = _dias_hasta(

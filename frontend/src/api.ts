@@ -15,6 +15,7 @@ export type Stats = {
 export type Opportunity = {
   id: number;
   source: string;
+  external_id: string;
   entity: string;
   nomenclature: string;
   object_type: string;
@@ -39,6 +40,10 @@ export type Opportunity = {
   consultation_deadline: string | null;
   quote_deadline: string | null;
   proposal_deadline: string | null;
+  is_archived: boolean;
+  archived_at: string | null;
+  archived_by_id: number | null;
+  archive_country: string;
 };
 
 export type Run = {
@@ -53,6 +58,25 @@ export type Run = {
   error_message: string;
   started_at: string | null;
   finished_at: string | null;
+};
+
+export type SchedulerStatus = {
+  enabled: boolean;
+  country: "peru" | "chile";
+  is_running: boolean;
+  next_update_at: string | null;
+  interval_minutes: number;
+  interval_seconds: number;
+};
+
+export type SchedulerIntervalConfig = {
+  country: "peru" | "chile";
+  days: number;
+  hours: number;
+  minutes: number;
+  interval_seconds: number;
+  next_update_at: string | null;
+  enabled: boolean;
 };
 
 export type AlertRule = {
@@ -147,6 +171,16 @@ export type AppSettingsRecord = {
   updated_at: string | null;
 };
 
+export type ScoringFactor = { label: string; points: number; enabled: boolean; value: string; value_type: "list" | "number" | "text"; field: "description" | "entity" | "region" | "amount" | "origin" | "status" };
+export type ScoringConfig = {
+  country: "peru" | "chile";
+  priority_a_min: number;
+  priority_b_min: number;
+  attractive_amount_min: number;
+  score_target: number;
+  factors: Record<string, ScoringFactor>;
+};
+
 export const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 export class ApiError extends Error {
@@ -223,6 +257,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ version_label: versionLabel }),
     }),
+  scoringConfig: (token: string, country: "peru" | "chile") =>
+    request<ScoringConfig>(`/app-settings/scoring/${country}`, token),
+  updateScoringConfig: (token: string, country: "peru" | "chile", config: ScoringConfig) =>
+    request<ScoringConfig>(`/app-settings/scoring/${country}`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }),
   legalDocuments: () => request<LegalDocumentRecord[]>("/legal-documents", ""),
   updateLegalDocument: (token: string, key: LegalDocumentKey, content: string) =>
     request<LegalDocumentRecord>(`/legal-documents/${key}`, token, {
@@ -253,7 +295,38 @@ export const api = {
     const query = params.toString();
     return request<Opportunity[]>(`/opportunities${query ? `?${query}` : ""}`, token);
   },
+  exportOpportunitiesXlsx: async (token: string, payload: { title: string; country: "peru" | "chile"; headers: string[]; rows: Array<Array<string | number | null>> }) => {
+    const response = await fetch(`${API_URL}/opportunities/export/xlsx`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new ApiError("No se pudo generar el archivo Excel", response.status);
+    return response.blob();
+  },
+  archivedOpportunities: (token: string, country: "peru" | "chile") =>
+    request<Opportunity[]>(`/opportunities/archived?country=${country}`, token),
+  archiveOpportunity: (token: string, opportunityId: number) =>
+    request<Opportunity>(`/opportunities/${opportunityId}/archive`, token, { method: "POST" }),
+  archiveOpportunitiesByKeyword: (token: string, country: "peru" | "chile", keyword: string, remainingKeywords: string[]) =>
+    request<{ archived: number; opportunity_ids: number[] }>("/opportunities/archive-by-keyword", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ country, keyword, remaining_keywords: remainingKeywords }),
+    }),
+  restoreOpportunity: (token: string, opportunityId: number) =>
+    request<Opportunity>(`/opportunities/${opportunityId}/restore`, token, { method: "POST" }),
   runs: (token: string) => request<Run[]>("/runs", token),
+  schedulerStatus: (token: string, country: "peru" | "chile") =>
+    request<SchedulerStatus>(`/runs/scheduler/status?country=${country}`, token),
+  schedulerIntervalConfig: (token: string, country: "peru" | "chile") =>
+    request<SchedulerIntervalConfig>(`/app-settings/scheduler/${country}`, token),
+  updateSchedulerIntervalConfig: (token: string, country: "peru" | "chile", config: Pick<SchedulerIntervalConfig, "days" | "hours" | "minutes">) =>
+    request<SchedulerIntervalConfig>(`/app-settings/scheduler/${country}`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }),
   radarKeywords: (token: string, country: "peru" | "chile") =>
     request<RadarKeyword[]>(`/radar-keywords/${country}`, token),
   createRadarKeyword: (token: string, country: "peru" | "chile", keyword: string) =>
@@ -272,10 +345,13 @@ export const api = {
       source: string;
       keyword: string;
       nomenclature?: string;
+      entity_filter?: string;
       year: string;
       month?: string;
       years?: string[];
       months?: string[];
+      publication_date_from?: string;
+      publication_date_to?: string;
       version: string;
       max_results: number;
       max_details: number;

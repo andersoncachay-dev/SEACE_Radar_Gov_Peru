@@ -1,17 +1,132 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
 from ..config import settings
 from ..database import SessionLocal
-from ..models import RadarKeyword, ScrapeRun, SearchProfile
+from ..models import AppSetting, RadarKeyword, ScrapeRun, SearchProfile
 from ..radar_config import AUTO_PROFILE_PREFIX, DEFAULT_RADAR_KEYWORDS, RADAR_COUNTRY_CONFIG
 from .notification_service import send_pending_alerts
 from .run_service import execute_scrape_run
 
 scheduler = None
+LIMA_TIMEZONE = ZoneInfo("America/Lima")
+SUPPORTED_COUNTRIES = ("peru", "chile")
+DEFAULT_INTERVAL_SECONDS = 15 * 60
+
+
+def scheduler_initial_delay(country: str, interval_seconds: int) -> int:
+    """Keep country jobs out of phase while preserving each configured interval."""
+    if country == "peru":
+        return interval_seconds
+    chile_offset = min(5 * 60, max(30, interval_seconds // 3))
+    return interval_seconds + chile_offset
+
+
+def _interval_key(country: str) -> str:
+    return f"scheduler.{country}.interval_seconds"
+
+
+def get_scheduler_interval(db, country: str) -> int:
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"País de scheduler no soportado: {country}")
+    item = db.scalar(select(AppSetting).where(AppSetting.key == _interval_key(normalized_country)))
+    if item is None:
+        return DEFAULT_INTERVAL_SECONDS
+    try:
+        return max(60, int(item.value))
+    except (TypeError, ValueError):
+        return DEFAULT_INTERVAL_SECONDS
+
+
+def scheduler_interval_config(country: str) -> dict[str, object]:
+    normalized_country = str(country or "").strip().lower()
+    db = SessionLocal()
+    try:
+        interval_seconds = get_scheduler_interval(db, normalized_country)
+    finally:
+        db.close()
+    job = scheduler.get_job(f"active-search-profiles-{normalized_country}") if scheduler is not None else None
+    days, remainder = divmod(interval_seconds, 86_400)
+    hours, remainder = divmod(remainder, 3_600)
+    minutes = remainder // 60
+    return {
+        "country": normalized_country,
+        "days": days,
+        "hours": hours,
+        "minutes": minutes,
+        "interval_seconds": interval_seconds,
+        "next_update_at": job.next_run_time.isoformat() if job and job.next_run_time else None,
+        "enabled": bool(settings.enable_scheduler and job is not None),
+    }
+
+
+def save_scheduler_interval(country: str, interval_seconds: int, user_id: int | None) -> dict[str, object]:
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"País de scheduler no soportado: {country}")
+    interval_seconds = max(60, int(interval_seconds))
+    db = SessionLocal()
+    try:
+        key = _interval_key(normalized_country)
+        item = db.scalar(select(AppSetting).where(AppSetting.key == key))
+        if item is None:
+            db.add(AppSetting(key=key, value=str(interval_seconds), updated_by_id=user_id))
+        else:
+            item.value = str(interval_seconds)
+            item.updated_by_id = user_id
+        db.commit()
+    finally:
+        db.close()
+    if scheduler is not None:
+        scheduler.add_job(
+            enqueue_active_profiles,
+            trigger="interval",
+            seconds=interval_seconds,
+            next_run_time=datetime.now(LIMA_TIMEZONE) + timedelta(seconds=scheduler_initial_delay(normalized_country, interval_seconds)),
+            kwargs={"country": normalized_country},
+            id=f"active-search-profiles-{normalized_country}",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
+    return scheduler_interval_config(normalized_country)
+
+
+def current_ingestion_period(now: datetime | None = None) -> dict[str, object]:
+    """Return the single calendar month processed by automatic ingestion."""
+    current = now.astimezone(LIMA_TIMEZONE) if now else datetime.now(LIMA_TIMEZONE)
+    year = str(current.year)
+    month = str(current.month)
+    return {"year": year, "month": month, "years": [year], "months": [month]}
+
+
+def current_ingestion_window(db, country: str, now: datetime | None = None) -> dict[str, object]:
+    current = now.astimezone(LIMA_TIMEZONE) if now else datetime.now(LIMA_TIMEZONE)
+    # The overlap is intentionally fixed: it catches late publications without
+    # allowing a delayed scheduler to expand into an increasingly expensive scan.
+    start_date = current.date() - timedelta(days=2)
+    end_date = current.date()
+    month_cursor = start_date.replace(day=1)
+    covered: list[tuple[int, int]] = []
+    while month_cursor <= end_date:
+        covered.append((month_cursor.year, month_cursor.month))
+        month_cursor = (month_cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return {
+        "year": str(end_date.year),
+        "month": str(end_date.month),
+        "years": sorted({str(year) for year, _ in covered}),
+        "months": sorted({str(month) for _, month in covered}, key=int),
+        "publication_date_from": start_date.isoformat(),
+        "publication_date_to": end_date.isoformat(),
+        "active_only": True,
+        "automatic_incremental": True,
+        "skip_detail_enrichment": True,
+    }
 
 
 def sync_radar_profiles(db) -> list[SearchProfile]:
@@ -66,6 +181,7 @@ def enqueue_active_profiles(country: str | None = None) -> dict[str, int]:
             query = query.where(SearchProfile.source == config["source"])
         profiles = list(db.scalars(query).all())
         summary["profiles"] = len(profiles)
+        ingestion_period = current_ingestion_window(db, country) if country else current_ingestion_period()
         for profile in profiles:
             run = ScrapeRun(search_profile_id=profile.id, source=profile.source, status="queued")
             db.add(run)
@@ -77,7 +193,7 @@ def enqueue_active_profiles(country: str | None = None) -> dict[str, int]:
                     "search_profile_id": profile.id,
                     "source": profile.source,
                     "keyword": profile.keyword,
-                    "year": profile.year,
+                    **ingestion_period,
                     "version": profile.version,
                     "max_results": profile.max_results,
                     "max_details": min(profile.max_results, 15),
@@ -104,6 +220,33 @@ def send_pending_alerts_job() -> None:
         db.close()
 
 
+def scheduler_status(country: str) -> dict[str, object]:
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"País de scheduler no soportado: {country}")
+    job = scheduler.get_job(f"active-search-profiles-{normalized_country}") if scheduler is not None else None
+    next_run = job.next_run_time if job is not None else None
+    db = SessionLocal()
+    try:
+        interval_seconds = get_scheduler_interval(db, normalized_country)
+        source = RADAR_COUNTRY_CONFIG[normalized_country]["source"]
+        active_run_id = db.scalar(
+            select(ScrapeRun.id)
+            .where(ScrapeRun.source == source, ScrapeRun.status.in_(("queued", "running")))
+            .limit(1)
+        )
+    finally:
+        db.close()
+    return {
+        "enabled": bool(settings.enable_scheduler and job is not None),
+        "country": normalized_country,
+        "is_running": active_run_id is not None,
+        "next_update_at": next_run.isoformat() if next_run is not None else None,
+        "interval_minutes": interval_seconds // 60,
+        "interval_seconds": interval_seconds,
+    }
+
+
 def start_scheduler() -> None:
     global scheduler
     if not settings.enable_scheduler or scheduler is not None:
@@ -111,13 +254,23 @@ def start_scheduler() -> None:
     from apscheduler.schedulers.background import BackgroundScheduler
 
     scheduler = BackgroundScheduler(timezone="America/Lima")
-    scheduler.add_job(
-        enqueue_active_profiles,
-        trigger="interval",
-        minutes=settings.scheduler_interval_minutes,
-        id="active-search-profiles",
-        replace_existing=True,
-    )
+    db = SessionLocal()
+    try:
+        country_intervals = {country: get_scheduler_interval(db, country) for country in SUPPORTED_COUNTRIES}
+    finally:
+        db.close()
+    for country, interval_seconds in country_intervals.items():
+        scheduler.add_job(
+            enqueue_active_profiles,
+            trigger="interval",
+            seconds=interval_seconds,
+            next_run_time=datetime.now(LIMA_TIMEZONE) + timedelta(seconds=scheduler_initial_delay(country, interval_seconds)),
+            kwargs={"country": country},
+            id=f"active-search-profiles-{country}",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
     scheduler.add_job(
         send_pending_alerts_job,
         trigger="interval",

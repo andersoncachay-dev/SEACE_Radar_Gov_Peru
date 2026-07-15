@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -86,7 +86,7 @@ class AppSetting(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     key: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
-    value: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
     updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
@@ -111,7 +111,10 @@ class ScrapeRun(TimestampMixin, Base):
 
 class Opportunity(TimestampMixin, Base):
     __tablename__ = "opportunities"
-    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_opportunities_source_external_id"),)
+    __table_args__ = (
+        UniqueConstraint("source", "external_id", name="uq_opportunities_source_external_id"),
+        Index("ix_opportunities_archive_lookup", "is_archived", "archive_country", "archive_key"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -141,6 +144,11 @@ class Opportunity(TimestampMixin, Base):
     quote_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     proposal_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    archived_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    archive_country: Mapped[str] = mapped_column(String(10), default="", nullable=False)
+    archive_key: Mapped[str] = mapped_column(String(180), default="", nullable=False)
 
 
 class OpportunitySnapshot(TimestampMixin, Base):

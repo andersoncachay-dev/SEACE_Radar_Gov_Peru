@@ -15,8 +15,9 @@ class Settings:
     frontend_url: str = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
     auto_create_tables: bool = os.getenv("AUTO_CREATE_TABLES", "false").lower() == "true"
     enable_menor8_module: bool = os.getenv("ENABLE_MENOR8_MODULE", "false").lower() == "true"
+    enable_chile_grandes_compras: bool = os.getenv("ENABLE_CHILE_GRANDES_COMPRAS", "false").lower() == "true"
     enable_scheduler: bool = os.getenv("ENABLE_SCHEDULER", "false").lower() == "true"
-    scheduler_interval_minutes: int = int(os.getenv("SCHEDULER_INTERVAL_MINUTES", "120"))
+    scheduler_interval_minutes: int = int(os.getenv("SCHEDULER_INTERVAL_MINUTES", "15"))
     auto_send_alerts: bool = os.getenv("AUTO_SEND_ALERTS", "false").lower() == "true"
     alert_sender_interval_minutes: int = int(os.getenv("ALERT_SENDER_INTERVAL_MINUTES", "10"))
     alert_batch_size: int = int(os.getenv("ALERT_BATCH_SIZE", "50"))

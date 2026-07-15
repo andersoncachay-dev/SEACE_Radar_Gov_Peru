@@ -6,11 +6,33 @@ from src.mercado_publico_scraper import (
     _filter_rows_for_period,
     _is_closed_process,
     _parse_detail,
+    _parse_large_purchase_results,
     _to_float,
 )
 
 
 class MercadoPublicoScraperTests(unittest.TestCase):
+    def test_parses_large_purchase_with_empty_supplier_without_shifting_columns(self):
+        html = """
+        <table><tr>
+          <td><a href="/gran-compra/54988">54988</a></td>
+          <td>PRODUCCION Y TRANSMISION SATELITAL DE HDTV</td>
+          <td>SERVICIO NACIONAL DE TURISMO</td>
+          <td></td>
+          <td>22-09-2020 17:17:00</td>
+          <td>08-10-2020 23:59:00</td>
+          <td>Cerrada</td>
+        </tr></table>
+        """
+
+        rows = _parse_large_purchase_results(html, "https://www.mercadopublico.cl/resultados")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["Nomenclatura"], "54988")
+        self.assertEqual(rows[0]["convocatoria_inicio"], "22/09/2020 17:17:00")
+        self.assertEqual(rows[0]["propuesta_fin"], "08/10/2020 23:59:00")
+        self.assertEqual(rows[0]["Vigencia"], "Cerrada")
+
     def test_parses_regular_tender_estimated_amount(self):
         html = "<html><body>7. Montos y duración del contrato Monto Total Estimado: 184120000</body></html>"
 

@@ -65,6 +65,19 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
         external_id = _first_text(row, "nomenclatura", "codigo", "Nomenclatura")
         if not external_id:
             continue
+        archive_country = "chile" if source.lower().startswith("mercado_publico") else "peru"
+        archive_key = external_id.casefold()
+        archived_id = db.scalar(
+            select(Opportunity.id).where(
+                Opportunity.is_archived.is_(True),
+                Opportunity.archive_country == archive_country,
+                Opportunity.archive_key == archive_key,
+            ).limit(1)
+        )
+        if archived_id is not None:
+            # Los retiros son decisiones comerciales persistentes. Una nueva
+            # lectura de la fuente no debe reincorporar ni modificar el proceso.
+            continue
         existing = db.scalar(select(Opportunity).where(Opportunity.source == source, Opportunity.external_id == external_id))
         opportunity = existing or Opportunity(source=source, external_id=external_id)
         previous_hash = opportunity.content_hash if existing else ""

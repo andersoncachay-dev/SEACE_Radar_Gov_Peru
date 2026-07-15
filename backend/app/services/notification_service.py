@@ -82,7 +82,7 @@ def evaluate_new_opportunity_alerts(db: Session, run_id: int) -> list[Alert]:
             continue
         seen_opportunity_ids.add(snapshot.opportunity_id)
         opp = db.get(Opportunity, snapshot.opportunity_id)
-        if not opp:
+        if not opp or opp.is_archived:
             continue
         for rule in rules:
             if not _priority_at_least(opp.priority, rule.min_priority):
@@ -235,6 +235,12 @@ def send_pending_alerts(db: Session, limit: int | None = None) -> list[Alert]:
         ).all()
     )
     for alert in alerts:
+        opportunity = db.get(Opportunity, alert.opportunity_id)
+        if opportunity and opportunity.is_archived:
+            alert.status = "skipped"
+            alert.last_error = "Proceso retirado por decisión comercial"
+            alert.next_attempt_at = None
+            continue
         rule = db.get(AlertRule, alert.rule_id)
         if not rule or not rule.is_active:
             alert.status = "skipped"

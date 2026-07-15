@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
@@ -11,8 +12,17 @@ from ..dependencies import get_current_user, require_source_access, source_acces
 from ..models import ScrapeRun, SearchProfile, User
 from ..schemas import RunStart, ScrapeRunOut
 from ..services.run_service import execute_scrape_run, request_run_cancel
+from ..services.scheduler_service import scheduler_status
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+
+
+@router.get("/scheduler/status")
+def get_scheduler_status(
+    country: Literal["peru", "chile"],
+    current_user: User = Depends(get_current_user),
+):
+    return scheduler_status(country)
 
 
 @router.get("", response_model=list[ScrapeRunOut])

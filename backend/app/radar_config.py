@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-DEFAULT_RADAR_KEYWORDS = ("satelital", "internet", "conectividad", "radio enlace", "LEO", "GEO", "órbita")
+DEFAULT_RADAR_KEYWORDS = ("satelital", "internet", "conectividad", "LEO", "GEO", "órbita")
 AUTO_PROFILE_PREFIX = "Radar automático"
 
 RADAR_COUNTRY_CONFIG = {

@@ -14,12 +14,13 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 
 
 BASE_URL = "https://www.mercadopublico.cl"
 ADVANCED_SEARCH_URL = f"{BASE_URL}/portal/Modules/Site/Busquedas/BuscadorAvanzado.aspx?qs=1"
-LARGE_PURCHASES_URL = f"{BASE_URL}/Portal/Modules/Site/Busquedas/ResultadoBusqueda.aspx?qs=9"
+LARGE_PURCHASES_URL = f"{BASE_URL}/Portal/Modules/Site/Busquedas/BuscadorAvanzado.aspx?qs=9"
 
 
 def _clean(value: str) -> str:
@@ -70,6 +71,39 @@ def _click_search(driver) -> None:
             item.click()
             return
     raise RuntimeError("No se encontro el boton Buscar en Mercado Publico.")
+
+
+def _enable_regular_search_filters(
+    driver,
+    publication_date_from: str | None = None,
+    publication_date_to: str | None = None,
+    published_only: bool = False,
+) -> None:
+    if publication_date_from or publication_date_to:
+        checkbox = driver.find_element(By.ID, "chkFecha")
+        if not checkbox.is_selected():
+            checkbox.click()
+        Select(driver.find_element(By.ID, "ddlDateType")).select_by_value("1")
+        for element_id, value in (("txtFecha1", publication_date_from), ("txtFecha2", publication_date_to)):
+            if not value:
+                continue
+            parsed = pd.to_datetime(value, errors="coerce")
+            formatted = parsed.strftime("%d-%m-%Y") if not pd.isna(parsed) else value
+            element = driver.find_element(By.ID, element_id)
+            # Clicking opens an ASP.NET calendar overlay that intercepts the
+            # second date field in headless Chrome. Set the value directly and
+            # notify the page so its postback state remains consistent.
+            driver.execute_script(
+                "arguments[0].value = arguments[1];"
+                "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));",
+                element,
+                formatted,
+            )
+    if published_only:
+        checkbox = driver.find_element(By.ID, "chkEstado")
+        if not checkbox.is_selected():
+            checkbox.click()
+        Select(driver.find_element(By.ID, "ddlAdquisitionState")).select_by_value("5")
 
 
 def _wait_results(driver, keyword: str) -> None:
@@ -242,9 +276,10 @@ def _parse_large_purchase_results(html: str, current_url: str) -> List[dict]:
     soup = BeautifulSoup(html, "html.parser")
     rows: List[dict] = []
     for tr in soup.find_all("tr"):
+        # Preserve empty cells: Mercado Publico leaves Proveedor blank in many
+        # rows, and removing it shifts both invitation dates and the status.
         cells = [_clean(td.get_text(" ", strip=True)) for td in tr.find_all("td")]
-        cells = [cell for cell in cells if cell]
-        if len(cells) < 6 or not re.match(r"^\d{3,}$", cells[0]):
+        if len(cells) < 7 or not re.match(r"^\d{3,}$", cells[0]):
             continue
         row = _empty_row("grandes_compras")
         row["Nomenclatura"] = cells[0]
@@ -468,6 +503,10 @@ def search_mercado_publico(
     headless: bool = True,
     max_results: int = 25,
     enrich_details: bool = False,
+    enrich_closed_details: bool = True,
+    publication_date_from: str | None = None,
+    publication_date_to: str | None = None,
+    include_active_revalidation: bool = False,
     max_details: int = 10,
     years: List[int] | None = None,
     months: List[int] | None = None,
@@ -483,27 +522,60 @@ def search_mercado_publico(
             progress_callback(0.05, f"Abriendo Mercado Público: {mode}")
         if mode == "grandes_compras":
             driver.get(LARGE_PURCHASES_URL)
+            _set_search_text(driver, keyword)
+            _click_search(driver)
         else:
             driver.get(ADVANCED_SEARCH_URL)
             _set_search_text(driver, keyword)
+            _enable_regular_search_filters(
+                driver,
+                publication_date_from=publication_date_from,
+                publication_date_to=publication_date_to,
+                published_only=bool(publication_date_from or publication_date_to),
+            )
             _click_search(driver)
         _wait_results(driver, keyword)
         time.sleep(1)
         rows = _collect_result_rows(driver, mode, max_results, progress_callback, cancel_callback)
+        if mode == "licitaciones" and (publication_date_from or publication_date_to):
+            for row in rows:
+                row["automatic_discovery"] = True
+        if mode == "licitaciones" and include_active_revalidation:
+            driver.get(ADVANCED_SEARCH_URL)
+            _set_search_text(driver, keyword)
+            _enable_regular_search_filters(driver, published_only=True)
+            _click_search(driver)
+            _wait_results(driver, keyword)
+            time.sleep(0.6)
+            revalidation_rows = _collect_result_rows(driver, mode, max_results, progress_callback, cancel_callback)
+            by_key = {str(row.get("Nomenclatura", "")): row for row in rows}
+            for row in revalidation_rows:
+                by_key.setdefault(str(row.get("Nomenclatura", "")), row)
+            diagnostics.append(
+                f"Mercado Publico licitaciones: {len(revalidation_rows)} vigentes listados para revalidacion"
+            )
+            rows = list(by_key.values())
         if progress_callback:
             progress_callback(0.35, f"{len(rows)} procesos detectados en {mode}")
         diagnostics.append(f"Mercado Publico {mode}: {len(rows)} procesos detectados para keyword={keyword} incluyendo paginas siguientes")
-        if years or months:
+        if (years or months) and not (publication_date_from or publication_date_to):
             detected_count = len(rows)
             rows = _filter_rows_for_period(rows, years, months)
             diagnostics.append(
                 f"Mercado Publico {mode}: {len(rows)}/{detected_count} procesos dentro del periodo solicitado"
             )
+        elif publication_date_from or publication_date_to:
+            diagnostics.append(
+                f"Mercado Publico {mode}: descubrimiento limitado por fecha de publicacion "
+                f"{publication_date_from or 'inicio'} a {publication_date_to or 'hoy'}"
+            )
 
         if rows and mode == "licitaciones":
             explicit_limit = min(max_details or len(rows), len(rows)) if enrich_details else 0
             explicit_indexes = set(range(explicit_limit))
-            closed_indexes = {index for index, row in enumerate(rows) if _is_closed_process(row)}
+            closed_indexes = {
+                index for index, row in enumerate(rows) if _is_closed_process(row)
+            } if enrich_closed_details else set()
             detail_indexes = sorted(explicit_indexes | closed_indexes)
             if closed_indexes:
                 diagnostics.append(
