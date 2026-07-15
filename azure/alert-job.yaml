@@ -1,0 +1,46 @@
+name: govradar-alert-worker
+properties:
+  configuration:
+    triggerType: Schedule
+    scheduleTriggerConfig:
+      cronExpression: "*/5 * * * *"
+      parallelism: 1
+      replicaCompletionCount: 1
+    replicaTimeout: 300
+    replicaRetryLimit: 2
+  template:
+    containers:
+      - name: alert-worker
+        image: REGISTRY_NAME.azurecr.io/govradar-api:IMAGE_TAG
+        command:
+          - python
+          - -m
+          - backend.app.alert_worker
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi
+        env:
+          - name: ENVIRONMENT
+            value: azure
+          - name: DATABASE_URL
+            secretRef: database-url
+          - name: EMAIL_PROVIDER
+            value: azure
+          - name: AZURE_COMMUNICATION_CONNECTION_STRING
+            secretRef: azure-communication-connection
+          - name: AZURE_EMAIL_SENDER
+            value: EMAIL_SENDER_ADDRESS
+          - name: WHATSAPP_ENABLED
+            value: "false"
+          - name: WHATSAPP_PROVIDER
+            value: azure_acs
+          - name: WHATSAPP_CHANNEL_ID
+            value: WHATSAPP_CHANNEL_GUID
+          - name: WHATSAPP_TEMPLATE_NAME
+            value: govradar_alert
+          - name: WHATSAPP_TEMPLATE_LANGUAGE
+            value: es
+          - name: ALERT_MAX_ATTEMPTS
+            value: "5"
+          - name: ALERT_RETRY_BASE_MINUTES
+            value: "5"

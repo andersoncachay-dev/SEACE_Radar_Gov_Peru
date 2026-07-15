@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 import unicodedata
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -107,10 +107,17 @@ def _detail_link_url(link, current_url: str) -> str:
 def _to_float(value: str) -> float:
     text = _clean(value).replace("$", "").replace("CLP", "").replace("Pesos", "")
     text = re.sub(r"[^0-9,.\-]", "", text)
-    if text.count(",") == 1 and text.rfind(",") > text.rfind("."):
-        text = text.replace(".", "").replace(",", ".")
-    else:
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif text.count(".") > 1 or (text.count(".") == 1 and len(text.rsplit(".", 1)[1]) == 3):
+        text = text.replace(".", "")
+    elif text.count(",") > 1 or (text.count(",") == 1 and len(text.rsplit(",", 1)[1]) == 3):
         text = text.replace(",", "")
+    elif "," in text:
+        text = text.replace(",", ".")
     try:
         return float(text) if text else 0.0
     except ValueError:
@@ -128,13 +135,43 @@ def _date_from_chile(value: str) -> str:
 
 def _estado_comercial(state: str, closing: str, questions: str = "") -> str:
     state_norm = _norm(state)
-    if "cerrada" in state_norm or "seleccionada" in state_norm:
+    if any(value in state_norm for value in ("cerrada", "seleccionada", "adjudicada", "desierta", "revocada")):
         return "Proceso Culminado"
     if questions:
         return "Vigente para Consultas y Propuesta"
     if closing:
         return "Vigente para Propuesta"
     return "Revisar"
+
+
+def _is_closed_process(row: dict) -> bool:
+    state = _norm(row.get("Vigencia", ""))
+    if any(value in state for value in ("cerrada", "seleccionada", "adjudicada", "desierta", "revocada")):
+        return True
+    closing = pd.to_datetime(row.get("propuesta_fin"), errors="coerce", dayfirst=True)
+    return not pd.isna(closing) and closing.to_pydatetime() <= pd.Timestamp.now().to_pydatetime()
+
+
+def _filter_rows_for_period(rows: List[dict], years: List[int] | None, months: List[int] | None) -> List[dict]:
+    selected_years = set(years or [])
+    selected_months = set(months or [])
+    if not selected_years and not selected_months:
+        return rows
+    filtered: List[dict] = []
+    for row in rows:
+        date = pd.to_datetime(
+            row.get("Fecha y Hora de Publicacion") or row.get("convocatoria_inicio") or row.get("propuesta_fin"),
+            errors="coerce",
+            dayfirst=True,
+        )
+        if pd.isna(date):
+            continue
+        if selected_years and int(date.year) not in selected_years:
+            continue
+        if selected_months and int(date.month) not in selected_months:
+            continue
+        filtered.append(row)
+    return filtered
 
 
 def _empty_row(source: str) -> dict:
@@ -249,11 +286,19 @@ def _click_next_results_page(driver) -> bool:
     return False
 
 
-def _collect_result_rows(driver, mode: str, max_results: int) -> List[dict]:
+def _collect_result_rows(
+    driver,
+    mode: str,
+    max_results: int,
+    progress_callback: Callable[[float, str], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
+) -> List[dict]:
     rows: List[dict] = []
     seen: set[str] = set()
     visited_pages: set[str] = set()
     while True:
+        if cancel_callback:
+            cancel_callback()
         page_rows = _parse_results_for_mode(mode, driver.page_source, driver.current_url)
         for row in page_rows:
             key = row.get("Nomenclatura") or f"{row.get('Nombre o Sigla de la Entidad')}|{row.get('Descripcion de Objeto')}"
@@ -266,6 +311,8 @@ def _collect_result_rows(driver, mode: str, max_results: int) -> List[dict]:
         if page_marker in visited_pages:
             return rows
         visited_pages.add(page_marker)
+        if progress_callback:
+            progress_callback(min(0.3, 0.1 + len(visited_pages) * 0.05), f"Leyendo página {len(visited_pages)} de {mode}")
         previous_marker = page_marker
         if not _click_next_results_page(driver):
             return rows
@@ -302,7 +349,13 @@ def _parse_detail(html: str) -> dict:
     questions_end = _find_date(text, ["Fecha final de preguntas"])
     close_date = _find_date(text, ["Fecha de cierre de recepcion de la oferta", "Fecha de cierre de recepción de la oferta", "Fecha de Cierre"])
     adjudication = _find_date(text, ["Fecha de Adjudicacion", "Fecha de Adjudicación"])
-    amount_match = re.search(r"(?:TOTAL FINAL|Monto estimado para la gran compra)\s*:?\s*\$?\s*([\d.,]+)", text, re.I)
+    amount_match = re.search(
+        r"(?:Monto\s+Total\s+Adjudicado|Monto\s+Adjudicado|Monto\s+Total\s+Estimado|"
+        r"TOTAL\s+FINAL|Monto\s+estimado\s+para\s+la\s+gran\s+compra)"
+        r"\s*:?\s*(?:CLP\s*)?\$?\s*([\d][\d.,]*)",
+        text,
+        re.I,
+    )
     if publication:
         fields["Fecha y Hora de Publicacion"] = _date_from_chile(publication)
         fields["convocatoria_inicio"] = fields["Fecha y Hora de Publicacion"]
@@ -353,7 +406,7 @@ def _click_first_containing(driver, text: str) -> bool:
     return False
 
 
-def _enrich_regular_detail(driver, row: dict, diagnostics: List[str]) -> dict:
+def _enrich_regular_detail(driver, row: dict, diagnostics: List[str], include_attachments: bool = True) -> dict:
     original = driver.current_window_handle
     original_url = driver.current_url
     before = set(driver.window_handles)
@@ -380,7 +433,7 @@ def _enrich_regular_detail(driver, row: dict, diagnostics: List[str]) -> dict:
     row.update(_parse_detail(driver.page_source))
     row["Estado Comercial"] = _estado_comercial(row.get("Vigencia", ""), row.get("propuesta_fin", ""), row.get("consulta_fin", ""))
 
-    if _click_first_containing(driver, "Ver adjuntos"):
+    if include_attachments and _click_first_containing(driver, "Ver adjuntos"):
         time.sleep(1.5)
         if len(driver.window_handles) > len(before) + 1:
             attachment_handle = [h for h in driver.window_handles if h not in before and h != driver.current_window_handle][-1]
@@ -416,10 +469,18 @@ def search_mercado_publico(
     max_results: int = 25,
     enrich_details: bool = False,
     max_details: int = 10,
+    years: List[int] | None = None,
+    months: List[int] | None = None,
+    progress_callback: Callable[[float, str], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
 ) -> Tuple[pd.DataFrame, List[str]]:
     diagnostics: List[str] = []
     driver = _driver(headless=headless)
     try:
+        if cancel_callback:
+            cancel_callback()
+        if progress_callback:
+            progress_callback(0.05, f"Abriendo Mercado Público: {mode}")
         if mode == "grandes_compras":
             driver.get(LARGE_PURCHASES_URL)
         else:
@@ -428,16 +489,45 @@ def search_mercado_publico(
             _click_search(driver)
         _wait_results(driver, keyword)
         time.sleep(1)
-        rows = _collect_result_rows(driver, mode, max_results)
+        rows = _collect_result_rows(driver, mode, max_results, progress_callback, cancel_callback)
+        if progress_callback:
+            progress_callback(0.35, f"{len(rows)} procesos detectados en {mode}")
         diagnostics.append(f"Mercado Publico {mode}: {len(rows)} procesos detectados para keyword={keyword} incluyendo paginas siguientes")
+        if years or months:
+            detected_count = len(rows)
+            rows = _filter_rows_for_period(rows, years, months)
+            diagnostics.append(
+                f"Mercado Publico {mode}: {len(rows)}/{detected_count} procesos dentro del periodo solicitado"
+            )
 
-        if enrich_details and rows and mode == "licitaciones":
-            limit = min(max_details or len(rows), len(rows))
-            for index in range(limit):
+        if rows and mode == "licitaciones":
+            explicit_limit = min(max_details or len(rows), len(rows)) if enrich_details else 0
+            explicit_indexes = set(range(explicit_limit))
+            closed_indexes = {index for index, row in enumerate(rows) if _is_closed_process(row)}
+            detail_indexes = sorted(explicit_indexes | closed_indexes)
+            if closed_indexes:
+                diagnostics.append(
+                    f"Mercado Publico licitaciones: leyendo montos de {len(closed_indexes)} procesos cerrados"
+                )
+            total_details = max(1, len(detail_indexes))
+            for position, index in enumerate(detail_indexes, start=1):
+                if cancel_callback:
+                    cancel_callback()
                 try:
-                    rows[index] = _enrich_regular_detail(driver, rows[index], diagnostics)
+                    rows[index] = _enrich_regular_detail(
+                        driver,
+                        rows[index],
+                        diagnostics,
+                        include_attachments=index in explicit_indexes,
+                    )
                 except Exception as exc:
+                    if cancel_callback:
+                        cancel_callback()
                     diagnostics.append(f"{rows[index].get('Nomenclatura', index)}: no se pudo enriquecer detalle ({type(exc).__name__}: {exc})")
+                if progress_callback:
+                    progress_callback(0.35 + (position / total_details) * 0.6, f"Revisando ficha {position} de {total_details}")
+        if progress_callback:
+            progress_callback(1.0, f"Consulta {mode} completada")
         return pd.DataFrame(rows), diagnostics
     finally:
         driver.quit()

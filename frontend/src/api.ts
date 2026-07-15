@@ -2,9 +2,14 @@ export type Stats = {
   total: number;
   by_source: Record<string, number>;
   by_priority: Record<string, number>;
+  by_region: Record<string, number>;
   vigentes: number;
   cerrados: number;
   total_amount: number;
+  with_ruc: number;
+  with_region: number;
+  ocds_total: number;
+  documents_known: number;
 };
 
 export type Opportunity = {
@@ -15,6 +20,12 @@ export type Opportunity = {
   object_type: string;
   description: string;
   region: string;
+  buyer_ruc: string;
+  ocid: string;
+  tender_id: string;
+  ocds_source_id: string;
+  release_id: string;
+  documents_count: number;
   amount: number;
   currency: string;
   status: string;
@@ -35,6 +46,9 @@ export type Run = {
   source: string;
   status: "queued" | "running" | "completed" | "failed" | string;
   rows_found: number;
+  progress: number;
+  progress_message: string;
+  cancel_requested: boolean;
   diagnostics: string;
   error_message: string;
   started_at: string | null;
@@ -46,10 +60,12 @@ export type AlertRule = {
   name: string;
   channel: string;
   destination: string;
+  keywords: string;
   min_priority: string;
-  hours_before_deadline: number;
   is_active: boolean;
 };
+
+export type AlertRulePayload = Omit<AlertRule, "id">;
 
 export type Alert = {
   id: number;
@@ -58,6 +74,11 @@ export type Alert = {
   alert_type: string;
   status: string;
   message: string;
+  attempt_count: number;
+  next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  last_error: string;
+  provider_message_id: string;
   sent_at: string | null;
 };
 
@@ -72,6 +93,58 @@ export type DocumentRecord = {
   status: string;
   error_message: string;
   created_at: string;
+};
+
+export type AccessProfile = "peru" | "chile" | "both";
+
+export type UserRecord = {
+  id: number;
+  email: string;
+  full_name: string;
+  first_name: string;
+  last_name: string;
+  position: string;
+  address: string;
+  phone_peru: string;
+  phone_chile: string;
+  access_profile: AccessProfile;
+  role: "viewer" | "admin";
+  is_active: boolean;
+  created_at: string;
+};
+
+export type UserCreatePayload = {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  position: string;
+  address: string;
+  phone_peru: string;
+  phone_chile: string;
+  access_profile: AccessProfile;
+  role: "viewer" | "admin";
+};
+
+export type RadarKeyword = {
+  id: number | null;
+  country: "peru" | "chile";
+  keyword: string;
+  is_default: boolean;
+};
+
+export type LegalDocumentKey = "terms" | "privacy" | "confidentiality";
+
+export type LegalDocumentRecord = {
+  key: LegalDocumentKey;
+  title: string;
+  content: string;
+  updated_at: string;
+};
+
+export type AppSettingsRecord = {
+  version_label: string;
+  updated_at: string | null;
 };
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
@@ -91,7 +164,18 @@ async function request<T>(path: string, token: string, init: RequestInit = {}): 
     },
   });
   if (!response.ok) {
-    const detail = await response.text();
+    const body = await response.text();
+    let detail = body;
+    try {
+      const parsed = JSON.parse(body);
+      detail = typeof parsed.detail === "string"
+        ? parsed.detail
+        : Array.isArray(parsed.detail)
+          ? parsed.detail.map((item: { msg?: string }) => item.msg || "Dato invalido").join(". ")
+          : body;
+    } catch {
+      // Preserve non-JSON backend responses.
+    }
     throw new ApiError(detail || response.statusText, response.status);
   }
   if (response.status === 204) {
@@ -115,7 +199,51 @@ export async function login(email: string, password: string) {
   return response.json() as Promise<{ access_token: string; token_type: string }>;
 }
 
+export async function requestPasswordReset(email: string) {
+  return request<{ message: string }>("/auth/forgot-password", "", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function confirmPasswordReset(token: string, password: string) {
+  return request<{ message: string }>("/auth/reset-password", "", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+}
+
 export const api = {
+  appSettings: () => request<AppSettingsRecord>("/app-settings", ""),
+  updateAppSettings: (token: string, versionLabel: string) =>
+    request<AppSettingsRecord>("/app-settings", token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version_label: versionLabel }),
+    }),
+  legalDocuments: () => request<LegalDocumentRecord[]>("/legal-documents", ""),
+  updateLegalDocument: (token: string, key: LegalDocumentKey, content: string) =>
+    request<LegalDocumentRecord>(`/legal-documents/${key}`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    }),
+  me: (token: string) => request<UserRecord>("/auth/me", token),
+  users: (token: string) => request<UserRecord[]>("/users", token),
+  createUser: (token: string, payload: UserCreatePayload) =>
+    request<UserRecord>("/users", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  updateUser: (token: string, userId: number, payload: Partial<UserCreatePayload> & { is_active?: boolean }) =>
+    request<UserRecord>(`/users/${userId}`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   stats: (token: string) => request<Stats>("/opportunities/stats", token),
   opportunities: (token: string, options: { runIds?: number[] } = {}) => {
     const params = new URLSearchParams();
@@ -126,7 +254,18 @@ export const api = {
     return request<Opportunity[]>(`/opportunities${query ? `?${query}` : ""}`, token);
   },
   runs: (token: string) => request<Run[]>("/runs", token),
+  radarKeywords: (token: string, country: "peru" | "chile") =>
+    request<RadarKeyword[]>(`/radar-keywords/${country}`, token),
+  createRadarKeyword: (token: string, country: "peru" | "chile", keyword: string) =>
+    request<RadarKeyword>(`/radar-keywords/${country}`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keyword }),
+    }),
+  deleteRadarKeyword: (token: string, country: "peru" | "chile", keywordId: number) =>
+    request<void>(`/radar-keywords/${country}/${keywordId}`, token, { method: "DELETE" }),
   run: (token: string, id: number) => request<Run>(`/runs/${id}`, token),
+  cancelRun: (token: string, id: number) => request<Run>(`/runs/${id}/cancel`, token, { method: "POST" }),
   startRun: (
     token: string,
     payload: {
@@ -141,6 +280,7 @@ export const api = {
       max_results: number;
       max_details: number;
       enrich_details: boolean;
+      commercial_mode?: "active" | "all";
     },
   ) =>
     request<Run>("/runs/start", token, {
@@ -158,18 +298,19 @@ export const api = {
     `${API_URL}/documents/${documentId}/download?token=${encodeURIComponent(token)}`,
   createAlertRule: (
     token: string,
-    payload: {
-      name: string;
-      channel: string;
-      destination: string;
-      min_priority: string;
-      hours_before_deadline: number;
-      is_active: boolean;
-    },
+    payload: AlertRulePayload,
   ) =>
     request<AlertRule>("/alerts/rules", token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+  updateAlertRule: (token: string, ruleId: number, payload: AlertRulePayload) =>
+    request<AlertRule>(`/alerts/rules/${ruleId}`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deleteAlertRule: (token: string, ruleId: number) =>
+    request<void>(`/alerts/rules/${ruleId}`, token, { method: "DELETE" }),
 };

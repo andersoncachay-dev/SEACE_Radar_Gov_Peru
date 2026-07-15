@@ -7,6 +7,8 @@ from typing import Dict, List, Tuple
 import pandas as pd
 import requests
 
+from .keyword_matching import contains_complete_phrase
+
 DEFAULT_BASE_URL = "https://contratacionesabiertas.oece.gob.pe/api"
 REQUEST_TIMEOUT = 30
 
@@ -91,10 +93,12 @@ def fetch_ocds_releases(base_url=DEFAULT_BASE_URL, limit=100, keyword="", endpoi
             releases = _extract_releases(payload)
             rows = [_flatten_release(x) for x in releases if isinstance(x, dict)]
             if keyword:
-                kw = keyword.lower()
                 rows = [
                     r for r in rows
-                    if kw in f"{r.get('entidad', '')} {r.get('descripcion', '')} {r.get('objeto', '')}".lower()
+                    if contains_complete_phrase(
+                        f"{r.get('entidad', '')} {r.get('descripcion', '')} {r.get('objeto', '')}",
+                        keyword,
+                    )
                 ]
             diagnostics.append(f"OK {url}: {len(rows)} registros")
             all_rows.extend(rows)

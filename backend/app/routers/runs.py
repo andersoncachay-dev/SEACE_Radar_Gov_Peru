@@ -1,28 +1,54 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, require_source_access, source_access_condition
 from ..models import ScrapeRun, SearchProfile, User
 from ..schemas import RunStart, ScrapeRunOut
-from ..services.run_service import execute_scrape_run
+from ..services.run_service import execute_scrape_run, request_run_cancel
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
 @router.get("", response_model=list[ScrapeRunOut])
-def list_runs(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return list(db.scalars(select(ScrapeRun).order_by(ScrapeRun.created_at.desc()).limit(100)).all())
+def list_runs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = select(ScrapeRun)
+    access_condition = source_access_condition(ScrapeRun.source, current_user)
+    if access_condition is not None:
+        query = query.where(access_condition)
+    return list(db.scalars(query.order_by(ScrapeRun.created_at.desc()).limit(100)).all())
 
 
 @router.get("/{run_id}", response_model=ScrapeRunOut)
-def get_run(run_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_run(run_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     run = db.get(ScrapeRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+    require_source_access(current_user, run.source)
+    return run
+
+
+@router.post("/{run_id}/cancel", response_model=ScrapeRunOut)
+def cancel_run(run_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    run = db.get(ScrapeRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    require_source_access(current_user, run.source)
+    if run.status in {"completed", "failed", "cancelled"}:
+        return run
+    run.cancel_requested = True
+    run.status = "cancelled"
+    run.progress_message = "Búsqueda detenida"
+    run.error_message = ""
+    run.finished_at = datetime.utcnow()
+    db.commit()
+    db.refresh(run)
+    request_run_cancel(run.id)
     return run
 
 
@@ -30,7 +56,7 @@ def get_run(run_id: int, _: User = Depends(get_current_user), db: Session = Depe
 def start_run(
     payload: RunStart,
     background_tasks: BackgroundTasks,
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     if payload.search_profile_id:
@@ -40,6 +66,7 @@ def start_run(
         source = profile.source
     else:
         source = payload.source
+    require_source_access(current_user, source)
     run = ScrapeRun(search_profile_id=payload.search_profile_id, source=source, status="queued")
     db.add(run)
     db.commit()

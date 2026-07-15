@@ -1,5 +1,5 @@
 
-from typing import Tuple, List
+from typing import Callable, Tuple, List
 import time
 import re
 from urllib.parse import urljoin
@@ -323,9 +323,12 @@ def _apply_if_valid(df,idx,row,info,diagnostics):
     return True
 
 
-def _enrich_details(driver,df,max_details,diagnostics):
+def _enrich_details(driver,df,max_details,diagnostics,progress_callback=None,cancel_callback=None):
     reviewed=0; applied=0
-    for idx,row in df.head(max_details).iterrows():
+    detail_rows=df.head(max_details)
+    total_details=max(1,len(detail_rows))
+    for position,(idx,row) in enumerate(detail_rows.iterrows(),start=1):
+        if cancel_callback: cancel_callback()
         nomen=row.get('Nomenclatura',''); row_no=row.get('N°',''); url=row.get('url_detalle','')
         try:
             before=set(driver.window_handles)
@@ -354,6 +357,7 @@ def _enrich_details(driver,df,max_details,diagnostics):
             else: driver.back()
             time.sleep(2)
         except Exception as e:
+            if cancel_callback: cancel_callback()
             diagnostics.append(f"No se pudo enriquecer cronograma fila {idx} / {nomen}: {type(e).__name__} - {e}")
             try:
                 if len(driver.window_handles)>1:
@@ -361,17 +365,20 @@ def _enrich_details(driver,df,max_details,diagnostics):
                 else: driver.back()
             except Exception: pass
             estado,vig=_infer_estado_cron(row); df.at[idx,'Estado Comercial']=estado; df.at[idx,'Vigencia']=vig
+        if progress_callback: progress_callback(position/total_details,f"Revisando cronograma {position} de {total_details}")
     diagnostics.append(f"Cronogramas revisados: {reviewed}/{min(max_details,len(df))}; aplicados correctamente: {applied}")
     return df
 
 
-def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2026',version='Seace 3',headless=False,max_wait=45,enrich_details=False,max_details=10)->Tuple[pd.DataFrame,List[str]]:
+def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2026',version='Seace 3',headless=False,max_wait=45,enrich_details=False,max_details=10,progress_callback: Callable[[float,str],None] | None=None,cancel_callback: Callable[[],None] | None=None)->Tuple[pd.DataFrame,List[str]]:
     diagnostics=[]; options=Options()
     if headless: options.add_argument('--headless=new')
     options.add_argument('--start-maximized'); options.add_argument('--disable-notifications'); options.add_argument('--disable-popup-blocking'); options.add_argument('--ignore-certificate-errors')
     options.add_argument('--no-sandbox'); options.add_argument('--disable-dev-shm-usage')
     driver=None
     try:
+        if cancel_callback: cancel_callback()
+        if progress_callback: progress_callback(0.05,"Abriendo SEACE")
         driver=webdriver.Chrome(options=options); wait=WebDriverWait(driver,max_wait); driver.get(url); diagnostics.append(f"GET navegador: {url}")
         time.sleep(3); tabs=driver.find_elements(By.XPATH,"//*[contains(text(),'Buscador de Procedimientos de Selección')]")
         if tabs: driver.execute_script("arguments[0].click();",tabs[0]); diagnostics.append('Pestaña Procedimientos seleccionada'); time.sleep(3)
@@ -383,12 +390,15 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2
         for bid in [f"{PROCESS_FORM}:btnBuscarSelToken",f"{PROCESS_FORM}:btnBuscarSel"]:
             if _click_like_user(driver,bid): diagnostics.append(f"Click botón: {bid}"); clicked=True; break
         if not clicked: diagnostics.append('No se encontró botón Buscar por ID; intentando submit del formulario'); driver.execute_script("document.getElementById(arguments[0]).submit();",PROCESS_FORM)
+        if progress_callback: progress_callback(0.2,"Esperando resultados de SEACE")
         end=time.time()+max_wait; last_len=0; best_info=[]
         while time.time()<end:
+            if cancel_callback: cancel_callback()
             time.sleep(1); html=driver.page_source
             if len(html)!=last_len: last_len=len(html); diagnostics.append(f"HTML len actual: {last_len}")
             df,tables_count,candidates_info=_parse_tables(html); best_info=candidates_info
             if not df.empty:
+                if progress_callback: progress_callback(0.4,f"{len(df)} procesos detectados en SEACE")
                 with open('respuesta_seace_browser.html','w',encoding='utf-8',errors='ignore') as f: f.write(html)
                 df=_normalize(df)
                 for col in [
@@ -411,7 +421,7 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2
                     if col not in df.columns: df[col]=''
                 if enrich_details:
                     diagnostics.append(f"Enriqueciendo cronogramas para máximo {max_details} procesos...")
-                    df=_enrich_details(driver,df,max_details,diagnostics)
+                    df=_enrich_details(driver,df,max_details,diagnostics,lambda value,message: progress_callback(0.4+value*0.55,message) if progress_callback else None,cancel_callback)
                 for idx,row in df.iterrows():
                     estado,vig=_infer_estado_cron(row); df.at[idx,'Estado Comercial']=estado; df.at[idx,'Vigencia']=vig
                     dias_consulta = _dias_hasta(
@@ -430,12 +440,14 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',year='2
                         str(dias_propuesta) if dias_propuesta != '' else ''
                     )
                 diagnostics.append(f"Tablas HTML detectadas: {tables_count}"); diagnostics.append(f"Candidatas: {candidates_info}"); diagnostics.append(f"Tabla detectada navegador: {len(df)} filas / {len(df.columns)} columnas")
+                if progress_callback: progress_callback(1.0,"Consulta SEACE completada")
                 return df,diagnostics
         html=driver.page_source
         with open('respuesta_seace_browser.html','w',encoding='utf-8',errors='ignore') as f: f.write(html)
         df,tables_count,candidates_info=_parse_tables(html); diagnostics.append(f"Tablas HTML al final: {tables_count}"); diagnostics.append(f"Candidatas al final: {candidates_info or best_info}"); diagnostics.append('No se detectó tabla con navegador.')
         return pd.DataFrame(),diagnostics
     except Exception as e:
+        if cancel_callback: cancel_callback()
         diagnostics.append(f"Error navegador: {type(e).__name__} - {e}"); return pd.DataFrame(),diagnostics
     finally:
         try:

@@ -4,11 +4,13 @@ import json
 import zipfile
 from io import BytesIO
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urljoin
 
 import pandas as pd
 import requests
+
+from .keyword_matching import contains_complete_phrase
 
 
 API_BASE = "https://contratacionesabiertas.oece.gob.pe/api/v1"
@@ -59,7 +61,7 @@ def _contains_keyword(release: dict[str, Any], keyword: str) -> bool:
         parts.append(item.get("description") or "")
     for document in tender.get("documents") or []:
         parts.extend([document.get("title") or "", document.get("description") or "", document.get("documentType") or ""])
-    return keyword.lower() in " ".join(parts).lower()
+    return contains_complete_phrase(" ".join(parts), keyword)
 
 
 def _amount(tender: dict[str, Any]) -> tuple[float, str]:
@@ -280,11 +282,46 @@ def _csv_status(row: pd.Series) -> str:
     return "Proceso Culminado"
 
 
+def _csv_region(row: pd.Series) -> str:
+    for name, value in row.items():
+        normalized = str(name).lower()
+        if not any(term in normalized for term in ("departamento", "regi", "localidad", "department", "region", "locality")):
+            continue
+        if any(term in normalized for term in ("fecha", "date", "moneda", "currency", "url")):
+            continue
+        text = _clean(value)
+        if text and text.lower() not in {"peru", "pen", "s/"}:
+            return text
+    return ""
+
+
+def _csv_status(row: pd.Series) -> str:
+    now = datetime.now(timezone.utc)
+    consultation_end = None
+    tender_end = None
+    for name, value in row.items():
+        normalized = str(name).lower()
+        parsed = _parse_date(value)
+        if parsed is None:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if "periodo de consulta" in normalized and "fecha de fin" in normalized:
+            consultation_end = parsed
+        if ("periodo de licitaci" in normalized or "tenderperiod" in normalized) and ("fecha de fin" in normalized or "enddate" in normalized):
+            tender_end = parsed
+    if consultation_end and now <= consultation_end:
+        return "Vigente para Consultas y Propuesta"
+    if tender_end and now <= tender_end:
+        return "Vigente para Propuesta"
+    return "Proceso Culminado"
+
+
 def _csv_matches(row: pd.Series, keyword: str) -> bool:
     if not keyword:
         return True
-    all_values_haystack = " ".join(_clean(value) for value in row.values).lower()
-    if keyword.lower() in all_values_haystack:
+    all_values_haystack = " ".join(_clean(value) for value in row.values)
+    if contains_complete_phrase(all_values_haystack, keyword):
         return True
     haystack = " ".join(
         _csv_col(row, name)
@@ -296,7 +333,7 @@ def _csv_matches(row: pd.Series, keyword: str) -> bool:
             "Entrega compilada:Planeación:Presupuesto:Título del Proyecto",
         ]
     )
-    return keyword.lower() in haystack.lower()
+    return contains_complete_phrase(haystack, keyword)
 
 
 def _parse_csv_row(row: pd.Series, source_id: str) -> dict[str, Any]:
@@ -315,7 +352,7 @@ def _parse_csv_row(row: pd.Series, source_id: str) -> dict[str, Any]:
         "Estado Comercial": _csv_status(row),
         "Vigencia": _csv_col(row, "Entrega compilada:Licitación:Método de contratación", "Entrega compilada:Licitación:Detalles del método de contratación"),
         "url_detalle": urljoin(API_BASE + "/", f"release/{release_id}") if release_id else "",
-        "region": "",
+        "region": _csv_region(row),
         "consulta_inicio": _csv_date(row, "Entrega compilada:Licitación:Periodo de consulta:Fecha de inicio"),
         "consulta_fin": _csv_date(row, "Entrega compilada:Licitación:Periodo de consulta:Fecha de fin"),
         "propuesta_inicio": _csv_date(row, "Entrega compilada:Licitación:Periodo de licitación:Fecha de inicio"),
@@ -338,6 +375,8 @@ def _search_monthly_downloads(
     month: int | None = None,
     years: list[int] | None = None,
     months: list[int] | None = None,
+    progress_callback: Callable[[float, str], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     today = datetime.now()
     target_years = years or ([year] if year else [today.year])
@@ -348,20 +387,32 @@ def _search_monthly_downloads(
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     limit = max_results if max_results and max_results > 0 else None
+    total_downloads = max(1, len(sources) * len(target_years) * len(target_months))
+    completed_downloads = 0
     for source_id in sources:
         for target_year in target_years:
             for target_month in target_months:
+                if cancel_callback:
+                    cancel_callback()
                 try:
                     df, download_diagnostics = _read_monthly_csv(source_id, int(target_year), int(target_month))
                     diagnostics.extend(download_diagnostics)
                 except Exception as exc:
                     diagnostics.append(f"OCDS {source_id}: error leyendo descarga {int(target_year)}-{int(target_month):02d}: {type(exc).__name__}: {exc}")
+                    completed_downloads += 1
+                    if progress_callback:
+                        progress_callback(completed_downloads / total_downloads, f"Revisando {source_id} {int(target_year)}-{int(target_month):02d}")
                     continue
                 if df.empty:
+                    completed_downloads += 1
+                    if progress_callback:
+                        progress_callback(completed_downloads / total_downloads, f"Revisando {source_id} {int(target_year)}-{int(target_month):02d}")
                     continue
                 matches = df[df.apply(lambda row: _csv_matches(row, keyword), axis=1)].copy()
                 diagnostics.append(f"OCDS {source_id}: {len(matches)} coincidencias CSV para {keyword} en {int(target_year)}-{int(target_month):02d}")
                 for _, row in matches.iterrows():
+                    if cancel_callback:
+                        cancel_callback()
                     parsed = _parse_csv_row(row, source_id)
                     parsed["propuesta_inicio"] = None
                     parsed["propuesta_fin"] = None
@@ -372,6 +423,9 @@ def _search_monthly_downloads(
                     rows.append(parsed)
                     if limit is not None and len(rows) >= limit:
                         return rows, diagnostics
+                completed_downloads += 1
+                if progress_callback:
+                    progress_callback(completed_downloads / total_downloads, f"Revisando {source_id} {int(target_year)}-{int(target_month):02d}")
     return rows, diagnostics
 
 
@@ -387,6 +441,8 @@ def search_oece_ocds(
     page_size: int = 100,
     sources: tuple[str, ...] = DEFAULT_SOURCES,
     allow_release_fallback: bool = False,
+    progress_callback: Callable[[float, str], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     diagnostics: list[str] = [
         "Fuente: Portal de Contrataciones Abiertas OECE API OCDS",
@@ -405,6 +461,8 @@ def search_oece_ocds(
         month=month,
         years=years,
         months=months,
+        progress_callback=progress_callback,
+        cancel_callback=cancel_callback,
     )
     diagnostics.extend(download_diagnostics)
     rows.extend(download_rows)
@@ -415,6 +473,8 @@ def search_oece_ocds(
         return pd.DataFrame(rows), diagnostics
 
     for source_id in sources:
+        if cancel_callback:
+            cancel_callback()
         releases, fetch_diagnostics = _fetch_releases(source_id, max_pages=max_pages, page_size=page_size)
         diagnostics.extend(fetch_diagnostics)
         for release in releases:

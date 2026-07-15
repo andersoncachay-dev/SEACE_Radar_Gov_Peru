@@ -1,9 +1,9 @@
 from .keywords import CORE_KEYWORDS, TARGET_ENTITIES, TARGET_REGIONS, ENTERPRISE_REQUIREMENTS
+from .keyword_matching import contains_any_complete_phrase
 
 
 def contains_any(text, terms):
-    t = str(text or "").lower()
-    return any(term in t for term in terms)
+    return contains_any_complete_phrase(text, terms)
 
 
 def detectar_sector(row):

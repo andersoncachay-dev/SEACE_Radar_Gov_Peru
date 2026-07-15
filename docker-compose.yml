@@ -26,6 +26,16 @@ services:
       DATABASE_URL: postgresql+psycopg://seace:seace_dev_password@db:5432/seace_radar
       SECRET_KEY: change-this-secret-before-production
       ENVIRONMENT: docker
+      FRONTEND_URL: "${FRONTEND_URL:-http://127.0.0.1:5173}"
+      PASSWORD_RESET_MINUTES: "${PASSWORD_RESET_MINUTES:-30}"
+      EMAIL_PROVIDER: "${EMAIL_PROVIDER:-smtp}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      AZURE_COMMUNICATION_CONNECTION_STRING: "${AZURE_COMMUNICATION_CONNECTION_STRING:-}"
+      AZURE_EMAIL_SENDER: "${AZURE_EMAIL_SENDER:-}"
       ENABLE_MENOR8_MODULE: "false"
       ENABLE_SCHEDULER: "true"
       SCHEDULER_INTERVAL_MINUTES: "60"

@@ -552,6 +552,17 @@ def _click_chile_attachments(driver) -> bool:
     return False
 
 
+def _chile_protected_attachments_url(driver) -> str:
+    try:
+        onclick = driver.find_element(By.ID, "imgAdjuntos").get_attribute("onclick") or ""
+    except Exception:
+        return ""
+    match = re.search(r"open\('([^']+ViewAttachment\.aspx\?enc=[^']+)'", onclick, re.I)
+    if not match:
+        return ""
+    return urljoin(driver.current_url, match.group(1))
+
+
 def _chile_direct_attachment_links(driver) -> list[dict]:
     return driver.execute_script(
         r"""
@@ -870,10 +881,49 @@ def _unique_documents(docs: list[Document]) -> list[Document]:
     return unique
 
 
+def _ordered_documents(docs: list[Document]) -> list[Document]:
+    unique = _unique_documents(docs)
+    return sorted(
+        unique,
+        key=lambda doc: (
+            0 if (doc.title or "").lower().startswith("ficha mercado publico") else 1,
+            0 if doc.status == "downloaded" else 1,
+            (doc.title or doc.filename or "").lower(),
+        ),
+    )
+
+
+def _is_chile_protected_route(doc: Document) -> bool:
+    return (doc.title or "").lower().startswith("ruta protegida")
+
+
+def _visible_chile_documents(docs: list[Document]) -> list[Document]:
+    visible = [doc for doc in docs if doc.status == "downloaded" or _is_chile_protected_route(doc)]
+    return _ordered_documents(visible)
+
+
+def _register_chile_protected_route(db: Session, opportunity: Opportunity, protected_url: str) -> Document | None:
+    if not protected_url:
+        return None
+    return _register_document(
+        db,
+        opportunity,
+        title="Ruta Protegida Mercado Publico",
+        source_url=protected_url,
+        status="error",
+        error_message=f"Ruta Protegida: Descargar desde el link: {protected_url}",
+    )
+
+
 def _discover_chile_documents(db: Session, opportunity: Opportunity, driver, target_dir: Path) -> list[Document]:
     docs: list[Document] = []
     driver.get(opportunity.detail_url)
     time.sleep(4)
+    protected_url = _chile_protected_attachments_url(driver)
+    docs.extend(_click_chile_ficha_pdf(db, driver, opportunity, target_dir))
+    driver.get(opportunity.detail_url)
+    time.sleep(2)
+    protected_url = protected_url or _chile_protected_attachments_url(driver)
     session = requests.Session()
     for cookie in driver.get_cookies():
         session.cookies.set(cookie.get("name"), cookie.get("value"), domain=cookie.get("domain"))
@@ -893,21 +943,17 @@ def _discover_chile_documents(db: Session, opportunity: Opportunity, driver, tar
             )
         )
     downloaded = [doc for doc in docs if doc.status == "downloaded"]
-    if downloaded:
-        return _unique_documents(downloaded)
-    docs.extend(_click_chile_direct_links(db, driver, opportunity, target_dir))
-    downloaded = [doc for doc in docs if doc.status == "downloaded"]
-    if downloaded:
-        return _unique_documents(downloaded)
-    docs.extend(_click_chile_ficha_pdf(db, driver, opportunity, target_dir))
-    downloaded = [doc for doc in docs if doc.status == "downloaded"]
-    if downloaded:
-        return _unique_documents(downloaded)
+    if len(downloaded) <= 1:
+        docs.extend(_click_chile_direct_links(db, driver, opportunity, target_dir))
     driver.get(opportunity.detail_url)
     time.sleep(2)
     before_handles = set(driver.window_handles)
     if not _click_chile_attachments(driver):
-        return docs or [
+        protected_doc = _register_chile_protected_route(db, opportunity, protected_url)
+        if protected_doc:
+            docs.append(protected_doc)
+        visible = _visible_chile_documents(docs)
+        return visible if visible else [
             _register_document(
                 db,
                 opportunity,
@@ -923,6 +969,10 @@ def _discover_chile_documents(db: Session, opportunity: Opportunity, driver, tar
         time.sleep(2)
     actions = _chile_attachment_actions(driver)
     cookies = driver.get_cookies()
+    if not actions and "403" in (driver.current_url or ""):
+        protected_doc = _register_chile_protected_route(db, opportunity, protected_url or opportunity.detail_url)
+        if protected_doc:
+            docs.append(protected_doc)
     for index, candidate in enumerate(actions, start=1):
         title = _clean(candidate.get("title") or "") or f"Documento Mercado Publico {index}"
         href = _clean(candidate.get("href") or "")
@@ -971,15 +1021,21 @@ def _discover_chile_documents(db: Session, opportunity: Opportunity, driver, tar
                     error_message=f"{type(exc).__name__}: {exc}",
                 )
             )
-    if docs:
-        return docs
+    if protected_url and not any(_is_chile_protected_route(doc) for doc in docs):
+        protected_doc = _register_chile_protected_route(db, opportunity, protected_url)
+        if protected_doc:
+            docs.append(protected_doc)
+    visible = _visible_chile_documents(docs)
+    if visible:
+        return visible
     return [
         _register_document(
             db,
             opportunity,
-            title="Adjuntos Mercado Publico sin descarga",
+            title="Ruta Protegida Mercado Publico",
+            source_url=protected_url or opportunity.detail_url,
             status="error",
-            error_message="Se abrio Ver adjuntos, pero no se pudo activar una descarga en Acciones.",
+            error_message=f"Ruta Protegida: Descargar desde el link: {protected_url or opportunity.detail_url}",
         )
     ]
 

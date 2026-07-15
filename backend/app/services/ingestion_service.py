@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Opportunity, OpportunitySnapshot
+from .entity_catalog_service import find_entity
 
 
 def _as_text(value: Any) -> str:
@@ -41,6 +42,14 @@ def _merge_datetime(existing: datetime | None, value: Any) -> datetime | None:
     return parsed if parsed is not None else existing
 
 
+def _first_text(row: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = _as_text(row.get(key))
+        if value:
+            return value
+    return ""
+
+
 def _content_hash(row: dict[str, Any]) -> str:
     payload = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -53,30 +62,53 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
 
     for _, raw in rows.iterrows():
         row = raw.to_dict()
-        external_id = _as_text(row.get("nomenclatura") or row.get("codigo") or row.get("Nomenclatura"))
+        external_id = _first_text(row, "nomenclatura", "codigo", "Nomenclatura")
         if not external_id:
             continue
         existing = db.scalar(select(Opportunity).where(Opportunity.source == source, Opportunity.external_id == external_id))
         opportunity = existing or Opportunity(source=source, external_id=external_id)
         previous_hash = opportunity.content_hash if existing else ""
 
-        opportunity.entity = _as_text(row.get("entidad") or row.get("Nombre o Sigla de la Entidad"))
-        opportunity.nomenclature = _as_text(row.get("nomenclatura") or row.get("codigo") or row.get("Nomenclatura"))
-        opportunity.object_type = _as_text(row.get("objeto") or row.get("Objeto de Contratación"))
-        opportunity.description = _as_text(row.get("descripcion") or row.get("Descripción de Objeto"))
-        opportunity.region = _as_text(row.get("region"))
-        opportunity.amount = _as_float(row.get("monto") or row.get("VR / VE / Cuantía de la contratación"))
-        opportunity.currency = _as_text(row.get("moneda") or row.get("Moneda"))
-        opportunity.status = _as_text(row.get("estado_operativo") or row.get("estado_comercial") or row.get("Estado Comercial"))
-        opportunity.priority = _as_text(row.get("prioridad") or "C")
+        opportunity.entity = _first_text(row, "entidad", "Nombre o Sigla de la Entidad")
+        opportunity.nomenclature = _first_text(row, "nomenclatura", "codigo", "Nomenclatura")
+        opportunity.object_type = _first_text(row, "objeto", "Objeto de Contratacion", "Objeto de Contratación")
+        opportunity.description = _first_text(row, "descripcion", "Descripcion de Objeto", "Descripción de Objeto")
+        catalog_entity = find_entity(opportunity.entity)
+        opportunity.region = _first_text(row, "region", "Departamento", "Región") or (catalog_entity or {}).get("region", "")
+        opportunity.buyer_ruc = _first_text(row, "ruc", "RUC") or (catalog_entity or {}).get("ruc", "")
+        opportunity.ocid = _as_text(row.get("ocid"))
+        opportunity.tender_id = _as_text(row.get("tender_id"))
+        opportunity.ocds_source_id = _as_text(row.get("source_id"))
+        opportunity.release_id = _as_text(row.get("release_id"))
+        documents_payload = _as_text(row.get("documentos_ocds"))
+        if documents_payload:
+            try:
+                parsed_documents = json.loads(documents_payload)
+                opportunity.documents_count = len(parsed_documents) if isinstance(parsed_documents, list) else 0
+            except json.JSONDecodeError:
+                opportunity.documents_count = 0
+        else:
+            opportunity.documents_count = 0
+        incoming_amount = _as_float(
+            row.get("monto")
+            or row.get("VR / VE / Cuantia de la contratacion")
+            or row.get("VR / VE / Cuantía de la contratación")
+        )
+        # Result listings do not expose the amount. Preserve a value previously
+        # collected from the detail page when a later lightweight scan returns 0.
+        if incoming_amount > 0 or not existing:
+            opportunity.amount = incoming_amount
+        opportunity.currency = _first_text(row, "moneda", "Moneda")
+        opportunity.status = _first_text(row, "estado_operativo", "estado_comercial", "Estado Comercial")
+        opportunity.priority = _first_text(row, "prioridad") or "C"
         opportunity.score = int(_as_float(row.get("score")))
         opportunity.reasons = _as_text(row.get("motivos_score"))
-        opportunity.detail_url = _as_text(row.get("url_detalle") or row.get("detalle_url"))
+        opportunity.detail_url = _first_text(row, "url_detalle", "detalle_url")
         opportunity.requirement_pdf_url = _as_text(row.get("requerimiento_pdf"))
         opportunity.requirement_pdf_local = _as_text(row.get("requerimiento_pdf_local"))
         opportunity.publication_date = _merge_datetime(
             opportunity.publication_date,
-            row.get("fecha_publicacion") or row.get("Fecha y Hora de Publicacion"),
+            row.get("fecha_publicacion") or row.get("Fecha y Hora de Publicacion") or row.get("Fecha y Hora de Publicación"),
         )
         opportunity.consultation_deadline = _merge_datetime(opportunity.consultation_deadline, row.get("consulta_fin"))
         opportunity.quote_deadline = _merge_datetime(opportunity.quote_deadline, row.get("cotizacion_fin"))

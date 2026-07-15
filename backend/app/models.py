@@ -19,11 +19,28 @@ class User(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    last_name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    position: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    address: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    phone_peru: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    phone_chile: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    access_profile: Mapped[str] = mapped_column(String(20), default="peru", nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), default="viewer", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     search_profiles: Mapped[list["SearchProfile"]] = relationship(back_populates="owner")
+
+
+class PasswordResetToken(TimestampMixin, Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class SearchProfile(TimestampMixin, Base):
@@ -43,6 +60,36 @@ class SearchProfile(TimestampMixin, Base):
     runs: Mapped[list["ScrapeRun"]] = relationship(back_populates="search_profile")
 
 
+class RadarKeyword(TimestampMixin, Base):
+    __tablename__ = "radar_keywords"
+    __table_args__ = (UniqueConstraint("country", "normalized_keyword", name="uq_radar_keywords_country_normalized"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    country: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    keyword: Mapped[str] = mapped_column(String(80), nullable=False)
+    normalized_keyword: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class LegalDocument(TimestampMixin, Base):
+    __tablename__ = "legal_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(40), unique=True, index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class AppSetting(TimestampMixin, Base):
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class ScrapeRun(TimestampMixin, Base):
     __tablename__ = "scrape_runs"
 
@@ -53,6 +100,9 @@ class ScrapeRun(TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     rows_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    progress_message: Mapped[str] = mapped_column(String(255), default="En cola", nullable=False)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     diagnostics: Mapped[str] = mapped_column(Text, default="", nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
@@ -71,6 +121,12 @@ class Opportunity(TimestampMixin, Base):
     object_type: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     region: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    buyer_ruc: Mapped[str] = mapped_column(String(30), default="", nullable=False)
+    ocid: Mapped[str] = mapped_column(String(220), default="", nullable=False)
+    tender_id: Mapped[str] = mapped_column(String(180), default="", nullable=False)
+    ocds_source_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    release_id: Mapped[str] = mapped_column(String(220), default="", nullable=False)
+    documents_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     status: Mapped[str] = mapped_column(String(120), default="", nullable=False)
@@ -121,6 +177,7 @@ class AlertRule(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     channel: Mapped[str] = mapped_column(String(40), default="email", nullable=False)
     destination: Mapped[str] = mapped_column(String(255), nullable=False)
+    keywords: Mapped[str] = mapped_column(Text, default="", nullable=False)
     min_priority: Mapped[str] = mapped_column(String(10), default="A", nullable=False)
     hours_before_deadline: Mapped[int] = mapped_column(Integer, default=48, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -136,4 +193,9 @@ class Alert(TimestampMixin, Base):
     alert_type: Mapped[str] = mapped_column(String(80), nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
     message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    provider_message_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

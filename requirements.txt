@@ -16,3 +16,5 @@ email-validator
 python-multipart
 apscheduler
 psycopg[binary]
+azure-communication-email>=1.0.0
+azure-communication-messages>=1.1.0

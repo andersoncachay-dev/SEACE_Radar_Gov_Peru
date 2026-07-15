@@ -21,12 +21,15 @@ def main() -> None:
         user = db.scalar(select(User).where(User.email == email))
         if user:
             user.full_name = full_name
+            user.first_name = full_name
+            user.last_name = ""
+            user.access_profile = "both"
             user.role = "admin"
             user.is_active = True
             user.password_hash = hash_password(password)
             action = "updated"
         else:
-            db.add(User(email=email, full_name=full_name, role="admin", password_hash=hash_password(password)))
+            db.add(User(email=email, full_name=full_name, first_name=full_name, access_profile="both", role="admin", password_hash=hash_password(password)))
             action = "created"
         db.commit()
         print(f"Admin user {action}: {email}")
