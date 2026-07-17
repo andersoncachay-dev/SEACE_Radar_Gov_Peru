@@ -146,6 +146,8 @@ class Opportunity(TimestampMixin, Base):
     amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     status: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    source_status: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    contract_duration: Mapped[str] = mapped_column(String(60), default="", nullable=False)
     priority: Mapped[str] = mapped_column(String(10), default="C", nullable=False)
     score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reasons: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -164,6 +166,7 @@ class Opportunity(TimestampMixin, Base):
     archived_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     archive_country: Mapped[str] = mapped_column(String(10), default="", nullable=False)
     archive_key: Mapped[str] = mapped_column(String(180), default="", nullable=False)
+    archive_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
 
 class OpportunitySnapshot(TimestampMixin, Base):

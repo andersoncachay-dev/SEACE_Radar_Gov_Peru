@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import tempfile
 import time
 import unicodedata
 from typing import Callable, List, Tuple
@@ -32,7 +35,7 @@ def _norm(value: str) -> str:
     return text.encode("ascii", "ignore").decode("ascii").lower()
 
 
-def _driver(headless: bool = True):
+def _driver(headless: bool = True, download_dir: str | None = None):
     options = Options()
     if headless:
         options.add_argument("--headless=new")
@@ -42,7 +45,25 @@ def _driver(headless: bool = True):
     options.add_argument("--window-size=1440,1100")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
-    return webdriver.Chrome(options=options)
+    if download_dir:
+        options.add_experimental_option(
+            "prefs",
+            {
+                "download.default_directory": download_dir,
+                "download.prompt_for_download": False,
+                "download.directory_upgrade": True,
+                "safebrowsing.enabled": True,
+            },
+        )
+    driver = webdriver.Chrome(options=options)
+    if download_dir:
+        # Headless Chrome ignores the download prefs above unless downloads are
+        # also allowed explicitly through DevTools for this session.
+        driver.execute_cdp_cmd(
+            "Page.setDownloadBehavior",
+            {"behavior": "allow", "downloadPath": download_dir},
+        )
+    return driver
 
 
 def _set_search_text(driver, keyword: str) -> None:
@@ -118,6 +139,135 @@ def _wait_results(driver, keyword: str) -> None:
     except TimeoutException:
         if keyword.lower() not in driver.page_source.lower():
             raise RuntimeError("Mercado Publico no devolvio resultados en el tiempo esperado.")
+
+
+def _find_excel_download_url(driver) -> str:
+    for item in driver.find_elements(By.CSS_SELECTOR, "a"):
+        if not item.is_displayed():
+            continue
+        onclick = item.get_attribute("onclick") or ""
+        match = re.search(r"window\.open\('([^']*GrillaExcel\.aspx[^']*)'", onclick)
+        if match:
+            return urljoin(driver.current_url, match.group(1))
+    return ""
+
+
+def _excel_column(frame: pd.DataFrame, *labels: str) -> str | None:
+    normalized = {_norm(str(column)): column for column in frame.columns}
+    for label in labels:
+        column = normalized.get(_norm(label))
+        if column is not None:
+            return column
+    return None
+
+
+def _download_excel_dataframe(driver, download_dir: str, timeout: float = 25.0) -> pd.DataFrame | None:
+    """Returns None when Mercado Publico genuinely found nothing to export -
+    a search with zero matches never renders the download link."""
+    excel_url = _find_excel_download_url(driver)
+    if not excel_url:
+        if "no se encontraron" in _norm(driver.page_source):
+            return None
+        raise RuntimeError("No se encontro el enlace de descarga de Excel en Mercado Publico.")
+    before = set(os.listdir(download_dir)) if os.path.isdir(download_dir) else set()
+    driver.get(excel_url)
+    deadline = time.time() + timeout
+    downloaded_path = ""
+    while time.time() < deadline:
+        current = set(os.listdir(download_dir)) if os.path.isdir(download_dir) else set()
+        candidates = [name for name in (current - before) if not name.endswith((".crdownload", ".tmp"))]
+        if candidates:
+            candidate_path = os.path.join(download_dir, candidates[0])
+            size_before = os.path.getsize(candidate_path)
+            time.sleep(0.5)
+            if os.path.exists(candidate_path) and size_before > 0 and os.path.getsize(candidate_path) == size_before:
+                downloaded_path = candidate_path
+                break
+        time.sleep(0.3)
+    if not downloaded_path:
+        raise RuntimeError("Mercado Publico no genero el archivo Excel a tiempo.")
+    return pd.read_excel(downloaded_path)
+
+
+def search_mercado_publico_bulk_excel(
+    keyword: str,
+    date_from: str,
+    date_to: str,
+    headless: bool = True,
+    progress_callback: Callable[[float, str], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
+) -> Tuple[List[dict], List[str]]:
+    """Discover every licitacion matching ``keyword`` within a Fecha de Cierre
+    window in a single Excel download instead of paginating result pages.
+
+    Mercado Publico's results table always exports "Fecha Cierre" regardless
+    of which date-type filter was applied, so this always searches by closing
+    date - callers translate any other selection into that same window.
+    """
+    diagnostics: List[str] = []
+    download_dir = tempfile.mkdtemp(prefix="mp_excel_")
+    driver = _driver(headless=headless, download_dir=download_dir)
+    try:
+        if cancel_callback:
+            cancel_callback()
+        if progress_callback:
+            progress_callback(0.05, "Abriendo Mercado Publico: busqueda avanzada")
+        driver.get(ADVANCED_SEARCH_URL)
+        _set_search_text(driver, keyword)
+        _enable_regular_search_filters(
+            driver,
+            publication_date_from=date_from,
+            publication_date_to=date_to,
+            published_only=False,
+            date_filter_type="closing",
+        )
+        _click_search(driver)
+        _wait_results(driver, keyword)
+        time.sleep(1)
+        if cancel_callback:
+            cancel_callback()
+        if progress_callback:
+            progress_callback(0.35, "Descargando Excel de resultados")
+        frame = _download_excel_dataframe(driver, download_dir)
+        if frame is None:
+            diagnostics.append(
+                f"Mercado Publico licitaciones: 0 procesos para keyword={keyword} (cierre {date_from} a {date_to})"
+            )
+            if progress_callback:
+                progress_callback(0.55, "0 procesos leidos del Excel")
+            return [], diagnostics
+        code_column = _excel_column(frame, "Numero", "Codigo")
+        title_column = _excel_column(frame, "Nombre de la Licitacion")
+        buyer_column = _excel_column(frame, "Comprador")
+        status_column = _excel_column(frame, "Estado")
+        closing_column = _excel_column(frame, "Fecha Cierre")
+        diagnostics.append(
+            f"Mercado Publico licitaciones: Excel con {len(frame)} procesos para keyword={keyword} "
+            f"(cierre {date_from} a {date_to})"
+        )
+        rows: List[dict] = []
+        for _, record in frame.iterrows():
+            nomenclature = _clean(record.get(code_column, "")) if code_column else ""
+            if not nomenclature:
+                continue
+            row = _empty_row("licitaciones")
+            row["Nomenclatura"] = nomenclature
+            row["Descripcion de Objeto"] = _clean(record.get(title_column, "")) if title_column else ""
+            row["Nombre o Sigla de la Entidad"] = _clean(record.get(buyer_column, "")) if buyer_column else ""
+            estado_ml = _clean(record.get(status_column, "")) if status_column else ""
+            row["estado_mercado_publico"] = estado_ml
+            row["Vigencia"] = estado_ml
+            closing_value = record.get(closing_column) if closing_column else None
+            closing_date = pd.to_datetime(closing_value, errors="coerce")
+            row["propuesta_fin"] = closing_date.strftime("%d/%m/%Y %H:%M:%S") if not pd.isna(closing_date) else ""
+            row["Estado Comercial"] = _estado_comercial(estado_ml, row["propuesta_fin"])
+            rows.append(row)
+        if progress_callback:
+            progress_callback(0.55, f"{len(rows)} procesos leidos del Excel")
+        return rows, diagnostics
+    finally:
+        driver.quit()
+        shutil.rmtree(download_dir, ignore_errors=True)
 
 
 def _href_to_url(href: str, current_url: str) -> str:
@@ -414,6 +564,11 @@ def _parse_detail(html: str) -> dict:
     questions_end = _find_date(text, ["Fecha final de preguntas"])
     close_date = _find_date(text, ["Fecha de cierre de recepcion de la oferta", "Fecha de cierre de recepción de la oferta", "Fecha de Cierre"])
     adjudication = _find_date(text, ["Fecha de Adjudicacion", "Fecha de Adjudicación"])
+    contract_duration_match = re.search(
+        r"Tiempo del Contrato\s*:?\s*(.+?)(?=\s+(?:Plazos de pago|Opciones de pago|Subir))",
+        text,
+        re.I,
+    )
     amount_match = re.search(
         r"(?:Monto\s+Total\s+Adjudicado|Monto\s+Adjudicado|Monto\s+Total\s+Estimado|"
         r"TOTAL\s+FINAL|Monto\s+estimado\s+para\s+la\s+gran\s+compra)"
@@ -430,6 +585,8 @@ def _parse_detail(html: str) -> dict:
         fields["propuesta_fin"] = _date_from_chile(close_date)
     if adjudication:
         fields["buena_pro_fin"] = _date_from_chile(adjudication)
+    if contract_duration_match:
+        fields["contract_duration"] = _clean(contract_duration_match.group(1))
     if amount_match:
         fields["VR / VE / Cuantia de la contratacion"] = _to_float(amount_match.group(1))
     if region_match:
@@ -527,6 +684,90 @@ def _enrich_regular_detail(driver, row: dict, diagnostics: List[str], include_at
     if driver.current_url != original_url:
         driver.get(original_url)
     return row
+
+
+def _open_detail_by_nomenclature(driver, nomenclature: str, original_handle: str) -> bool:
+    """Search the exact process code (the API/CSV shortcuts on the ficha don't
+    work) and open its detail page in a new tab. Returns True on success."""
+    driver.get(ADVANCED_SEARCH_URL)
+    _set_search_text(driver, nomenclature)
+    _click_search(driver)
+    _wait_results(driver, nomenclature)
+    time.sleep(0.6)
+    target = _norm(nomenclature)
+    link = next(
+        (item for item in driver.find_elements(By.CSS_SELECTOR, "a") if _norm(item.text) == target),
+        None,
+    )
+    if link is None:
+        return False
+    before = set(driver.window_handles)
+    link.click()
+    try:
+        WebDriverWait(driver, 15).until(
+            lambda d: len(set(d.window_handles) - before) > 0 or d.current_window_handle != original_handle
+        )
+    except TimeoutException:
+        return False
+    new_handles = list(set(driver.window_handles) - before)
+    if new_handles:
+        driver.switch_to.window(new_handles[0])
+    time.sleep(1)
+    return True
+
+
+def search_mercado_publico_details_by_code(
+    nomenclatures: List[str],
+    headless: bool = True,
+    progress_callback: Callable[[float, str], None] | None = None,
+    cancel_callback: Callable[[], None] | None = None,
+) -> Tuple[List[dict], List[str]]:
+    """Enrich a specific set of already-known process codes one by one.
+
+    Used for the rows that qualify for a ficha visit (Publicada, or whose
+    Estado/Fecha Cierre changed since the last Excel snapshot) - not for
+    bulk discovery, which goes through ``search_mercado_publico_bulk_excel``.
+    """
+    diagnostics: List[str] = []
+    rows: List[dict] = []
+    if not nomenclatures:
+        return rows, diagnostics
+    driver = _driver(headless=headless)
+    original_handle = driver.current_window_handle
+    total = len(nomenclatures)
+    try:
+        for index, nomenclature in enumerate(nomenclatures):
+            if cancel_callback:
+                cancel_callback()
+            if progress_callback:
+                progress_callback(index / max(total, 1), f"Leyendo ficha {index + 1}/{total}: {nomenclature}")
+            try:
+                opened = _open_detail_by_nomenclature(driver, nomenclature, original_handle)
+                if not opened:
+                    diagnostics.append(f"{nomenclature}: no se encontro la ficha por numero de proceso")
+                    continue
+                fields = _parse_detail(driver.page_source)
+                fields["Nomenclatura"] = nomenclature
+                fields["url_detalle"] = driver.current_url
+                rows.append(fields)
+            except Exception as exc:
+                diagnostics.append(f"{nomenclature}: error leyendo ficha ({type(exc).__name__}: {exc})")
+            finally:
+                for handle in list(driver.window_handles):
+                    if handle != original_handle:
+                        try:
+                            driver.switch_to.window(handle)
+                            driver.close()
+                        except Exception:
+                            pass
+                try:
+                    driver.switch_to.window(original_handle)
+                except Exception:
+                    pass
+        diagnostics.append(f"Mercado Publico fichas: {len(rows)}/{total} procesos enriquecidos")
+    finally:
+        driver.quit()
+    return rows, diagnostics
 
 
 def search_mercado_publico(

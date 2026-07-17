@@ -264,7 +264,14 @@ def enqueue_active_profiles(country: str | None = None) -> dict[str, int]:
             query = query.where(SearchProfile.source == config["source"])
         profiles = list(db.scalars(query).all())
         summary["profiles"] = len(profiles)
-        ingestion_period = current_ingestion_window(db, country) if country else current_ingestion_period()
+        # Chile's run_service branch computes its own "mes actual + mes
+        # siguiente" Fecha de Cierre window (chile_closing_window) from
+        # scratch on every call, so it needs nothing but the incremental
+        # flag here. Peru keeps the OCDS rolling-window payload as before.
+        if country == "chile":
+            ingestion_period = {"automatic_incremental": True}
+        else:
+            ingestion_period = current_ingestion_window(db, country) if country else current_ingestion_period()
         for profile in profiles:
             run = ScrapeRun(search_profile_id=profile.id, source=profile.source, status="queued")
             db.add(run)

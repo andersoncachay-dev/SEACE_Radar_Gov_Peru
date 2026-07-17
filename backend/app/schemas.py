@@ -229,6 +229,7 @@ class RunStart(BaseModel):
     max_details: int = 15
     enrich_details: bool = False
     revalidate_closed_detail: bool = False
+    direct_detail_lookup: bool = False
     commercial_mode: str = "active"
 
 
@@ -264,6 +265,8 @@ class OpportunityOut(ORMModel):
     amount: float
     currency: str
     status: str
+    source_status: str
+    contract_duration: str
     priority: str
     score: int
     reasons: str
@@ -278,6 +281,7 @@ class OpportunityOut(ORMModel):
     archived_at: datetime | None
     archived_by_id: int | None
     archive_country: str
+    archive_reason: str = ""
     is_new: bool = False
     created_at: datetime
     updated_at: datetime
@@ -300,6 +304,10 @@ class OpportunityImportIn(BaseModel):
 
 class OpportunityImportResult(BaseModel):
     imported: int
+
+
+class OpportunityArchiveIn(BaseModel):
+    reason: str = Field(default="", max_length=500)
 
 
 class OpportunityKeywordArchiveIn(BaseModel):
@@ -402,4 +410,7 @@ class AlertOut(ORMModel):
     channel: str = "email"
     entity: str = ""
     description: str = ""
+    destination: str = ""
+    keywords: str = ""
+    run_id: int | None = None
     rule_is_active: bool = True

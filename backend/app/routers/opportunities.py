@@ -18,7 +18,7 @@ from ..database import get_db
 from ..dependencies import get_current_user, require_source_access, source_access_condition
 from ..config import settings
 from ..models import Opportunity, OpportunitySnapshot, ScrapeRun, User
-from ..schemas import OpportunityExcelExportIn, OpportunityImportIn, OpportunityImportResult, OpportunityKeywordArchiveIn, OpportunityKeywordArchiveOut, OpportunityOut, OpportunitySnapshotOut
+from ..schemas import OpportunityArchiveIn, OpportunityExcelExportIn, OpportunityImportIn, OpportunityImportResult, OpportunityKeywordArchiveIn, OpportunityKeywordArchiveOut, OpportunityOut, OpportunitySnapshotOut
 from src.keyword_matching import contains_complete_phrase
 from ..services.ingestion_service import upsert_opportunities
 from ..services.notification_service import evaluate_alerts, evaluate_new_opportunity_alerts, send_pending_alerts
@@ -54,9 +54,23 @@ def export_opportunities_xlsx(
         cell.font = Font(color="FFFFFF", bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     sheet.auto_filter.ref = sheet.dimensions
-    widths = [12, 34, 38, 30, 70, 24, 24, 16, 24, 16, 18]
-    for index, width in enumerate(widths[: len(payload.headers)], start=1):
-        sheet.column_dimensions[get_column_letter(index)].width = width
+    column_widths = {
+        "Prioridad": 12,
+        "Semaforo comercial": 34,
+        "Entidad": 38,
+        "Proceso": 30,
+        "Descripcion": 70,
+        "Estado en Mercado Público CL": 26,
+        "Duración de contrato": 20,
+        "Fecha de convocatoria": 24,
+        "Fin Consultas": 24,
+        "Dias Consultas": 16,
+        "Fin Propuesta": 24,
+        "Dias Propuesta": 16,
+        "Monto": 18,
+    }
+    for index, header in enumerate(payload.headers, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = column_widths.get(header, 20)
     for row in sheet.iter_rows(min_row=2):
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
@@ -351,6 +365,7 @@ def archive_opportunities_by_keyword(
 @router.post("/{opportunity_id}/archive", response_model=OpportunityOut)
 def archive_opportunity(
     opportunity_id: int,
+    payload: OpportunityArchiveIn = OpportunityArchiveIn(),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -366,6 +381,24 @@ def archive_opportunity(
     opportunity.archived_by_id = current_user.id
     opportunity.archive_country = _country_for_source(opportunity.source)
     opportunity.archive_key = key
+    opportunity.archive_reason = payload.reason.strip()
+    db.commit()
+    db.refresh(opportunity)
+    return _opportunity_out(opportunity)
+
+
+@router.patch("/{opportunity_id}/archive-reason", response_model=OpportunityOut)
+def update_archive_reason(
+    opportunity_id: int,
+    payload: OpportunityArchiveIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    opportunity = db.get(Opportunity, opportunity_id)
+    if not opportunity:
+        raise HTTPException(status_code=404, detail="Proceso no encontrado")
+    require_source_access(current_user, opportunity.source)
+    opportunity.archive_reason = payload.reason.strip()
     db.commit()
     db.refresh(opportunity)
     return _opportunity_out(opportunity)
@@ -386,6 +419,7 @@ def restore_opportunity(
     opportunity.archived_by_id = None
     opportunity.archive_country = ""
     opportunity.archive_key = ""
+    opportunity.archive_reason = ""
     db.commit()
     db.refresh(opportunity)
     return _opportunity_out(opportunity)

@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.app.database import Base
 from backend.app.models import Opportunity, User
 from backend.app.routers.opportunities import archive_opportunity, archive_opportunities_by_keyword, list_archived_opportunities, list_opportunities, restore_opportunity
-from backend.app.schemas import OpportunityKeywordArchiveIn
+from backend.app.schemas import OpportunityArchiveIn, OpportunityKeywordArchiveIn
 from backend.app.services.ingestion_service import upsert_opportunities
 
 
@@ -40,11 +40,18 @@ class OpportunityArchiveTests(unittest.TestCase):
         self.db.close()
 
     def test_archive_excludes_from_active_and_ingestion_until_restored(self) -> None:
-        archive_opportunity(self.opportunity.id, self.user, self.db)
+        result = archive_opportunity(
+            self.opportunity.id,
+            payload=OpportunityArchiveIn(reason="Proceso desierto, ya no aplica al rubro"),
+            current_user=self.user,
+            db=self.db,
+        )
+        self.assertEqual(result["archive_reason"], "Proceso desierto, ya no aplica al rubro")
 
         self.assertEqual(list_opportunities(current_user=self.user, db=self.db), [])
         archived = list_archived_opportunities("peru", self.user, self.db)
         self.assertEqual([item["id"] for item in archived], [self.opportunity.id])
+        self.assertEqual(archived[0]["archive_reason"], "Proceso desierto, ya no aplica al rubro")
 
         imported = upsert_opportunities(
             self.db,
@@ -57,6 +64,7 @@ class OpportunityArchiveTests(unittest.TestCase):
         restore_opportunity(self.opportunity.id, self.user, self.db)
         active = list_opportunities(current_user=self.user, db=self.db)
         self.assertEqual([item["id"] for item in active], [self.opportunity.id])
+        self.assertEqual(active[0]["archive_reason"], "")
 
     def test_archive_by_keyword_moves_only_matching_country_processes(self) -> None:
         exclusive = Opportunity(

@@ -147,6 +147,10 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
             proposal_deadline = _as_datetime(row.get("propuesta_fin"))
             incoming_status = "Vigente para Propuesta" if proposal_deadline is None or proposal_deadline > datetime.utcnow() else "Proceso Culminado"
         opportunity.status = incoming_status or (opportunity.status if existing else "Vigente para Propuesta")
+        incoming_source_status = _first_text(row, "estado_mercado_publico", "source_status")
+        opportunity.source_status = incoming_source_status or (opportunity.source_status if existing else "")
+        incoming_contract_duration = _as_text(row.get("contract_duration"))
+        opportunity.contract_duration = incoming_contract_duration or (opportunity.contract_duration if existing else "")
         incoming_priority = _first_text(row, "prioridad")
         opportunity.priority = incoming_priority or (opportunity.priority if existing else "C")
         incoming_score = _as_text(row.get("score"))

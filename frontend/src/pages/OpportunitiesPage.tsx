@@ -1,6 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, DocumentRecord, Opportunity, Run } from "../api";
+import { api, chileStatusSlug, ApiError, DocumentRecord, Opportunity, Run } from "../api";
 import { CommercialClass, ConfirmModal, Country, Empty, HighlightedText, RunProgress, addKeyword, commercialSignal, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, normalizedSearchTerm, parseDate, presentationDeadline, sourceBelongsToCountry, uniqueKeywords, useRadarKeywords } from "../shared";
+
+export function documentTypeLabel(doc: DocumentRecord): string {
+  const fromType = (doc.document_type || "").trim().toLowerCase();
+  const fromName = (doc.filename || doc.title || "").trim().toLowerCase();
+  const extension = fromType || fromName.slice(fromName.lastIndexOf(".") + 1);
+  if (extension === "doc" || extension === "docx") return "DOC";
+  if (extension === "xls" || extension === "xlsx") return "XLS";
+  if (extension === "ppt" || extension === "pptx") return "PPT";
+  if (extension === "zip" || extension === "rar") return "ZIP";
+  if (extension && extension.length <= 4) return extension.toUpperCase();
+  return "PDF";
+}
 
 export type Module = "SEACE Publico" | "Contratos Menores a 8 UIT" | "Oportunidades Chile LMP-GC" | "Ambos modulos";
 
@@ -217,13 +229,21 @@ export function daysText(value: number | null) {
   return String(value);
 }
 
-export async function exportOpportunitiesToExcel(token: string, rows: Array<{ item: Opportunity; signal: ReturnType<typeof commercialSignal> }>, title: string, country: Country) {
+export async function exportOpportunitiesToExcel(
+  token: string,
+  rows: Array<{ item: Opportunity; signal: ReturnType<typeof commercialSignal> }>,
+  title: string,
+  country: Country,
+  exportKind: "table" | "dashboard" | "historico" = "table",
+) {
+  const isChile = country === "Chile";
   const headers = [
     "Prioridad",
     "Semaforo comercial",
     "Entidad",
     "Proceso",
     "Descripcion",
+    ...(isChile ? ["Estado en Mercado Público CL", "Duración de contrato"] : []),
     "Fecha de convocatoria",
     "Fin Consultas",
     "Dias Consultas",
@@ -239,6 +259,7 @@ export async function exportOpportunitiesToExcel(token: string, rows: Array<{ it
       item.entity,
       item.nomenclature,
       item.description,
+      ...(isChile ? [item.source_status || "-", item.contract_duration || "-"] : []),
       formatDate(item.publication_date),
       formatDate(item.consultation_deadline),
       daysText(daysUntil(item.consultation_deadline)),
@@ -251,7 +272,21 @@ export async function exportOpportunitiesToExcel(token: string, rows: Array<{ it
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `oportunidades-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const countryLabel = isChile ? "Chile" : "Perú";
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
+  if (exportKind === "historico") {
+    // Colons aren't valid in Windows filenames, so "hh:mm" becomes "hh-mm"
+    // with a space (not underscore) before it, matching what was asked.
+    const historicoTimestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}`;
+    link.download = `Histórico Procesos Eliminados ${countryLabel} ${historicoTimestamp}.xlsx`;
+  } else {
+    const filenamePrefix = exportKind === "dashboard"
+      ? `Procesos Gobierno ${countryLabel} Dashboard Inicial`
+      : `Oportunidades Gobierno ${countryLabel}`;
+    link.download = `${filenamePrefix} ${timestamp}.xlsx`;
+  }
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -987,6 +1022,7 @@ export function Opportunities({
         max_details: country === "Chile" ? 1 : 12,
         enrich_details: true,
         revalidate_closed_detail: country === "Chile" && commercialSignal(item).className === "red",
+        direct_detail_lookup: country === "Chile",
         commercial_mode: maxResultsMode,
       });
       setActiveRun(run);
@@ -1042,8 +1078,8 @@ export function Opportunities({
     setPublicationDateTo("");
   }
 
-  async function archiveProcess(item: Opportunity) {
-    await api.archiveOpportunity(token, item.id);
+  async function archiveProcess(item: Opportunity, reason: string = "") {
+    await api.archiveOpportunity(token, item.id, reason);
     setScopedRows((current) => current ? current.filter((row) => row.id !== item.id) : current);
     setPinnedRows((current) => current.filter((row) => row.id !== item.id));
     await refresh();
@@ -1311,7 +1347,7 @@ export function Opportunities({
               <button className={searchMode === "append" ? "selected" : ""} onClick={() => setSearchMode("append")} type="button">
                 Agregar a la búsqueda actual
               </button>
-              <button className={searchMode === "replace" ? "selected" : ""} onClick={() => setSearchMode("replace")} type="button">
+              <button className={`search-mode-secondary ${searchMode === "replace" ? "selected" : ""}`} onClick={() => setSearchMode("replace")} type="button">
                 Iniciar nueva búsqueda
               </button>
               {(((activeRun?.status === "queued" || activeRun?.status === "running") && !activeRun.cancel_requested) || pendingRunStatuses.some((item) => (item.status === "queued" || item.status === "running") && !item.cancel_requested)) ? (
@@ -1929,6 +1965,11 @@ export function ArchivedProcesses({
     await onRestored();
   }
 
+  async function updateArchiveReason(item: Opportunity, reason: string) {
+    const updated = await api.updateArchiveReason(token, item.id, reason);
+    setRows((current) => current.map((row) => (row.id === item.id ? updated : row)));
+  }
+
   return (
     <section className="panel archived-processes-panel">
       <div className="panel-title archived-processes-heading">
@@ -1958,6 +1999,7 @@ export function ArchivedProcesses({
           highlightTerms={[]}
           actionMode="restore"
           onProcessAction={restoreProcess}
+          onUpdateArchiveReason={updateArchiveReason}
           allowRevalidation={false}
         />
       )}
@@ -1974,6 +2016,7 @@ export function OpportunityTable({
   highlightTerms,
   actionMode = "archive",
   onProcessAction,
+  onUpdateArchiveReason,
   allowRevalidation = true,
 }: {
   rows: Opportunity[];
@@ -1983,14 +2026,17 @@ export function OpportunityTable({
   onRevalidateProposal: (item: Opportunity) => Promise<boolean>;
   highlightTerms: string[];
   actionMode?: "archive" | "restore";
-  onProcessAction: (item: Opportunity) => Promise<void>;
+  onProcessAction: (item: Opportunity, reason?: string) => Promise<void>;
+  onUpdateArchiveReason?: (item: Opportunity, reason: string) => Promise<void>;
   allowRevalidation?: boolean;
 }) {
   const [commercialFilter, setCommercialFilter] = useState<CommercialClass | null>(null);
   const [columnFilters, setColumnFilters] = useState<TableColumnFilters>(emptyTableColumnFilters);
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
+  const [activeRowId, setActiveRowId] = useState<number | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<Opportunity | null>(null);
+  const [archiveReason, setArchiveReason] = useState("");
   const [actionError, setActionError] = useState("");
   const [actionPending, setActionPending] = useState(false);
   const [revalidatingIds, setRevalidatingIds] = useState<Set<number>>(new Set());
@@ -2001,6 +2047,7 @@ export function OpportunityTable({
 
   useEffect(() => {
     setPendingRemoval(null);
+    setArchiveReason("");
     setActionError("");
     setUnavailableProposalIds(new Set());
     setManualProposalUpdates(new Map());
@@ -2048,6 +2095,15 @@ export function OpportunityTable({
   }, [rowsWithSignals, commercialFilter, columnFilters, countdownNow]);
 
   const sortedRows = useMemo(() => {
+    if (actionMode === "restore") {
+      // Histórico: most recently retired process first, regardless of
+      // commercial signal - that's the order that matches how it was built.
+      return [...filteredRows].sort((left, right) => {
+        const dateResult = compareValues(parseDate(left.item.archived_at), parseDate(right.item.archived_at));
+        if (dateResult !== 0) return -dateResult;
+        return right.item.id - left.item.id;
+      });
+    }
     return [...filteredRows].sort((left, right) => {
       const commercialResult = commercialOrder(left.signal.className) - commercialOrder(right.signal.className);
       if (commercialResult !== 0) return commercialResult;
@@ -2055,7 +2111,7 @@ export function OpportunityTable({
       if (dateResult !== 0) return -dateResult;
       return right.item.id - left.item.id;
     });
-  }, [filteredRows]);
+  }, [filteredRows, actionMode]);
 
   function updateColumnFilter(key: keyof TableColumnFilters, value: string | boolean) {
     setColumnFilters((current) => ({ ...current, [key]: value }));
@@ -2086,8 +2142,9 @@ export function OpportunityTable({
     setActionPending(true);
     setActionError("");
     try {
-      await onProcessAction(pendingRemoval);
+      await onProcessAction(pendingRemoval, actionMode === "archive" ? archiveReason.trim() : undefined);
       setPendingRemoval(null);
+      setArchiveReason("");
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "No se pudo completar la acción");
     } finally {
@@ -2134,23 +2191,44 @@ export function OpportunityTable({
           ))}
         </div>
         <div className="table-action-buttons">
-          <button className="export-excel-button" type="button" onClick={() => void exportOpportunitiesToExcel(token, sortedRows, "Oportunidades GovRadar", country)}>
+          <button className="export-excel-button" type="button" onClick={() => void exportOpportunitiesToExcel(token, sortedRows, "Oportunidades GovRadar", country, actionMode === "restore" ? "historico" : "table")}>
             <img src={excelLogoUrl} alt="" aria-hidden="true" loading="lazy" decoding="async" />
             <span>Exportar a Excel</span>
           </button>
         </div>
       </div>
       <p className="mobile-table-hint">Desliza horizontalmente para consultar todas las columnas.</p>
-      <div className="table-scroll-top" ref={topScrollRef} onScroll={() => syncTableScroll("top")} aria-label="Desplazamiento horizontal de oportunidades">
+      <div className={`table-scroll-top ${actionMode === "restore" ? "has-motivo-column" : ""}`} ref={topScrollRef} onScroll={() => syncTableScroll("top")} aria-label="Desplazamiento horizontal de oportunidades">
         <div />
       </div>
       <div className="table-wrap" ref={tableScrollRef} onScroll={() => syncTableScroll("table")}>
-        <table>
+        <table className={actionMode === "restore" ? "has-motivo-column" : ""}>
+          {actionMode === "restore" ? (
+            // table-layout:fixed reads column widths from here first, ahead
+            // of any th/td nth-child CSS - the most reliable way to pin down
+            // every column (including the last one, Monto) for this table.
+            <colgroup>
+              <col style={{ width: "106px" }} />
+              <col style={{ width: "260px" }} />
+              <col style={{ width: "270px" }} />
+              <col style={{ width: "180px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "126px" }} />
+              <col style={{ width: "340px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "124px" }} />
+              <col style={{ width: "150px" }} />
+              <col style={{ width: "124px" }} />
+              <col style={{ width: "110px" }} />
+            </colgroup>
+          ) : null}
           <thead>
             <tr>
               <FilterTh label="Prioridad" active={Boolean(columnFilters.priority)} onClear={() => updateColumnFilter("priority", "")}>
                 <label>Prioridad<select value={columnFilters.priority} onChange={(event) => updateColumnFilter("priority", event.target.value)}><option value="">Todas</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></label>
               </FilterTh>
+              {actionMode === "restore" ? <th><span className="plain-header">Motivo</span></th> : null}
               <th><span className="plain-header">Semaforo<br />comercial</span></th>
               <FilterTh label="Entidad" active={Boolean(columnFilters.entity)} onClear={() => updateColumnFilter("entity", "")}>
                 <label>Nombre de entidad<input value={columnFilters.entity} onChange={(event) => updateColumnFilter("entity", event.target.value)} placeholder="Escribir entidad" /></label>
@@ -2159,7 +2237,7 @@ export function OpportunityTable({
                 <label>Nomenclatura<input value={columnFilters.process} onChange={(event) => updateColumnFilter("process", event.target.value)} placeholder="Escribir proceso" /></label>
               </FilterTh>
               <th><span className="plain-header">Documentos</span></th>
-              <FilterTh label="Descripcion" active={Boolean(columnFilters.description)} onClear={() => updateColumnFilter("description", "")}>
+              <FilterTh label={country === "Chile" ? "Descripción c/ Estado y\nTiempo (MP.cl)" : "Descripcion"} active={Boolean(columnFilters.description)} onClear={() => updateColumnFilter("description", "")}>
                 <label>Descripción<input value={columnFilters.description} onChange={(event) => updateColumnFilter("description", event.target.value)} placeholder="Escribir descripción" /></label>
               </FilterTh>
               <FilterTh label="Fecha de\nconvocatoria" active={Boolean(columnFilters.publicationFrom || columnFilters.publicationTo)} onClear={() => setColumnFilters((current) => ({ ...current, publicationFrom: "", publicationTo: "" }))}>
@@ -2200,6 +2278,9 @@ export function OpportunityTable({
                 highlightTerms={highlightTerms}
                 manualProposalUpdatedAt={manualProposalUpdates.get(item.id) || null}
                 countdownNow={countdownNow}
+                onUpdateArchiveReason={onUpdateArchiveReason}
+                isActive={activeRowId === item.id}
+                onActivate={() => setActiveRowId(item.id)}
               />
             ))}
           </tbody>
@@ -2213,19 +2294,43 @@ export function OpportunityTable({
           onClose={() => setSelectedOpportunity(null)}
         />
       ) : null}
-      {pendingRemoval ? (
+      {pendingRemoval && actionMode === "archive" ? (
+        <div className="confirm-backdrop" role="dialog" aria-modal="true" aria-label="Retirar de esta Sección">
+          <div className="confirm-card archive-reason-card">
+            <h3>Retirar de esta Sección</h3>
+            <p>¿Está seguro de retirar este proceso? Se moverá al histórico y quedará excluido de las actualizaciones automáticas.</p>
+            <label className="archive-reason-field">
+              Motivo del retiro <small>Opcional, pero te ayuda a recordar por qué lo moviste</small>
+              <textarea
+                value={archiveReason}
+                onChange={(event) => setArchiveReason(event.target.value)}
+                placeholder="Ej. Proceso desierto, ya no aplica al rubro, cliente descartado..."
+                rows={3}
+                maxLength={500}
+                autoFocus
+              />
+            </label>
+            {actionError ? <div className="notice danger archive-action-notice" role="alert">{actionError}</div> : null}
+            <div className="confirm-actions">
+              <button className="ghost" onClick={() => { setPendingRemoval(null); setArchiveReason(""); }}>Cancelar</button>
+              <button className="primary" onClick={removePendingRow} disabled={actionPending}>{actionPending ? "Enviando..." : "Enviar"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {pendingRemoval && actionMode !== "archive" ? (
         <ConfirmModal
-          title={actionMode === "archive" ? "Retirar de esta vista" : "Regresar al módulo Oportunidades"}
-          message={actionMode === "archive"
-            ? "¿Está seguro de retirar este proceso? Se moverá al histórico y quedará excluido de las actualizaciones automáticas."
-            : "¿Está seguro de regresar este proceso al módulo Oportunidades? Volverá a participar en las actualizaciones automáticas."}
-          confirmLabel={actionPending ? "Procesando..." : actionMode === "archive" ? "Sí, retirar" : "Sí, regresar"}
+          title="Regresar al módulo Oportunidades"
+          message="¿Está seguro de regresar este proceso al módulo Oportunidades? Volverá a participar en las actualizaciones automáticas."
+          confirmLabel={actionPending ? "Procesando..." : "Sí, regresar"}
           cancelLabel="No"
           onConfirm={removePendingRow}
           onCancel={() => setPendingRemoval(null)}
         />
       ) : null}
-      {actionError ? <div className="notice danger archive-action-notice" role="alert">{actionError}</div> : null}
+      {actionError && !(pendingRemoval && actionMode === "archive") ? (
+        <div className="notice danger archive-action-notice" role="alert">{actionError}</div>
+      ) : null}
     </>
   );
 }
@@ -2269,6 +2374,48 @@ export function DateRangeFilter({ from, to, onFromChange, onToChange }: { from: 
   return <div className="column-filter-fields"><label>Desde<input type="date" value={from} onChange={(event) => onFromChange(event.target.value)} /></label><label>Hasta<input type="date" value={to} min={from || undefined} onChange={(event) => onToChange(event.target.value)} /></label></div>;
 }
 
+export function ArchiveReasonCell({ item, onSave }: { item: Opportunity; onSave: (item: Opportunity, reason: string) => Promise<void> }) {
+  const [value, setValue] = useState(item.archive_reason);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setValue(item.archive_reason);
+  }, [item.archive_reason]);
+
+  const dirty = value.trim() !== (item.archive_reason || "").trim();
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(item, value.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="archive-reason-editable">
+      <textarea
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        placeholder="Sin motivo registrado"
+        rows={2}
+        maxLength={500}
+      />
+      {dirty ? (
+        <button className="archive-reason-save" type="button" onClick={save} disabled={saving}>
+          {saving ? "Guardando..." : "Guardar"}
+        </button>
+      ) : null}
+      {error ? <small className="archive-reason-error" role="alert">{error}</small> : null}
+    </div>
+  );
+}
+
 export function NumberRangeFilter({ unit, minimum, maximum, disabled = false, onMinimumChange, onMaximumChange }: { unit: string; minimum: string; maximum: string; disabled?: boolean; onMinimumChange: (value: string) => void; onMaximumChange: (value: string) => void }) {
   return <div className="column-filter-fields"><span className="column-filter-unit">Rango en {unit}</span><label>Desde<input type="number" value={minimum} disabled={disabled} onChange={(event) => onMinimumChange(event.target.value)} placeholder="Mínimo" /></label><label>Hasta<input type="number" value={maximum} disabled={disabled} min={minimum || undefined} onChange={(event) => onMaximumChange(event.target.value)} placeholder="Máximo" /></label></div>;
 }
@@ -2287,6 +2434,9 @@ export function OpportunityRow({
   countdownNow,
   actionMode,
   allowRevalidation,
+  onUpdateArchiveReason,
+  isActive = false,
+  onActivate,
 }: {
   item: Opportunity;
   signal: ReturnType<typeof commercialSignal>;
@@ -2301,13 +2451,25 @@ export function OpportunityRow({
   countdownNow: number;
   actionMode: "archive" | "restore";
   allowRevalidation: boolean;
+  onUpdateArchiveReason?: (item: Opportunity, reason: string) => Promise<void>;
+  isActive?: boolean;
+  onActivate?: () => void;
 }) {
   const proposalDeadline = presentationDeadline(item);
   const isLargePurchase = item.source.toLowerCase() === "mercado_publico_grandes_compras";
   const isNewOpportunity = isOpportunityNew(item);
   return (
-    <tr>
+    <tr className={isActive ? "row-active" : ""} onClick={onActivate}>
       <td><span className={`priority p${item.priority}`}>{item.priority}</span></td>
+      {actionMode === "restore" ? (
+        <td>
+          {onUpdateArchiveReason ? (
+            <ArchiveReasonCell item={item} onSave={onUpdateArchiveReason} />
+          ) : (
+            <span className="archive-reason-cell">{item.archive_reason || "-"}</span>
+          )}
+        </td>
+      ) : null}
       <td>
         <span className={`commercial-signal ${signal.className}`}>
           <i aria-hidden="true" />
@@ -2330,7 +2492,7 @@ export function OpportunityRow({
             {isLargePurchase ? <span className="large-purchase-badge" title="Gran Compra">GC</span> : null}
           </div>
           <button className={`remove-view-button ${actionMode === "restore" ? "restore-view-button" : ""}`} type="button" onClick={() => onRemove(item)}>
-            {actionMode === "restore" ? "Regresar al módulo Oportunidades" : "Retirar de esta vista"}
+            {actionMode === "restore" ? "Regresar al módulo Oportunidades" : "Retirar de esta Sección"}
           </button>
         </div>
       </td>
@@ -2339,10 +2501,26 @@ export function OpportunityRow({
           <span>PDF</span>
         </button>
       </td>
-      <td><HighlightedText text={item.description} terms={highlightTerms} /></td>
-      <td>{formatDate(item.publication_date)}</td>
       <td>
-        {item.consultation_deadline ? formatDate(item.consultation_deadline) : country === "Chile" && signal.className === "red" && allowRevalidation ? (
+        <HighlightedText text={item.description} terms={highlightTerms} />
+        {country === "Chile" && (item.source_status || item.contract_duration) ? (
+          <div className="chile-ml-meta">
+            {item.source_status ? <span className={`chile-ml-status ${chileStatusSlug(item.source_status)}`}>{item.source_status}</span> : null}
+            {item.contract_duration ? <span className="chile-ml-contract">Duración de contrato: {item.contract_duration}</span> : null}
+          </div>
+        ) : null}
+      </td>
+      <td>
+        {item.publication_date ? (
+          manualProposalUpdatedAt ? (
+            <span className="manual-proposal-date">
+              <b>{formatDate(item.publication_date)}</b>
+              <small>*Actualizado manual desde {country === "Chile" ? "Mercado Público" : "Seace"} ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
+            </span>
+          ) : (
+            formatDate(item.publication_date)
+          )
+        ) : country === "Chile" && signal.className === "red" && allowRevalidation ? (
           proposalUnavailable ? (
             <span className="proposal-unavailable">Fecha no disponible en Mercado Público</span>
           ) : (
@@ -2353,7 +2531,34 @@ export function OpportunityRow({
                   <span>Consultando ML CL</span>
                 </>
               ) : (
-                "Revalidar fecha de fin de proceso en ML CL"
+                "Buscar Fecha en Mercado Público CL"
+              )}
+            </button>
+          )
+        ) : "-"}
+      </td>
+      <td>
+        {item.consultation_deadline ? (
+          manualProposalUpdatedAt ? (
+            <span className="manual-proposal-date">
+              <b>{formatDate(item.consultation_deadline)}</b>
+              <small>*Actualizado manual desde {country === "Chile" ? "Mercado Público" : "Seace"} ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
+            </span>
+          ) : (
+            formatDate(item.consultation_deadline)
+          )
+        ) : country === "Chile" && signal.className === "red" && allowRevalidation ? (
+          proposalUnavailable ? (
+            <span className="proposal-unavailable">Fecha no disponible en Mercado Público</span>
+          ) : (
+            <button className="revalidate-button chile-revalidate-button" type="button" disabled={isRevalidating} onClick={() => onRevalidateProposal(item)}>
+              {isRevalidating ? (
+                <>
+                  <span className="button-spinner compact" aria-hidden="true" />
+                  <span>Consultando ML CL</span>
+                </>
+              ) : (
+                "Buscar Fecha en Mercado Público CL"
               )}
             </button>
           )
@@ -2474,6 +2679,12 @@ export function OpportunityDetailModal({
                 </React.Fragment>
               ))}
               <span>Descripcion</span><p>{opportunity.description || "-"}</p>
+              {sourceBelongsToCountry(opportunity.source, "Chile") ? (
+                <>
+                  <span>Estado (Mercado Público)</span><strong>{opportunity.source_status || "-"}</strong>
+                  <span>Duración del contrato</span><strong>{opportunity.contract_duration || "-"}</strong>
+                </>
+              ) : null}
             </div>
           </article>
           <article className="detail-card">
@@ -2497,11 +2708,12 @@ export function OpportunityDetailModal({
                 const statusMessage = isProtectedRoute
                   ? "Mercado Publico requiere abrir el enlace original."
                   : doc.error_message;
+                const typeLabel = documentTypeLabel(doc);
 
                 return (
                   <div className="document-row" key={doc.id}>
                     <div className="document-info">
-                      <span className="pdf-badge">PDF</span>
+                      <span className={`pdf-badge ${typeLabel !== "PDF" ? "doc-badge" : ""}`}>{typeLabel}</span>
                       <div className="document-copy">
                         <strong>{doc.title || doc.filename || `Documento ${doc.id}`}</strong>
                         <small>

@@ -1,3 +1,8 @@
+export function chileStatusSlug(status: string): string {
+  const match = status.toLowerCase().match(/[a-z]+/);
+  return match ? match[0] : "";
+}
+
 export type Stats = {
   total: number;
   by_source: Record<string, number>;
@@ -30,6 +35,8 @@ export type Opportunity = {
   amount: number;
   currency: string;
   status: string;
+  source_status: string;
+  contract_duration: string;
   priority: string;
   score: number;
   reasons: string;
@@ -44,6 +51,7 @@ export type Opportunity = {
   archived_at: string | null;
   archived_by_id: number | null;
   archive_country: string;
+  archive_reason: string;
   is_new: boolean;
   created_at: string;
   updated_at: string;
@@ -113,6 +121,9 @@ export type Alert = {
   channel: string;
   entity: string;
   description: string;
+  destination: string;
+  keywords: string;
+  run_id: number | null;
   rule_is_active: boolean;
 };
 
@@ -333,8 +344,18 @@ export const api = {
   },
   archivedOpportunities: (token: string, country: "peru" | "chile") =>
     request<Opportunity[]>(`/opportunities/archived?country=${country}`, token),
-  archiveOpportunity: (token: string, opportunityId: number) =>
-    request<Opportunity>(`/opportunities/${opportunityId}/archive`, token, { method: "POST" }),
+  archiveOpportunity: (token: string, opportunityId: number, reason: string = "") =>
+    request<Opportunity>(`/opportunities/${opportunityId}/archive`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    }),
+  updateArchiveReason: (token: string, opportunityId: number, reason: string) =>
+    request<Opportunity>(`/opportunities/${opportunityId}/archive-reason`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    }),
   archiveOpportunitiesByKeyword: (token: string, country: "peru" | "chile", keyword: string, remainingKeywords: string[]) =>
     request<{ archived: number; opportunity_ids: number[] }>("/opportunities/archive-by-keyword", token, {
       method: "POST",
@@ -387,6 +408,7 @@ export const api = {
       max_details: number;
       enrich_details: boolean;
       revalidate_closed_detail?: boolean;
+      direct_detail_lookup?: boolean;
       commercial_mode?: "active" | "all";
     },
   ) =>

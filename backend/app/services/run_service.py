@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timedelta
 from threading import Event, Lock
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -161,58 +162,6 @@ def _existing_active_nomenclatures(db: Session, source: str) -> set[str]:
         and (item.proposal_deadline is None or item.proposal_deadline > now)
         and str(item.nomenclature or item.external_id).strip()
     }
-
-
-def _manual_chile_revalidation_rows(db: Session, source: str, keyword: str, payload: dict) -> list[dict[str, Any]]:
-    """Return saved active Chile rows whose detail dates still need enrichment.
-
-    Mercado Publico can stop returning a tender in a later text search while its
-    saved detail URL remains valid. Manual searches must still refresh those
-    matching rows for the selected closing month.
-    """
-    if payload.get("automatic_incremental") or not payload.get("enrich_details"):
-        return []
-    years = _period_values(payload, "years", "year")
-    months = _period_values(payload, "months", "month")
-    now = datetime.utcnow()
-    candidates = db.scalars(
-        select(Opportunity).where(
-            Opportunity.source == source,
-            Opportunity.is_archived.is_(False),
-            Opportunity.detail_url != "",
-            Opportunity.proposal_deadline.is_not(None),
-            Opportunity.proposal_deadline > now,
-        )
-    ).all()
-    rows: list[dict[str, Any]] = []
-    for item in candidates:
-        deadline = item.proposal_deadline
-        if deadline is None:
-            continue
-        if years and deadline.year not in years:
-            continue
-        if months and deadline.month not in months:
-            continue
-        searchable = " ".join((item.entity or "", item.nomenclature or "", item.description or ""))
-        if not contains_complete_phrase(searchable, keyword):
-            continue
-        if item.publication_date is not None and item.consultation_deadline is not None:
-            continue
-        rows.append({
-            "Nomenclatura": item.nomenclature or item.external_id,
-            "Nombre o Sigla de la Entidad": item.entity,
-            "Descripcion de Objeto": item.description,
-            "Fecha y Hora de Publicacion": item.publication_date,
-            "consulta_fin": item.consultation_deadline,
-            "propuesta_fin": item.proposal_deadline,
-            "Estado Comercial": item.status,
-            "Vigencia": item.status,
-            "url_detalle": item.detail_url,
-            "Moneda": item.currency or "CLP",
-            "region": item.region or "Chile",
-            "force_revalidation": True,
-        })
-    return rows
 
 
 def _finalize_expired_opportunities(db: Session, source: str) -> int:
@@ -624,11 +573,141 @@ def _persist_peru_opportunities(
     return upsert_opportunities(db, enriched, source, run_id=run_id)
 
 
-def _mercado_publico_modes(include_grandes_compras: bool) -> list[tuple[str, str]]:
-    modes = [("licitaciones", "mercado_publico_browser")]
-    if include_grandes_compras:
-        modes.append(("grandes_compras", "mercado_publico_grandes_compras"))
-    return modes
+_LIMA_TZ = ZoneInfo("America/Lima")
+
+
+def _month_add(year: int, month: int, delta: int) -> tuple[int, int]:
+    index = (year * 12 + (month - 1)) + delta
+    return index // 12, index % 12 + 1
+
+
+def chile_closing_window(payload: dict, now: datetime | None = None) -> tuple[str, str]:
+    """Fecha de Cierre range for a Chile search: day 1 of the earliest
+    selected month/year through the last day of the month *after* the latest
+    selected month/year (or, with nothing selected, current month + next
+    month). Mercado Publico's Excel export always reports Fecha Cierre no
+    matter which date-type filter was applied in the form, so every Chile
+    search - manual or automatic - is anchored to that field.
+    """
+    import calendar
+
+    years = sorted(_period_values(payload, "years", "year"))
+    months = sorted(_period_values(payload, "months", "month"))
+    current = now or datetime.now(_LIMA_TZ)
+    start_year = years[0] if years else current.year
+    start_month = months[0] if months else current.month
+    end_year = years[-1] if years else current.year
+    end_month = months[-1] if months else current.month
+    end_year, end_month = _month_add(end_year, end_month, 1)
+    end_day = calendar.monthrange(end_year, end_month)[1]
+    return f"{start_year:04d}-{start_month:02d}-01", f"{end_year:04d}-{end_month:02d}-{end_day:02d}"
+
+
+def _chile_rows_needing_detail(db: Session, source: str, rows: list[dict]) -> list[str]:
+    """Which Nomenclaturas from a fresh Excel snapshot should get a ficha visit.
+
+    Rule: Estado = Publicada, OR the row already existed and its Estado or
+    Fecha Cierre changed since our last snapshot. A brand-new row whose Estado
+    is already terminal (Cerrada/Adjudicada/Desierta/Revocada) is stored from
+    the Excel data alone and never spends a browser visit on its ficha.
+    """
+    import pandas as pd
+
+    nomenclatures = [str(row.get("Nomenclatura", "")).strip() for row in rows if str(row.get("Nomenclatura", "")).strip()]
+    if not nomenclatures:
+        return []
+    existing = db.scalars(
+        select(Opportunity).where(Opportunity.source == source, Opportunity.external_id.in_(nomenclatures))
+    ).all()
+    existing_by_key = {item.external_id.strip().casefold(): item for item in existing}
+    targets: list[str] = []
+    for row in rows:
+        nomenclature = str(row.get("Nomenclatura", "")).strip()
+        if not nomenclature:
+            continue
+        estado_ml = str(row.get("estado_mercado_publico", "")).strip().casefold()
+        if estado_ml == "publicada":
+            targets.append(nomenclature)
+            continue
+        current = existing_by_key.get(nomenclature.casefold())
+        if current is None:
+            continue
+        status_changed = (current.source_status or "").strip().casefold() != estado_ml
+        closing_changed = False
+        incoming_closing = pd.to_datetime(row.get("propuesta_fin"), dayfirst=True, errors="coerce")
+        if not pd.isna(incoming_closing):
+            if current.proposal_deadline is None:
+                closing_changed = True
+            else:
+                closing_changed = abs((incoming_closing.to_pydatetime() - current.proposal_deadline).total_seconds()) > 60
+        if status_changed or closing_changed:
+            targets.append(nomenclature)
+    return targets
+
+
+def _drop_archived_chile_rows(db: Session, rows: list[dict], diagnostics: list[str]) -> list[dict]:
+    """Discard rows the user already sent to Historico de procesos eliminados.
+
+    A discard is a persistent business decision, not a data gap: if the
+    process still shows up in a fresh Excel snapshot (still Publicada, or its
+    Estado/Fecha Cierre moved), it must not come back as an "update" and must
+    never trigger an alert. ``upsert_opportunities`` already refuses to touch
+    an archived opportunity, but filtering here also skips the wasted ficha
+    visit for it.
+    """
+    keys = {
+        str(row.get("Nomenclatura", "")).strip().casefold()
+        for row in rows
+        if str(row.get("Nomenclatura", "")).strip()
+    }
+    if not keys:
+        return rows
+    archived_keys = set(
+        db.scalars(
+            select(Opportunity.archive_key).where(
+                Opportunity.is_archived.is_(True),
+                Opportunity.archive_country == "chile",
+                Opportunity.archive_key.in_(keys),
+            )
+        ).all()
+    )
+    if not archived_keys:
+        return rows
+    filtered = [
+        row for row in rows
+        if str(row.get("Nomenclatura", "")).strip().casefold() not in archived_keys
+    ]
+    diagnostics.append(
+        f"Mercado Publico licitaciones: {len(rows) - len(filtered)} procesos omitidos "
+        "(ya estan en el historico de procesos eliminados)"
+    )
+    return filtered
+
+
+def _merge_mercado_publico_chile_details(rows: list[dict], detail_rows: list[dict], diagnostics: list[str]) -> list[dict]:
+    by_key = {str(row.get("Nomenclatura", "")).strip().casefold(): row for row in detail_rows if row.get("Nomenclatura")}
+    applied = 0
+    for row in rows:
+        key = str(row.get("Nomenclatura", "")).strip().casefold()
+        detail = by_key.get(key)
+        if not detail:
+            continue
+        for field in (
+            "Fecha y Hora de Publicacion",
+            "convocatoria_inicio",
+            "consulta_fin",
+            "propuesta_fin",
+            "buena_pro_fin",
+            "contract_duration",
+            "region",
+            "url_detalle",
+        ):
+            value = detail.get(field)
+            if value:
+                row[field] = value
+        applied += 1
+    diagnostics.append(f"Mercado Publico licitaciones: fichas aplicadas a {applied}/{len(detail_rows)} procesos")
+    return rows
 
 
 def execute_scrape_run(run_id: int, payload: dict) -> None:
@@ -723,79 +802,109 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
             if enriched is not None and not enriched.empty and max_results:
                 enriched = enriched.head(max_results).copy()
             rows_found = upsert_opportunities(db, enriched, source, run_id=run.id)
+        elif (
+            source == "mercado_publico_lmp_gc"
+            and not payload.get("automatic_incremental")
+            and payload.get("direct_detail_lookup")
+            and str(payload.get("nomenclature") or "").strip()
+        ):
+            # "Buscar Fecha en Mercado Publico CL" button: revalidate one known
+            # process directly by its code. No listing/date-range search is
+            # needed - Mercado Publico's search-by-code returns exactly that
+            # process, so we go straight to its ficha (Etapas y plazos +
+            # duracion de contrato) and refresh whichever dates it has. The
+            # ficha alone has no entity/description, so this must only touch
+            # an opportunity already saved from a prior discovery (upsert
+            # preserves its existing fields); a brand-new nomenclature lookup
+            # still goes through the branch below.
+            from src.mercado_publico_scraper import search_mercado_publico_details_by_code
+            from src.normalizer import normalize_columns
+            import pandas as pd
+
+            persisted_source = "mercado_publico_browser"
+            requested_nomenclature = str(payload.get("nomenclature")).strip()
+            update_progress(10, f"Buscando ficha de {requested_nomenclature} en Mercado Público")
+            detail_rows, diagnostics = search_mercado_publico_details_by_code(
+                [requested_nomenclature],
+                headless=True,
+                progress_callback=lambda value, message: update_progress(10 + value * 75, message),
+                cancel_callback=check_cancelled,
+            )
+            if not detail_rows:
+                raise RuntimeError(f"No se encontro la ficha de {requested_nomenclature} en Mercado Publico.")
+            update_progress(90, "Guardando fechas revalidadas")
+            raw = pd.DataFrame(detail_rows)
+            normalized = normalize_columns(raw)
+            rows_found = upsert_opportunities(db, normalized, persisted_source, run_id=run.id)
         elif source == "mercado_publico_lmp_gc":
-            from src.mercado_publico_scraper import search_mercado_publico
+            # Chile licitaciones: bulk Excel discovery (Fecha de Cierre) +
+            # selective ficha enrichment. Shared by manual UI searches and the
+            # automatic scheduler (automatic_incremental=True) alike - both
+            # need the same "mes actual + mes siguiente" window and the same
+            # rule for when a ficha visit is worth spending.
+            from src.mercado_publico_scraper import (
+                search_mercado_publico_bulk_excel,
+                search_mercado_publico_details_by_code,
+            )
             from src.normalizer import normalize_columns
             from src.scoring import enriquecer_oportunidades
+            from .scoring_config_service import get_scoring_config
+            import pandas as pd
 
-            rows_found = 0
-            all_diagnostics = []
-            mode_failures = []
-            modes = _mercado_publico_modes(settings.enable_chile_grandes_compras)
-            if not settings.enable_chile_grandes_compras:
-                all_diagnostics.append(
-                    "Mercado Publico grandes_compras: deshabilitado temporalmente; se consultaron solo licitaciones."
+            persisted_source = "mercado_publico_browser"
+            date_from, date_to = chile_closing_window(payload)
+            expired_count = _finalize_expired_opportunities(db, persisted_source)
+            diagnostics: list[str] = []
+            if expired_count:
+                diagnostics.append(f"Mercado Publico licitaciones: {expired_count} procesos vencidos cerrados localmente")
+            if settings.enable_chile_grandes_compras:
+                diagnostics.append(
+                    "Mercado Publico grandes_compras: aun no soportado por este flujo; se consultaron solo licitaciones."
                 )
-            for mode_index, (mode, persisted_source) in enumerate(modes):
-                stage_start = 5 + mode_index * 40
-                existing_active = _existing_active_nomenclatures(db, persisted_source)
-                expired_count = _finalize_expired_opportunities(db, persisted_source)
-                if expired_count:
-                    all_diagnostics.append(
-                        f"Mercado Publico {mode}: {expired_count} procesos vencidos cerrados localmente"
-                    )
-                try:
-                    saved_revalidation_rows = _manual_chile_revalidation_rows(
-                        db, persisted_source, keyword, payload
-                    ) if mode == "licitaciones" else []
-                    raw, mode_diagnostics = search_mercado_publico(
-                        keyword=keyword,
-                        mode=mode,
-                        headless=True,
-                        max_results=max_results,
-                        enrich_details=bool(payload.get("enrich_details", False)) and mode == "licitaciones",
-                        enrich_closed_details=bool(payload.get("revalidate_closed_detail", False)) and mode == "licitaciones",
-                        include_detail_attachments=False,
-                        publication_date_from=payload.get("publication_date_from"),
-                        publication_date_to=payload.get("publication_date_to"),
-                        date_filter_type=payload.get("date_filter_type", "publication"),
-                        include_active_revalidation=bool(payload.get("automatic_incremental")) and mode == "licitaciones",
-                        max_details=max_details,
-                        revalidation_rows=saved_revalidation_rows,
-                        years=sorted(_period_values(payload, "years", "year")),
-                        months=sorted(_period_values(payload, "months", "month")),
-                        progress_callback=lambda value, message, start=stage_start: update_progress(start + value * 35, message),
-                        cancel_callback=check_cancelled,
-                    )
-                except RunCancelled:
-                    raise
-                except Exception as exc:
-                    mode_failures.append(f"{mode}: {type(exc).__name__}: {exc}")
-                    all_diagnostics.append(f"Mercado Publico {mode}: fallo parcial ({type(exc).__name__}: {exc})")
-                    continue
-                normalized = normalize_columns(raw) if raw is not None and not raw.empty else raw
-                normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
-                normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
-                normalized = _filter_incremental_rows(normalized, payload, existing_active, all_diagnostics)
-                # Mercado Publico already applied its own text search, which
-                # also matches indexed tender content not visible in the title.
-                # A second literal filter here discarded valid portal results.
-                from .scoring_config_service import get_scoring_config
-                enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "chile")) if normalized is not None and not normalized.empty else normalized
-                if enriched is not None and not enriched.empty and max_results:
-                    enriched = enriched.head(max_results).copy()
-                rows_found += upsert_opportunities(db, enriched, persisted_source, run_id=run.id)
-                update_progress(stage_start + 38, f"Guardando resultados de {mode}")
-                all_diagnostics.extend(mode_diagnostics or [])
-            if rows_found == 0 and mode_failures:
-                raise RuntimeError("Mercado Publico LMP-GC no devolvio resultados: " + " | ".join(mode_failures))
-            diagnostics = all_diagnostics
-        elif source in {"mercado_publico_browser", "mercado_publico_grandes_compras"}:
+            update_progress(5, f"Buscando Mercado Publico (cierre {date_from} a {date_to})")
+            bulk_rows, bulk_diagnostics = search_mercado_publico_bulk_excel(
+                keyword=keyword,
+                date_from=date_from,
+                date_to=date_to,
+                headless=True,
+                progress_callback=lambda value, message: update_progress(5 + value * 40, message),
+                cancel_callback=check_cancelled,
+            )
+            diagnostics.extend(bulk_diagnostics)
+            bulk_rows = _drop_archived_chile_rows(db, bulk_rows, diagnostics)
+            update_progress(45, f"{len(bulk_rows)} procesos encontrados; comparando con la base")
+
+            detail_targets = _chile_rows_needing_detail(db, persisted_source, bulk_rows)
+            diagnostics.append(
+                f"Mercado Publico licitaciones: {len(detail_targets)}/{len(bulk_rows)} procesos requieren ficha "
+                "(Publicada o con cambio de estado/fecha de cierre)"
+            )
+            if detail_targets:
+                detail_rows, detail_diagnostics = search_mercado_publico_details_by_code(
+                    detail_targets,
+                    headless=True,
+                    progress_callback=lambda value, message: update_progress(50 + value * 35, message),
+                    cancel_callback=check_cancelled,
+                )
+                diagnostics.extend(detail_diagnostics)
+                bulk_rows = _merge_mercado_publico_chile_details(bulk_rows, detail_rows, diagnostics)
+
+            update_progress(88, "Procesando resultados de Mercado Público")
+            raw = pd.DataFrame(bulk_rows) if bulk_rows else pd.DataFrame()
+            normalized = normalize_columns(raw) if not raw.empty else raw
+            normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
+            normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
+            normalized = _filter_dataframe_keyword(normalized, keyword)
+            enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "chile")) if normalized is not None and not normalized.empty else normalized
+            if enriched is not None and not enriched.empty and max_results:
+                enriched = enriched.head(max_results).copy()
+            rows_found = upsert_opportunities(db, enriched, persisted_source, run_id=run.id)
+        elif source == "mercado_publico_grandes_compras":
             from src.mercado_publico_scraper import search_mercado_publico
             from src.normalizer import normalize_columns
             from src.scoring import enriquecer_oportunidades
 
-            mode = "grandes_compras" if source == "mercado_publico_grandes_compras" else "licitaciones"
+            mode = "grandes_compras"
             raw, diagnostics = search_mercado_publico(
                 keyword=keyword,
                 mode=mode,

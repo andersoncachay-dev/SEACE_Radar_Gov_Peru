@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, Alert, Opportunity, RadarKeyword, Run, SchedulerStatus, Stats } from "../api";
+import { api, chileStatusSlug, Alert, Opportunity, RadarKeyword, Run, SchedulerStatus, Stats } from "../api";
 import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, LegalView, LockIcon, RunProgress, commercialSignal, countryFlagUrls, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, parseDate, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
 import { alertStatusLabel, ChannelSymbol } from "./AlertsPage";
-import { excelLogoUrl, exportOpportunitiesToExcel } from "./OpportunitiesPage";
+import { excelLogoUrl, exportOpportunitiesToExcel, isOpportunityNew } from "./OpportunitiesPage";
 
 export type HomeStatusFilter = "all" | "priority-a" | "vigentes" | "cerrados";
 export type YearBreakdownMode = "processes";
@@ -83,6 +83,13 @@ export function matchesAnyKeywordHint(
   if (!keywordHints.length) return false;
   const text = `${opportunity.nomenclature} ${opportunity.description} ${opportunity.entity}`;
   return keywordHints.some((keyword) => keyword.terms.some((term) => term.trim() && matchesCompletePhrase(text, term)));
+}
+
+export function homeCommercialStatusLabel(item: Opportunity) {
+  const signal = commercialSignal(item);
+  if (signal.className === "green") return "Vigente para Consultas y Propuesta";
+  if (signal.className === "amber") return "Vigente sólo para Propuesta";
+  return "Proceso Culminado";
 }
 
 export function matchesHomeStatusFilter(item: Opportunity, filter: HomeStatusFilter) {
@@ -166,15 +173,12 @@ const AMOUNT_PIE_COLORS = [
 ];
 
 // Callouts for slices assigned to a column are stacked top-to-bottom in the
-// same order their rim points appear on the pie (ascending rimY), so a
-// connector line within one column never crosses another one in that same
-// column - two point sets both sorted by the same key can only be joined
-// without crossings.
-function layoutCalloutColumn<T extends { rimY: number }>(items: T[], side: "left" | "right") {
+// order they're given (largest amount first), not by their geometric
+// position on the pie, so the box reading order stays largest -> smallest.
+function layoutCalloutColumn<T>(items: T[], side: "left" | "right") {
   const anchorLeft = side === "left" ? 6 : 94;
-  const sorted = [...items].sort((a, b) => a.rimY - b.rimY);
-  const count = sorted.length;
-  return sorted.map((item, index) => ({
+  const count = items.length;
+  return items.map((item, index) => ({
     ...item,
     side,
     slot: {
@@ -200,51 +204,55 @@ export function AmountByRegionPie3D({
   totalAmount: number;
   country: Country;
 }) {
-  const withAmount = rows.filter((row) => row.amount > 0);
-  const total = withAmount.reduce((sum, row) => sum + row.amount, 0);
+  // rows arrives sorted largest amount -> smallest, with "Otros" always last
+  // regardless of its own amount (see summarizeByRegion). That order is the
+  // source of truth for both the box ranks below and each slice's color.
+  const ranked = rows
+    .filter((row) => row.amount > 0)
+    .map((row, index) => ({ ...row, color: AMOUNT_PIE_COLORS[index % AMOUNT_PIE_COLORS.length] }));
+  const total = ranked.reduce((sum, row) => sum + row.amount, 0);
 
-  let cumulativeDeg = 0;
-  const slices = withAmount.map((row, index) => {
+  // The largest slice starts at the 12 o'clock point (0deg in CSS's
+  // clockwise-from-12 convention - rotated 90deg clockwise from the 9
+  // o'clock start this used to have) and sweeps counter-clockwise through
+  // largest -> ... -> Otros. conic-gradient only sweeps clockwise from its
+  // start angle, so instead we draw the same start point with the stops in
+  // reverse (Otros first, largest last): sweeping clockwise through a
+  // reversed list traces the identical arcs as sweeping counter-clockwise
+  // through the forward list, since reversing both the direction and the
+  // order cancels out.
+  // conic-gradient requires its stop angles to be listed in non-decreasing
+  // order (browsers clamp any stop smaller than the previous one), so the
+  // gradient string is built from this reversed, ascending-angle sequence -
+  // not from `ranked`, whose rank order runs the opposite direction.
+  const START_DEG = 0;
+  let cumulativeDeg = START_DEG;
+  const drawnOrder = [...ranked].reverse().map((row) => {
     const fraction = total > 0 ? row.amount / total : 0;
-    const startDeg = cumulativeDeg;
     const sweepDeg = fraction * 360;
+    const startDeg = cumulativeDeg;
     cumulativeDeg += sweepDeg;
-    return {
-      ...row,
-      color: AMOUNT_PIE_COLORS[index % AMOUNT_PIE_COLORS.length],
-      startDeg,
-      sweepDeg,
-      midDeg: startDeg + sweepDeg / 2,
-    };
+    const midDeg = startDeg + sweepDeg / 2;
+    const angleRad = (midDeg * Math.PI) / 180;
+    const rimX = 50 + 20 * Math.sin(angleRad);
+    const rimY = 50 + 20 * -Math.cos(angleRad) * 0.58;
+    return { ...row, startDeg, sweepDeg, rimX, rimY };
   });
 
-  const gradient = slices.length
-    ? `conic-gradient(${slices.map((slice) => `${slice.color} ${slice.startDeg}deg ${slice.startDeg + slice.sweepDeg}deg`).join(", ")})`
+  const gradient = drawnOrder.length
+    ? `conic-gradient(${drawnOrder.map((slice) => `${slice.color} ${slice.startDeg}deg ${slice.startDeg + slice.sweepDeg}deg`).join(", ")})`
     : "#0d3a6b";
 
-  const withRim = slices.map((slice) => {
-    const angleRad = (slice.midDeg * Math.PI) / 180;
-    const x = Math.sin(angleRad);
-    const y = -Math.cos(angleRad);
-    return { ...slice, rimX: 50 + 20 * x, rimY: 50 + 20 * y * 0.58, onLeft: x < 0 };
-  });
+  const geometryByKey = new Map(drawnOrder.map((slice) => [slice.key, slice]));
+  const slices = ranked.map((row) => ({ ...row, ...geometryByKey.get(row.key)! }));
 
-  // A dominant slice (e.g. one region holding ~80% of the amount) leaves the
-  // remaining thin slices clustered near the same angle, so a pure x<0 split
-  // can dump nearly all of them on one geometric side. Splitting on a rimX
-  // threshold instead - every slice sent left has a rimX no greater than any
-  // slice sent right - guarantees the two columns' connector lines never
-  // cross each other, since their horizontal spans can't overlap. Within a
-  // column, layoutCalloutColumn's own rimY sort keeps that half crossing-free
-  // too (two point sets sorted by the same key can only be paired straight).
-  const byRimX = [...withRim].sort((a, b) => a.rimX - b.rimX);
-  const leftCount = Math.floor(byRimX.length / 2);
-  const leftSlices = byRimX.slice(0, leftCount).map((slice) => ({ ...slice, onLeft: true }));
-  const rightSlices = byRimX.slice(leftCount).map((slice) => ({ ...slice, onLeft: false }));
-
+  // Boxes read largest -> smallest -> Otros-last, top-left down to
+  // bottom-right: the first half of `ranked` fills the left column
+  // (top to bottom), the rest fills the right column.
+  const leftCount = Math.ceil(slices.length / 2);
   const placedSlices = [
-    ...layoutCalloutColumn(leftSlices, "left"),
-    ...layoutCalloutColumn(rightSlices, "right"),
+    ...layoutCalloutColumn(slices.slice(0, leftCount), "left"),
+    ...layoutCalloutColumn(slices.slice(leftCount), "right"),
   ];
 
   return (
@@ -262,8 +270,8 @@ export function AmountByRegionPie3D({
           >
             <span className="amount-pie-callout-dot" style={{ background: slice.color }} aria-hidden="true" />
             <span className="amount-pie-callout-copy">
-              <span className="amount-pie-callout-main">{slice.count} {slice.count === 1 ? "Opp" : "Opps"} / {slice.name}</span>
-              <span className="amount-pie-callout-amount">{formatCompactAmount(slice.amount, country)}</span>
+              <span className="amount-pie-callout-name">{slice.name}</span>
+              <span className="amount-pie-callout-amount">{slice.count} {slice.count === 1 ? "Opp" : "Opps"} · {formatCompactAmount(slice.amount, country)}</span>
             </span>
           </div>
         ))}
@@ -438,6 +446,15 @@ export function SortIcon({ className = "" }: { className?: string }) {
   );
 }
 
+export function SearchIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
 export async function copyToClipboard(value: string) {
   try {
     await navigator.clipboard.writeText(value);
@@ -468,6 +485,7 @@ export function Kpis({
   contextLabel,
   contextAction,
   filteredAmount,
+  yearScopedStats,
 }: {
   stats: Stats | null;
   country: Country;
@@ -481,17 +499,19 @@ export function Kpis({
   contextLabel?: React.ReactNode;
   contextAction?: React.ReactNode;
   filteredAmount?: number;
+  yearScopedStats?: Stats | null;
 }) {
   const amountHint = activeFilter && activeFilter !== "all"
     ? "Monto de la selección"
     : selectedYear
       ? `Año ${selectedYear}`
       : "Monto total detectado";
+  const countStats = yearScopedStats ?? stats;
   const values: Array<{ label: string; value: React.ReactNode; hint: string; filter?: HomeStatusFilter; breakdown?: YearBreakdownMode; tone?: "success" | "danger" }> = [
-    { label: "Procesos radar", value: stats?.total ?? 0, hint: yearBreakdownMode === "processes" ? "Ocultar desglose anual" : "Ver desglose por año", filter: "all", breakdown: "processes" },
-    { label: "Prioridad A", value: stats?.by_priority?.A ?? 0, hint: "Revisar Inmediatamente", filter: "priority-a", tone: "success" },
-    { label: "Vigentes", value: stats?.vigentes ?? 0, hint: "Presentar Consultas o Propuestas", filter: "vigentes", tone: "success" },
-    { label: "Cerrados", value: stats?.cerrados ?? 0, hint: "Procesos Finalizados", filter: "cerrados", tone: "danger" },
+    { label: "Procesos radar", value: countStats?.total ?? 0, hint: yearBreakdownMode === "processes" ? "Ocultar desglose anual" : "Ver desglose por año", filter: "all", breakdown: "processes" },
+    { label: "Prioridad A", value: countStats?.by_priority?.A ?? 0, hint: "Revisar Inmediatamente", filter: "priority-a", tone: "success" },
+    { label: "Vigentes", value: countStats?.vigentes ?? 0, hint: "Presentar Consultas o Propuestas", filter: "vigentes", tone: "success" },
+    { label: "Cerrados", value: countStats?.cerrados ?? 0, hint: "Procesos Finalizados", filter: "cerrados", tone: "danger" },
     { label: "Monto detectado", value: formatMoney(filteredAmount ?? stats?.total_amount ?? 0, country), hint: amountHint },
   ];
   return (
@@ -595,6 +615,8 @@ export function Home({
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [processSort, setProcessSort] = useState<ProcessSortMode>("date-desc");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [nomenclatureSearchOpen, setNomenclatureSearchOpen] = useState(false);
+  const [nomenclatureSearch, setNomenclatureSearch] = useState("");
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const [homeFilter, setHomeFilter] = useState<HomeStatusFilter>("all");
   const [selectedYear, setSelectedYear] = useState<string | null>(() => currentAnalysisYear());
@@ -647,6 +669,11 @@ export function Home({
   );
   const homeStats = useMemo(() => summarizeOpportunities(countryOpportunities), [countryOpportunities]);
   const filteredHomeStats = useMemo(() => summarizeOpportunities(filteredHomeOpportunities), [filteredHomeOpportunities]);
+  const yearScopedOpportunities = useMemo(
+    () => countryOpportunities.filter((item) => selectedYear === null || opportunityYear(item) === selectedYear),
+    [countryOpportunities, selectedYear],
+  );
+  const yearScopedStats = useMemo(() => summarizeOpportunities(yearScopedOpportunities), [yearScopedOpportunities]);
   const lastRun = countryRuns[0];
   const todayKey = limaDateKey(new Date(countdownNow));
   const todayRuns = countryRuns
@@ -707,18 +734,26 @@ export function Home({
       : selectedRegion
         ? filteredHomeOpportunities.filter((item) => normalizeRegionName(item.region) === selectedRegion)
         : filteredHomeOpportunities;
-    return filtered
+    const nomenclatureNeedle = nomenclatureSearch.trim().toLowerCase();
+    const searched = nomenclatureNeedle
+      ? filtered.filter((item) => item.nomenclature.toLowerCase().includes(nomenclatureNeedle))
+      : filtered;
+    return searched
       .slice()
       .sort((left, right) => {
         if (processSort === "amount-desc" || processSort === "amount-asc") {
           const delta = (left.amount || 0) - (right.amount || 0);
           return processSort === "amount-desc" ? -delta : delta;
         }
+        if (processSort === "date-desc") {
+          const newDelta = Number(isOpportunityNew(right)) - Number(isOpportunityNew(left));
+          if (newDelta !== 0) return newDelta;
+        }
         const rightDate = parseDate(right.publication_date) || parseDate(right.proposal_deadline) || parseDate(right.quote_deadline) || 0;
         const leftDate = parseDate(left.publication_date) || parseDate(left.proposal_deadline) || parseDate(left.quote_deadline) || 0;
         return processSort === "date-asc" ? leftDate - rightDate : rightDate - leftDate;
       });
-  }, [filteredHomeOpportunities, selectedRegion, processSort]);
+  }, [filteredHomeOpportunities, selectedRegion, processSort, nomenclatureSearch]);
   const regionAmountBreakdown = useMemo(() => summarizeByRegion(filteredHomeOpportunities, country), [filteredHomeOpportunities, country]);
 
   async function copyProcessNomenclature(item: Opportunity) {
@@ -849,6 +884,7 @@ export function Home({
       </section>
       <Kpis
         stats={homeStats}
+        yearScopedStats={yearScopedStats}
         filteredAmount={filteredHomeStats.total_amount}
         country={country}
         activeFilter={homeFilter}
@@ -927,10 +963,11 @@ export function Home({
               <span>Distribucion regional de oportunidades detectadas</span>
             </div>
             <div className="panel-title-actions">
-              {homeFilter !== "all" || selectedYear ? (
-                <span className="data-pill subtle">
-                  {[homeFilter !== "all" ? homeStatusFilterLabel(homeFilter) : null, selectedYear ? `Año ${selectedYear}` : null].filter(Boolean).join(" · ")}
-                </span>
+              {homeFilter !== "all" ? (
+                <span className="data-pill subtle">{homeStatusFilterLabel(homeFilter)}</span>
+              ) : null}
+              {selectedYear ? (
+                <span className="data-pill year-pill">Año {selectedYear}</span>
               ) : null}
               <span className="data-pill">{regionRows.total} procesos</span>
             </div>
@@ -991,9 +1028,40 @@ export function Home({
           <div className="panel-title">
             <div>
               <h3>Procesos {selectedRegionRow?.name || countryLabel}</h3>
-              <span>{selectedRegionRow?.count ?? regionRows.total} procesos visualizados</span>
+              <span>{selectedRegionProcesses.length} procesos visualizados</span>
             </div>
             <div className="panel-title-actions">
+              <div className={`process-nomenclature-search ${nomenclatureSearchOpen ? "is-open" : ""}`}>
+                {nomenclatureSearchOpen ? (
+                  <input
+                    autoFocus
+                    type="text"
+                    value={nomenclatureSearch}
+                    onChange={(event) => setNomenclatureSearch(event.target.value)}
+                    onBlur={() => {
+                      if (!nomenclatureSearch.trim()) setNomenclatureSearchOpen(false);
+                    }}
+                    placeholder="Buscar por nomenclatura"
+                    aria-label="Buscar proceso por nomenclatura"
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  className="process-search-icon-button"
+                  title="Buscar por nomenclatura"
+                  aria-label="Buscar por nomenclatura"
+                  onClick={() => {
+                    if (nomenclatureSearchOpen) {
+                      setNomenclatureSearch("");
+                      setNomenclatureSearchOpen(false);
+                    } else {
+                      setNomenclatureSearchOpen(true);
+                    }
+                  }}
+                >
+                  <SearchIcon />
+                </button>
+              </div>
               <button
                 className="export-excel-icon-button"
                 type="button"
@@ -1004,6 +1072,7 @@ export function Home({
                   selectedRegionProcesses.map((item) => ({ item, signal: commercialSignal(item) })),
                   `Procesos ${selectedRegionRow?.name || countryLabel}`,
                   country,
+                  "dashboard",
                 )}
               >
                 <img src={excelLogoUrl} alt="" aria-hidden="true" loading="lazy" decoding="async" />
@@ -1061,11 +1130,25 @@ export function Home({
                       <strong>{item.nomenclature || "Proceso sin nomenclatura"}</strong>
                       <span>{item.entity || "Entidad no informada"}</span>
                     </span>
-                    <button className="map-opportunity-remove" type="button" onClick={() => setPendingHomeRemoval(item)}>
-                      Retirar de esta vista
-                    </button>
+                    <div className="map-opportunity-action">
+                      <button className="map-opportunity-remove" type="button" onClick={() => setPendingHomeRemoval(item)}>
+                        Retirar de la Sección
+                      </button>
+                      {isOpportunityNew(item) ? (
+                        <span className="new-opportunity-badge" title="Proceso incorporado a GovRadar durante los últimos 7 días" aria-label="Proceso nuevo">
+                          NEW
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   <span className="map-opportunity-description"><HighlightedText text={item.description} terms={homeKeywordTerms} /></span>
+                  <span className={`home-status-badge ${commercialSignal(item).className}`}>{homeCommercialStatusLabel(item)}</span>
+                  {country === "Chile" && (item.source_status || item.contract_duration) ? (
+                    <span className="map-opportunity-chile-meta">
+                      {item.source_status ? <span className={`chile-ml-status ${chileStatusSlug(item.source_status)}`}>{item.source_status}</span> : null}
+                      {item.contract_duration ? <span className="chile-ml-contract">Duración de contrato: {item.contract_duration}</span> : null}
+                    </span>
+                  ) : null}
                   <span className="map-opportunity-amount">
                     <small className={item.amount > 0 ? "" : "amount-unpublished"}>
                       {item.amount > 0 ? "Monto detectado" : "Monto no publicado"}
@@ -1081,9 +1164,9 @@ export function Home({
         </article>
       </section>
       <section className="two-col">
-        <article className="panel">
+        <article className="panel execution-panel">
           <div className="panel-title execution-panel-title">
-            <h3>Ultima ejecucion</h3>
+            <h3>Updates Automáticos</h3>
             <div className="execution-title-actions">
               <UpdateCountdown status={schedulerStatus} seconds={nextUpdateSeconds} />
               <span className={`status ${lastRun?.status || "queued"}`}>{lastRun?.status || "Sin datos"}</span>
@@ -1098,22 +1181,29 @@ export function Home({
             <span>{recentCountryAlerts.length}</span>
           </div>
           <div className="list recent-alerts-list">
-            {recentCountryAlerts.slice(0, 20).map((alert) => (
-              <div className="list-row recent-alert-row" key={alert.id}>
-                <span className="recent-alert-icons">
-                  <CountryFlagIcon country={alert.country === "chile" ? "Chile" : "Peru"} className="rule-country-flag-image" />
-                  <ChannelSymbol channel={alert.channel} />
-                </span>
-                <div className="recent-alert-copy">
-                  <strong>{alert.entity || "Sin entidad"}</strong>
-                  <small>{alert.description || "Sin descripción"}</small>
+            {recentCountryAlerts.slice(0, 20).map((alert) => {
+              const alertKeywordTerms = alert.keywords.split(",").map((term) => term.trim()).filter(Boolean);
+              return (
+                <div className="list-row recent-alert-row" key={alert.id}>
+                  <span className="recent-alert-icons">
+                    <CountryFlagIcon country={alert.country === "chile" ? "Chile" : "Peru"} className="rule-country-flag-image" />
+                    <ChannelSymbol channel={alert.channel} />
+                  </span>
+                  <div className="recent-alert-copy">
+                    <strong>{alert.entity || "Sin entidad"}</strong>
+                    <small>
+                      {alert.description ? <HighlightedText text={alert.description} terms={alertKeywordTerms} /> : "Sin descripción"}
+                    </small>
+                    <small className="recent-alert-destination">{alert.destination || "Sin destino"}</small>
+                  </div>
+                  <div className="recent-alert-status">
+                    <span className={`event-status-label ${alert.status}`}>{alertStatusLabel(alert.status)}</span>
+                    {alert.run_id ? <small>Run #{alert.run_id} · 1 proceso</small> : null}
+                    <small>{formatDate(alert.created_at)}</small>
+                  </div>
                 </div>
-                <div className="recent-alert-status">
-                  <span className={`event-status-label ${alert.status}`}>{alertStatusLabel(alert.status)}</span>
-                  <small>{formatDate(alert.created_at)}</small>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {!recentCountryAlerts.length ? <Empty text="Crea reglas para activar alertas por email, WhatsApp o mensaje interno." /> : null}
           </div>
         </article>

@@ -97,7 +97,39 @@ def _build_message(opportunity: Opportunity, alert_type: str) -> str:
     return "\n".join(lines)
 
 
-def _build_message_html(opportunity: Opportunity, alert_type: str) -> str:
+def _highlight_keywords_html(text: str, keywords: str) -> str:
+    """Escape ``text`` for HTML and wrap whichever configured keywords it
+    contains in an inline-styled <mark> - email clients ignore CSS classes,
+    so the highlight style has to travel inline."""
+    if not text:
+        return ""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw in re.split(r"[,;\n]+", keywords or ""):
+        term = raw.strip()
+        if len(term) >= 3 and not term.isdigit() and term.casefold() not in seen:
+            seen.add(term.casefold())
+            terms.append(term)
+    if not terms:
+        return escape(text)
+    terms.sort(key=len, reverse=True)
+    pattern = re.compile(r"\b(" + "|".join(re.escape(term) for term in terms) + r")\b", re.IGNORECASE)
+    parts = pattern.split(text)
+    highlighted = []
+    for index, part in enumerate(parts):
+        if not part:
+            continue
+        if index % 2 == 1:
+            highlighted.append(
+                '<mark style="background:#fff1a8;color:#071f3f;font-weight:700;'
+                f'padding:0 2px;border-radius:3px;">{escape(part)}</mark>'
+            )
+        else:
+            highlighted.append(escape(part))
+    return "".join(highlighted)
+
+
+def _build_message_html(opportunity: Opportunity, alert_type: str, keywords: str = "") -> str:
     alert_labels = {
         "new_process": "Nueva oportunidad detectada",
         "priority_match": "Oportunidad de alta prioridad",
@@ -120,10 +152,19 @@ def _build_message_html(opportunity: Opportunity, alert_type: str) -> str:
     if publication_text:
         rows.append(("Fecha de publicación", publication_text))
     rows.append(("Fecha límite", deadline_text))
-    body_html = "".join(
+    row_html = [
         f"<p style=\"margin:0 0 10px;\"><strong>{escape(label)}:</strong> {escape(value)}</p>"
-        for label, value in rows[:-1]
-    ) + f"<p style=\"margin:0;\"><strong>{escape(rows[-1][0])}:</strong> {escape(rows[-1][1])}</p>"
+        for label, value in rows
+    ]
+    if opportunity.description:
+        row_html.insert(
+            2,
+            f"<p style=\"margin:0 0 10px;\"><strong>Descripción:</strong> "
+            f"{_highlight_keywords_html(opportunity.description, keywords)}</p>",
+        )
+    if row_html:
+        row_html[-1] = row_html[-1].replace("margin:0 0 10px;", "margin:0;", 1)
+    body_html = "".join(row_html)
     detail_url = opportunity.detail_url or ""
     return _branded_email_html(
         alert_labels.get(alert_type, "Alerta de oportunidad"),
@@ -416,7 +457,7 @@ def send_pending_alerts(db: Session, limit: int | None = None) -> list[Alert]:
         alert.message = clean_message
         try:
             if rule.channel == "email":
-                html_body = _build_message_html(opportunity, alert.alert_type) if opportunity else None
+                html_body = _build_message_html(opportunity, alert.alert_type, rule.keywords) if opportunity else None
                 provider_message_id = _send_email(
                     rule.destination, clean_message, subject=_email_subject(opportunity), html=html_body
                 )

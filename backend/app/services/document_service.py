@@ -48,6 +48,34 @@ def _safe_filename(value: str, fallback: str = "documento") -> str:
     return (name[:180] or fallback)
 
 
+def _probe_document_extension(url: str) -> str:
+    """OCDS document URLs (SdescargarArchivoAlfresco?fileCode=...) carry no
+    filename/extension of their own, so the type badge would otherwise always
+    fall back to "PDF" regardless of the real file. A lightweight HEAD (or,
+    failing that, a streamed GET closed immediately) reads Content-Disposition
+    / Content-Type to recover the real extension without downloading the
+    whole file."""
+    headers = {"User-Agent": "GovRadar CRM/1.0"}
+    try:
+        response = requests.head(url, timeout=10, allow_redirects=True, headers=headers, proxies=requests_proxies())
+        if response.status_code >= 400 or not response.headers.get("Content-Type"):
+            response = requests.get(url, timeout=15, stream=True, allow_redirects=True, headers=headers, proxies=requests_proxies())
+            response.close()
+        disposition = response.headers.get("Content-Disposition", "")
+        match = re.search(r"filename\*?=(?:UTF-8''|\"?)([^\";]+)", disposition, re.I)
+        if match:
+            suffix = Path(unquote(match.group(1))).suffix.lower().replace(".", "")
+            if suffix:
+                return suffix
+        content_type = (response.headers.get("Content-Type", "") or "").split(";")[0].strip()
+        guessed = mimetypes.guess_extension(content_type) if content_type else None
+        if guessed:
+            return guessed.lower().replace(".", "")
+    except Exception:
+        pass
+    return ""
+
+
 def _filename_from_url(url: str, title: str, opportunity: Opportunity) -> str:
     parsed = urlparse(url or "")
     name = Path(unquote(parsed.path)).name
@@ -1084,17 +1112,24 @@ def discover_documents_for_opportunity(db: Session, opportunity_id: int) -> list
                 docs_payload = []
         if not docs_payload and opportunity.requirement_pdf_url:
             docs_payload = [{"title": "Documento OCDS", "url": opportunity.requirement_pdf_url}]
-        docs = [
-            _register_document(
-                db,
-                opportunity,
-                title=_clean(item.get("title") or "Documento OCDS"),
-                source_url=_clean(item.get("url")),
-                status="registered",
+        docs = []
+        for item in docs_payload:
+            url = _clean(item.get("url"))
+            if not url:
+                continue
+            title = _clean(item.get("title") or "Documento OCDS")
+            extension = _probe_document_extension(url)
+            filename = _safe_filename(f"{title}.{extension}" if extension else title)
+            docs.append(
+                _register_document(
+                    db,
+                    opportunity,
+                    title=title,
+                    source_url=url,
+                    filename=filename,
+                    status="registered",
+                )
             )
-            for item in docs_payload
-            if _clean(item.get("url"))
-        ]
         if docs:
             return docs
         return [
@@ -1106,7 +1141,7 @@ def discover_documents_for_opportunity(db: Session, opportunity_id: int) -> list
                 error_message="La API OCDS no devolvio enlaces de documentos para esta oportunidad.",
             )
         ]
-    if not opportunity.detail_url:
+    if not opportunity.detail_url and not opportunity.source.startswith("mercado_publico"):
         return [
             _register_document(
                 db,
@@ -1147,6 +1182,35 @@ def discover_documents_for_opportunity(db: Session, opportunity_id: int) -> list
             driver.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": str(target_dir)})
         except Exception:
             pass
+        if opportunity.source.startswith("mercado_publico") and not opportunity.detail_url:
+            # Older Chile opportunities were saved before url_detalle was
+            # captured (bulk-Excel discovery never had a ficha link to save).
+            # Reproduce the manual recovery: search Mercado Publico's
+            # Busqueda Avanzada by the exact code and open its ficha live.
+            from src.mercado_publico_scraper import _open_detail_by_nomenclature
+
+            nomenclature = str(opportunity.nomenclature or "").strip()
+            resolved = False
+            if nomenclature:
+                try:
+                    resolved = _open_detail_by_nomenclature(driver, nomenclature, driver.current_window_handle)
+                except Exception:
+                    resolved = False
+            if resolved:
+                opportunity.detail_url = driver.current_url
+                db.commit()
+                db.refresh(opportunity)
+            if not opportunity.detail_url:
+                return [
+                    _register_document(
+                        db,
+                        opportunity,
+                        title="Sin URL de detalle",
+                        status="error",
+                        error_message="No se encontro la ficha de este proceso por numero de codigo en Mercado Publico.",
+                    )
+                ]
+
         if opportunity.source.startswith("mercado_publico"):
             return _discover_chile_documents(db, opportunity, driver, target_dir)
         driver.get(opportunity.detail_url)

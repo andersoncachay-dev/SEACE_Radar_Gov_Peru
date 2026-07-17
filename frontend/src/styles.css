@@ -1658,6 +1658,10 @@ input::placeholder {
   padding: 18px;
 }
 
+.execution-panel {
+  background: linear-gradient(145deg, #f3f9ff 0%, #e3f0ff 55%, #d3e8ff 100%);
+}
+
 .panel-title {
   display: flex;
   justify-content: space-between;
@@ -1851,6 +1855,12 @@ input::placeholder {
 .data-pill.subtle {
   background: #f5f9ff;
   color: #42607f !important;
+}
+
+.data-pill.year-pill {
+  background: #ffe58a;
+  color: #5b4000 !important;
+  font-weight: 850;
 }
 
 .panel-title-actions {
@@ -2160,14 +2170,18 @@ input::placeholder {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  perspective: 700px;
+  /* A larger perspective distance keeps the tilted disk closer to an
+     orthographic view, so each slice's screen area stays proportional to
+     its share of the amount instead of the near/far edges of the tilt
+     foreshortening some slices more than others. */
+  perspective: 1100px;
 }
 
 .amount-pie-3d {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 46%;
+  width: 40%;
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
   transform-style: preserve-3d;
@@ -2178,7 +2192,7 @@ input::placeholder {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  transform: rotateX(58deg);
+  transform: rotateX(42deg);
 }
 
 .amount-pie-3d-top {
@@ -2186,7 +2200,7 @@ input::placeholder {
 }
 
 .amount-pie-3d-side {
-  transform: rotateX(58deg) translateZ(-16px);
+  transform: rotateX(42deg) translateZ(-16px);
   filter: brightness(0.55);
 }
 
@@ -2205,13 +2219,12 @@ input::placeholder {
   align-items: flex-start;
   gap: 7px;
   width: max-content;
-  max-width: 190px;
+  max-width: 210px;
   padding: 6px 10px;
   border: 1.5px solid;
   border-radius: 8px;
   background: rgba(6, 26, 53, 0.82);
   line-height: 1.3;
-  white-space: nowrap;
   backdrop-filter: blur(2px);
 }
 
@@ -2238,22 +2251,20 @@ input::placeholder {
   min-width: 0;
 }
 
-.amount-pie-callout-main {
+.amount-pie-callout-name {
   color: #ffffff;
   font-size: 0.76rem;
   font-weight: 800;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .amount-pie-callout-amount {
   color: #dce9fb;
   font-size: 0.72rem;
   font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .map-selection-card {
@@ -2412,6 +2423,90 @@ input::placeholder {
   pointer-events: none;
 }
 
+.home-status-badge {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  margin-top: 6px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.home-status-badge.green {
+  background: #e7f8f1;
+  border-color: #a8e1cc;
+  color: #086448;
+}
+
+.home-status-badge.amber {
+  background: #fff5df;
+  border-color: #f3d28f;
+  color: #7b4a00;
+}
+
+.home-status-badge.red {
+  background: #fff0f0;
+  border-color: #ffc7c7;
+  color: #9d1d1d;
+}
+
+.map-opportunity-chile-meta,
+.chile-ml-meta {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chile-ml-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: #eef2f8;
+  color: #445a78;
+}
+
+.chile-ml-status.publicada {
+  background: #e3f6ea;
+  color: #1c7a43;
+}
+
+.chile-ml-status.cerrada,
+.chile-ml-status.revocada {
+  background: #fbe6e6;
+  color: #b3261e;
+}
+
+.chile-ml-status.adjudicada {
+  background: #e6f0fb;
+  color: #1d5faf;
+}
+
+.chile-ml-status.desierta {
+  background: #f5efe0;
+  color: #8a6d1c;
+}
+
+.chile-ml-contract {
+  font-size: 0.72rem;
+  color: #60748e;
+  font-weight: 650;
+}
+
 .map-opportunity-amount {
   position: relative;
   z-index: 2;
@@ -2466,6 +2561,49 @@ input::placeholder {
 
 .export-excel-icon-button:hover {
   background: #0f6f3d;
+}
+
+.process-nomenclature-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.process-nomenclature-search input {
+  min-height: 34px;
+  width: 190px;
+  padding: 6px 12px;
+  border: 1px solid #b7cdec;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--blue-900);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.process-nomenclature-search input:focus {
+  outline: none;
+  border-color: var(--blue-700);
+  box-shadow: 0 0 0 3px rgba(24, 91, 193, 0.14);
+}
+
+.process-search-icon-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid #b7cdec;
+  background: #ffffff;
+  color: var(--blue-900);
+}
+
+.process-search-icon-button:hover,
+.process-nomenclature-search.is-open .process-search-icon-button {
+  border-color: var(--blue-700);
+  box-shadow: 0 0 0 3px rgba(24, 91, 193, 0.14);
 }
 
 .process-sort-control {
@@ -2552,6 +2690,15 @@ input::placeholder {
   background: var(--blue-900);
   color: #ffffff;
   font-weight: 800;
+}
+
+.map-opportunity-action {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
 
 .map-opportunity-remove {
@@ -3065,11 +3212,14 @@ input::placeholder {
   min-height: 24px;
   align-items: center;
   justify-content: flex-start;
+  flex-wrap: wrap;
+  row-gap: 6px;
   gap: 12px;
 }
 
 .all-months-switch {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 8px;
   color: #334e70;
@@ -3077,6 +3227,7 @@ input::placeholder {
   font-weight: 800;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 }
 
 .all-months-switch input {
@@ -3089,6 +3240,7 @@ input::placeholder {
 
 .all-months-switch-track {
   display: inline-flex;
+  flex-shrink: 0;
   width: 38px;
   height: 22px;
   align-items: center;
@@ -3244,6 +3396,10 @@ input::placeholder {
   gap: 12px;
 }
 
+.required-filter-grid select {
+  height: 44px;
+}
+
 .optional-filter-grid {
   display: grid;
   grid-template-columns: minmax(250px, 1fr) minmax(250px, 1fr) minmax(330px, 1.15fr);
@@ -3322,12 +3478,14 @@ input::placeholder {
   grid-template-rows: auto minmax(0, 1fr);
   align-content: start;
   gap: 7px;
+  min-width: 0;
   color: #52677f;
   font-size: 0.75rem;
 }
 
 .date-range-inputs input[type="date"] {
   min-width: 0;
+  height: 44px;
   color-scheme: light;
   cursor: pointer;
 }
@@ -4586,6 +4744,83 @@ input::placeholder {
   margin-top: 18px;
 }
 
+.archive-reason-card {
+  width: min(520px, 100%);
+}
+
+.archive-reason-field {
+  margin-top: 14px;
+  color: #12315a;
+}
+
+.archive-reason-field small {
+  color: #6d7f99;
+  font-weight: 650;
+}
+
+.archive-reason-field textarea {
+  width: 100%;
+  min-height: 84px;
+  padding: 10px 12px;
+  border: 1px solid #bfd1ea;
+  border-radius: 10px;
+  background: #f9fbfe;
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.archive-reason-cell {
+  display: -webkit-box;
+  max-width: 220px;
+  overflow: hidden;
+  color: #51627a;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.archive-reason-editable {
+  display: grid;
+  gap: 6px;
+  width: 240px;
+}
+
+.archive-reason-editable textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 9px;
+  border: 1px solid #bfd1ea;
+  border-radius: 8px;
+  background: #f9fbfe;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.archive-reason-save {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: var(--blue-700);
+  color: white;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.archive-reason-save:hover:not(:disabled) {
+  background: var(--blue-800);
+}
+
+.archive-reason-error {
+  color: #b42318;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .run-progress {
   display: grid;
   gap: 12px;
@@ -4898,7 +5133,7 @@ input::placeholder {
   overscroll-behavior: contain;
   scrollbar-gutter: stable both-edges;
   background: white;
-  box-shadow: inset -10px 0 0 rgba(232, 241, 251, 0.55);
+  box-shadow: inset -24px 0 16px -16px rgba(232, 241, 251, 0.55);
 }
 
 .table-wrap::-webkit-scrollbar {
@@ -4922,7 +5157,7 @@ input::placeholder {
 }
 
 .table-scroll-top {
-  --opportunities-table-width: 1930px;
+  --opportunities-table-width: 2170px;
   width: 100%;
   max-width: 100%;
   height: 18px;
@@ -4947,7 +5182,7 @@ input::placeholder {
 
 table {
   width: 100%;
-  min-width: 1930px;
+  min-width: 2170px;
   border-collapse: collapse;
   background: white;
   table-layout: fixed;
@@ -4973,11 +5208,28 @@ th {
   line-height: 1.12;
   overflow-wrap: normal;
   word-break: normal;
+  /* Forces its own compositor layer - without this, WebKit/iOS Safari can
+     flash a stale sliver of the sticky header at its previous scroll offset
+     while a horizontal + vertical scroll on .table-wrap is still settling. */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
 }
 
 .table-wrap th,
 .table-wrap td {
   text-align: center;
+}
+
+/* Lets you tell which row you're reading once a horizontal scroll carries
+   its earlier columns out of view - stays until another row is clicked. */
+.table-wrap tbody tr {
+  cursor: pointer;
+}
+
+.table-wrap tbody tr.row-active td {
+  background: #e3f1ff;
 }
 
 .table-wrap tbody td {
@@ -5250,6 +5502,9 @@ th {
 }
 
 .new-opportunity-badge {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: inline-flex;
   min-height: 20px;
   flex: 0 0 auto;
@@ -5264,17 +5519,47 @@ th {
   font-weight: 900;
   line-height: 1;
   letter-spacing: 0.04em;
-  box-shadow: 0 0 0 2px rgb(25 167 111 / 16%);
+  box-shadow: 0 0 0 3px rgb(25 167 111 / 26%), 0 0 12px 3px rgb(53 240 165 / 42%);
   animation: new-opportunity-outline 2.4s ease-out infinite;
 }
 
+/* Same rotating conic-gradient sweep used by .hero-update-banner in Inicio -
+   reused here (not a new color) so the ring itself picks up a traveling
+   highlight instead of only pulsing evenly on every side. */
+.new-opportunity-badge::before {
+  position: absolute;
+  z-index: -2;
+  inset: -220%;
+  content: "";
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 42%,
+    #b9ffe2 48%,
+    #35f0a5 52%,
+    transparent 58% 100%
+  );
+  animation: update-border-sweep 2.2s linear infinite;
+}
+
+.new-opportunity-badge::after {
+  position: absolute;
+  z-index: -1;
+  inset: 1px;
+  border-radius: 999px;
+  background: #e7fff5;
+  content: "";
+}
+
 @keyframes new-opportunity-outline {
-  0%, 100% { box-shadow: 0 0 0 2px rgb(25 167 111 / 16%); }
-  50% { box-shadow: 0 0 0 4px rgb(25 167 111 / 7%); }
+  0%, 100% { box-shadow: 0 0 0 3px rgb(25 167 111 / 22%), 0 0 10px 2px rgb(53 240 165 / 30%); }
+  50% { box-shadow: 0 0 0 6px rgb(25 167 111 / 14%), 0 0 16px 5px rgb(53 240 165 / 50%); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .new-opportunity-badge { animation: none; }
+  .new-opportunity-badge,
+  .new-opportunity-badge::before {
+    animation: none;
+  }
 }
 
 .remove-view-button,
@@ -5386,7 +5671,7 @@ td:nth-child(2) {
 
 th:nth-child(3),
 td:nth-child(3) {
-  width: 180px;
+  width: 260px;
   text-align: left;
 }
 
@@ -5400,7 +5685,7 @@ th:nth-child(3) .filter-header > span {
 
 th:nth-child(4),
 td:nth-child(4) {
-  width: 150px;
+  width: 200px;
 }
 
 th:nth-child(5),
@@ -5410,7 +5695,7 @@ td:nth-child(5) {
 
 th:nth-child(6),
 td:nth-child(6) {
-  width: 290px;
+  width: 400px;
 }
 
 td:nth-child(6) {
@@ -5437,6 +5722,79 @@ td:nth-child(11) {
 
 th:nth-child(12),
 td:nth-child(12) {
+  width: 110px;
+}
+
+/* Histórico Procesos Eliminados inserts a "Motivo" column right after
+   Prioridad, shifting every column after it by one position - these
+   overrides restore each shifted column's correct width (and widen
+   Descripcion, the column that carries the most information) instead of
+   inheriting whatever the plain :nth-child(N) rule above was tuned for. */
+table.has-motivo-column {
+  min-width: 2240px;
+}
+
+.table-scroll-top.has-motivo-column {
+  --opportunities-table-width: 2240px;
+}
+
+table.has-motivo-column th:nth-child(2),
+table.has-motivo-column td:nth-child(2) {
+  width: 260px;
+}
+
+table.has-motivo-column th:nth-child(3),
+table.has-motivo-column td:nth-child(3) {
+  width: 270px;
+}
+
+table.has-motivo-column th:nth-child(4),
+table.has-motivo-column td:nth-child(4) {
+  width: 180px;
+  text-align: left;
+}
+
+table.has-motivo-column th:nth-child(4) .filter-header,
+table.has-motivo-column th:nth-child(4) .filter-header > span {
+  text-align: left;
+}
+
+table.has-motivo-column th:nth-child(5),
+table.has-motivo-column td:nth-child(5) {
+  width: 150px;
+}
+
+table.has-motivo-column th:nth-child(6),
+table.has-motivo-column td:nth-child(6) {
+  width: 126px;
+}
+
+table.has-motivo-column th:nth-child(7),
+table.has-motivo-column td:nth-child(7) {
+  width: 340px;
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
+}
+
+table.has-motivo-column th:nth-child(8),
+table.has-motivo-column td:nth-child(8),
+table.has-motivo-column th:nth-child(9),
+table.has-motivo-column td:nth-child(9),
+table.has-motivo-column th:nth-child(11),
+table.has-motivo-column td:nth-child(11) {
+  width: 150px;
+}
+
+table.has-motivo-column th:nth-child(10),
+table.has-motivo-column td:nth-child(10),
+table.has-motivo-column th:nth-child(12),
+table.has-motivo-column td:nth-child(12) {
+  width: 124px;
+}
+
+table.has-motivo-column th:nth-child(13),
+table.has-motivo-column td:nth-child(13) {
   width: 110px;
 }
 
@@ -5568,7 +5926,7 @@ td:nth-child(12) {
 }
 
 .recent-alert-row {
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-start;
 }
 
@@ -5587,17 +5945,18 @@ td:nth-child(12) {
 }
 
 .recent-alert-copy strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
   color: var(--ink);
 }
 
 .recent-alert-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
   color: var(--muted);
+}
+
+.recent-alert-destination {
+  font-weight: 700;
+  color: var(--blue-700) !important;
 }
 
 .recent-alert-status {
@@ -6062,6 +6421,29 @@ td:nth-child(12) {
 
 .document-list {
   display: grid;
+  gap: 2px;
+  max-height: 340px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(34, 116, 232, 0.72) transparent;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+
+.document-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.document-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.document-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(91, 164, 255, 0.86), rgba(34, 116, 232, 0.76));
+  border: 1px solid #f4f8fd;
+  border-radius: 999px;
 }
 
 .document-search-button {
@@ -6150,6 +6532,11 @@ td:nth-child(12) {
   color: #b42318;
   font-weight: 900;
   font-size: 0.75rem;
+}
+
+.pdf-badge.doc-badge {
+  background: #eaf1fd;
+  color: #1d5faf;
 }
 
 .document-actions {
@@ -6460,15 +6847,34 @@ td:nth-child(12) {
   }
 
   .search-mode-row {
-    flex-direction: column;
+    flex-direction: row;
+    flex: 1 1 0;
   }
 
-  .active-period-summary {
+  /* Months (unlike Años) always have a fixed count of 12, so a real grid
+     keeps both mobile rows of six lined up in clean columns instead of
+     drifting apart with flex-wrap's content-based widths. */
+  .multi-filter:has(.multi-filter-heading) > div {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  .multi-filter:has(.multi-filter-heading) > div button {
+    padding: 0 4px;
+  }
+
+  .search-mode-secondary {
+    display: none;
+  }
+
+  .active-period-summary,
+  .additional-search-summary {
     grid-template-columns: 1fr;
     gap: 6px;
   }
 
-  .active-period-summary > span {
+  .active-period-summary > span,
+  .additional-search-summary > span {
     padding-top: 0;
   }
 
@@ -6482,21 +6888,48 @@ td:nth-child(12) {
     grid-column: auto;
   }
 
+  /* Inicio/Fin side by side, splitting exactly the same total width as the
+     search boxes above them. min-width:0 on the label lets the grid track
+     shrink, but WebKit's native type="date" control still refuses to
+     render its formatted value ("17 jul. 2026") below a fairly wide
+     intrinsic floor - shrinking the font/padding is what actually brings
+     that floor under half the row's width on an iPhone-size screen. */
+  .date-range-inputs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .date-range-inputs input[type="date"] {
+    padding: 0 6px;
+    font-size: 0.74rem;
+  }
+
   .radar-filter-heading,
   .radar-action-row {
     align-items: stretch;
     flex-direction: column;
   }
 
+  /* Keep the two required-search actions (mode toggle + Ejecutar Radar)
+     side by side on mobile instead of stacking every button full-width. */
+  .required-action-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
   .filter-heading-actions {
-    justify-items: start;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
   }
 
   .search-mode-row button,
   .execute-radar-button {
-    width: 100%;
+    flex: 1 1 0;
+    width: auto;
     min-width: 0;
-    flex-basis: auto;
   }
 
   .ocds-period-picker {
@@ -6515,6 +6948,14 @@ td:nth-child(12) {
 
   .amount-pie-3d {
     width: 38%;
+  }
+
+  /* The stacked mobile layout gives the callouts less usable height than
+     the desktop side-by-side one, and wrapped region names make each box
+     taller, so the fixed 320px donut card is too short not to overlap
+     rows - grow it to match. */
+  .map-inspector-donut {
+    height: 400px;
   }
 
   .year-filter-panel {
@@ -6644,7 +7085,14 @@ td:nth-child(12) {
 
   .run-metrics {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .run-metrics span {
+    min-height: 38px;
+    justify-content: center;
+    text-align: center;
   }
 
   .table-wrap {
@@ -6657,7 +7105,7 @@ td:nth-child(12) {
   .table-scroll-top {
     margin-inline: 0;
     border-radius: 10px 10px 0 0;
-    --opportunities-table-width: 1760px;
+    --opportunities-table-width: 1700px;
   }
 
   .table-scroll-top > div {
@@ -6665,13 +7113,33 @@ td:nth-child(12) {
   }
 
   table {
-    min-width: 1760px;
+    min-width: 1700px;
   }
 
   th,
   td {
-    padding: 10px 8px;
+    padding: 7px 8px;
     font-size: 0.82rem;
+  }
+
+  th {
+    line-height: 1.05;
+  }
+
+  /* iOS Safari mis-paints `position: sticky` cells once a container scrolls
+     on both axes (this table scrolls x and y in the same .table-wrap): the
+     sticky header freezes at its last horizontal offset instead of
+     following the row underneath, leaving a stray block floating over
+     whatever column ends up beneath it. Dropping sticky on mobile trades
+     the "header follows vertical scroll" convenience for correct
+     rendering during the horizontal scroll every row needs here anyway. */
+  th {
+    position: static;
+  }
+
+  th:nth-child(6),
+  td:nth-child(6) {
+    width: 230px;
   }
 
   .process-modal {
@@ -6787,10 +7255,6 @@ td:nth-child(12) {
 
   .radar-filter-section.required {
     padding: 14px;
-  }
-
-  .date-range-inputs {
-    grid-template-columns: 1fr;
   }
 
   .country-map-orb {
@@ -7318,9 +7782,18 @@ td:nth-child(12) {
   }
 
   .amount-pie-callout {
-    font-size: 0.58rem;
-    max-width: 148px;
+    gap: 5px;
+    max-width: 165px;
     padding: 5px 8px;
+    line-height: 1.2;
+  }
+
+  .amount-pie-callout-name {
+    font-size: 0.66rem;
+  }
+
+  .amount-pie-callout-amount {
+    font-size: 0.62rem;
   }
 
   .panel-title {
@@ -7334,14 +7807,13 @@ td:nth-child(12) {
   }
 
   .run-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
   }
 
   .run-metrics span {
-    min-height: 38px;
-    justify-content: center;
-    text-align: center;
+    padding: 6px 4px;
+    font-size: 0.72rem;
   }
 
   .country-map-layout.peru .map-frame.interactive {
