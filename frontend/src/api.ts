@@ -44,6 +44,9 @@ export type Opportunity = {
   archived_at: string | null;
   archived_by_id: number | null;
   archive_country: string;
+  is_new: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type Run = {
@@ -86,6 +89,7 @@ export type AlertRule = {
   destination: string;
   keywords: string;
   min_priority: string;
+  country: "peru" | "chile" | "both";
   is_active: boolean;
 };
 
@@ -104,6 +108,12 @@ export type Alert = {
   last_error: string;
   provider_message_id: string;
   sent_at: string | null;
+  created_at: string;
+  country: "peru" | "chile";
+  channel: string;
+  entity: string;
+  description: string;
+  rule_is_active: boolean;
 };
 
 export type DocumentRecord = {
@@ -117,6 +127,12 @@ export type DocumentRecord = {
   status: string;
   error_message: string;
   created_at: string;
+};
+
+export type OpportunityViewStateRecord = {
+  scope: string;
+  state: Record<string, unknown>;
+  updated_at: string;
 };
 
 export type AccessProfile = "peru" | "chile" | "both";
@@ -286,15 +302,26 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
-  stats: (token: string) => request<Stats>("/opportunities/stats", token),
+  stats: (token: string) => request<Stats>("/opportunities/stats", token, { cache: "no-store" }),
   opportunities: (token: string, options: { runIds?: number[] } = {}) => {
     const params = new URLSearchParams();
     if (options.runIds?.length) {
       params.set("run_ids", options.runIds.join(","));
     }
     const query = params.toString();
-    return request<Opportunity[]>(`/opportunities${query ? `?${query}` : ""}`, token);
+    return request<Opportunity[]>(`/opportunities${query ? `?${query}` : ""}`, token, {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-cache" },
+    });
   },
+  opportunityViewState: (token: string, scope: string) =>
+    request<OpportunityViewStateRecord>(`/opportunity-view-states/${encodeURIComponent(scope)}`, token, { cache: "no-store" }),
+  saveOpportunityViewState: (token: string, scope: string, state: object) =>
+    request<OpportunityViewStateRecord>(`/opportunity-view-states/${encodeURIComponent(scope)}`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    }),
   exportOpportunitiesXlsx: async (token: string, payload: { title: string; country: "peru" | "chile"; headers: string[]; rows: Array<Array<string | number | null>> }) => {
     const response = await fetch(`${API_URL}/opportunities/export/xlsx`, {
       method: "POST",
@@ -316,7 +343,7 @@ export const api = {
     }),
   restoreOpportunity: (token: string, opportunityId: number) =>
     request<Opportunity>(`/opportunities/${opportunityId}/restore`, token, { method: "POST" }),
-  runs: (token: string) => request<Run[]>("/runs", token),
+  runs: (token: string) => request<Run[]>("/runs", token, { cache: "no-store" }),
   schedulerStatus: (token: string, country: "peru" | "chile") =>
     request<SchedulerStatus>(`/runs/scheduler/status?country=${country}`, token),
   schedulerIntervalConfig: (token: string, country: "peru" | "chile") =>
@@ -337,7 +364,10 @@ export const api = {
     }),
   deleteRadarKeyword: (token: string, country: "peru" | "chile", keywordId: number) =>
     request<void>(`/radar-keywords/${country}/${keywordId}`, token, { method: "DELETE" }),
-  run: (token: string, id: number) => request<Run>(`/runs/${id}`, token),
+  run: (token: string, id: number) => request<Run>(`/runs/${id}?_=${Date.now()}`, token, {
+    cache: "no-store",
+    headers: { "Cache-Control": "no-cache" },
+  }),
   cancelRun: (token: string, id: number) => request<Run>(`/runs/${id}/cancel`, token, { method: "POST" }),
   startRun: (
     token: string,
@@ -356,6 +386,7 @@ export const api = {
       max_results: number;
       max_details: number;
       enrich_details: boolean;
+      revalidate_closed_detail?: boolean;
       commercial_mode?: "active" | "all";
     },
   ) =>
@@ -381,7 +412,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
-  updateAlertRule: (token: string, ruleId: number, payload: AlertRulePayload) =>
+  updateAlertRule: (token: string, ruleId: number, payload: Partial<AlertRulePayload>) =>
     request<AlertRule>(`/alerts/rules/${ruleId}`, token, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

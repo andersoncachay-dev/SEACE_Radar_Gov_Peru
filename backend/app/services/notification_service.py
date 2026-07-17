@@ -4,12 +4,14 @@ import smtplib
 import re
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from html import escape
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import Alert, AlertRule, Opportunity, OpportunitySnapshot
+from ..radar_config import country_for_source
 import requests
 from src.keyword_matching import contains_complete_phrase, normalize_search_text
 
@@ -39,21 +41,95 @@ def _deadline_for(opportunity: Opportunity):
     return opportunity.quote_deadline or opportunity.proposal_deadline or opportunity.consultation_deadline
 
 
+def _format_amount(opportunity: Opportunity) -> str | None:
+    amount = opportunity.amount or 0
+    if amount <= 0:
+        return None
+    grouped = f"{amount:,.0f}"
+    if country_for_source(opportunity.source) == "chile":
+        return f"PESO CL {grouped.replace(',', '.')}"
+    return f"S/ {grouped}"
+
+
+def _format_datetime(value: datetime | None) -> str | None:
+    return value.strftime("%d/%m/%Y %H:%M") if value else None
+
+
+def _email_subject(opportunity: Opportunity | None) -> str:
+    country_label = "Chile" if opportunity and country_for_source(opportunity.source) == "chile" else "Perú"
+    return f"Rodar Consulting GovRadar · Nueva Alerta Gobierno {country_label}"
+
+
+def _is_active_new_process(opportunity: Opportunity, now: datetime | None = None) -> bool:
+    status = str(opportunity.status or "").strip().casefold()
+    if any(label in status for label in ("culminado", "cerrado", "adjudicado", "revocado", "desierto")):
+        return False
+    deadline = _deadline_for(opportunity)
+    return deadline is None or deadline > (now or datetime.utcnow())
+
+
 def _build_message(opportunity: Opportunity, alert_type: str) -> str:
     alert_labels = {
         "new_process": "Nueva oportunidad detectada",
         "priority_match": "Oportunidad de alta prioridad",
         "deadline": "Vencimiento comercial próximo",
     }
-    deadline = _deadline_for(opportunity)
-    deadline_text = deadline.strftime("%d/%m/%Y %H:%M") if deadline else "Sin fecha confirmada"
-    return (
-        f"GovRadar · {alert_labels.get(alert_type, 'Alerta de oportunidad')}\n\n"
-        f"Proceso: {opportunity.nomenclature or 'Sin nomenclatura'}\n"
-        f"Entidad: {opportunity.entity or 'Sin entidad'}\n"
-        f"Prioridad: {opportunity.priority} · Score: {opportunity.score}\n"
-        f"Fecha límite: {deadline_text}\n\n"
-        f"Revisar oportunidad: {opportunity.detail_url or 'Disponible en GovRadar'}"
+    deadline_text = _format_datetime(_deadline_for(opportunity)) or "Sin fecha confirmada"
+    publication_text = _format_datetime(opportunity.publication_date)
+    amount_text = _format_amount(opportunity)
+    lines = [
+        f"GovRadar · {alert_labels.get(alert_type, 'Alerta de oportunidad')}\n",
+        f"Nomenclatura: {opportunity.nomenclature or 'Sin nomenclatura'}",
+        f"Entidad: {opportunity.entity or 'Sin entidad'}",
+    ]
+    if opportunity.object_type:
+        lines.append(f"Objeto: {opportunity.object_type}")
+    if opportunity.region:
+        lines.append(f"Región: {opportunity.region}")
+    lines.append(f"Prioridad: {opportunity.priority} · Score: {opportunity.score}")
+    if amount_text:
+        lines.append(f"Monto referencial: {amount_text}")
+    if publication_text:
+        lines.append(f"Fecha de publicación: {publication_text}")
+    lines.append(f"Fecha límite: {deadline_text}")
+    lines.append("")
+    lines.append(f"Revisar oportunidad: {opportunity.detail_url or 'Disponible en GovRadar'}")
+    return "\n".join(lines)
+
+
+def _build_message_html(opportunity: Opportunity, alert_type: str) -> str:
+    alert_labels = {
+        "new_process": "Nueva oportunidad detectada",
+        "priority_match": "Oportunidad de alta prioridad",
+        "deadline": "Vencimiento comercial próximo",
+    }
+    deadline_text = _format_datetime(_deadline_for(opportunity)) or "Sin fecha confirmada"
+    publication_text = _format_datetime(opportunity.publication_date)
+    amount_text = _format_amount(opportunity)
+    rows = [
+        ("Nomenclatura", opportunity.nomenclature or "Sin nomenclatura"),
+        ("Entidad", opportunity.entity or "Sin entidad"),
+    ]
+    if opportunity.object_type:
+        rows.append(("Objeto", opportunity.object_type))
+    if opportunity.region:
+        rows.append(("Región", opportunity.region))
+    rows.append(("Prioridad", f"{opportunity.priority or '-'} · Score: {opportunity.score}"))
+    if amount_text:
+        rows.append(("Monto referencial", amount_text))
+    if publication_text:
+        rows.append(("Fecha de publicación", publication_text))
+    rows.append(("Fecha límite", deadline_text))
+    body_html = "".join(
+        f"<p style=\"margin:0 0 10px;\"><strong>{escape(label)}:</strong> {escape(value)}</p>"
+        for label, value in rows[:-1]
+    ) + f"<p style=\"margin:0;\"><strong>{escape(rows[-1][0])}:</strong> {escape(rows[-1][1])}</p>"
+    detail_url = opportunity.detail_url or ""
+    return _branded_email_html(
+        alert_labels.get(alert_type, "Alerta de oportunidad"),
+        body_html,
+        cta_url=detail_url or None,
+        cta_label="Ver oportunidad" if detail_url else None,
     )
 
 
@@ -82,12 +158,20 @@ def evaluate_new_opportunity_alerts(db: Session, run_id: int) -> list[Alert]:
             continue
         seen_opportunity_ids.add(snapshot.opportunity_id)
         opp = db.get(Opportunity, snapshot.opportunity_id)
-        if not opp or opp.is_archived:
+        if not opp or opp.is_archived or not _is_active_new_process(opp):
             continue
         for rule in rules:
             if not _priority_at_least(opp.priority, rule.min_priority):
                 continue
-            if not _matches_rule_keywords(opp.description, rule.keywords):
+            if rule.country != "both" and rule.country != country_for_source(opp.source):
+                continue
+            searchable_text = " ".join((
+                opp.nomenclature or "",
+                opp.description or "",
+                opp.entity or "",
+                opp.object_type or "",
+            ))
+            if not _matches_rule_keywords(searchable_text, rule.keywords):
                 continue
             existing = db.scalar(
                 select(Alert).where(
@@ -119,7 +203,61 @@ def evaluate_alerts(db: Session) -> list[Alert]:
     return []
 
 
-def _send_azure_email(destination: str, message: str, subject: str = "GovRadar · Nueva alerta comercial") -> str:
+def _branded_email_html(title: str, body_html: str, cta_url: str | None = None, cta_label: str | None = None) -> str:
+    """Wrap a notification's content in RODAR's branded HTML shell.
+
+    Used for password recovery (and reusable for any future transactional
+    email); logo is served by the frontend itself so it stays in sync with
+    whatever FRONTEND_URL points at, instead of being hardcoded here.
+    """
+    logo_url = f"{settings.frontend_url}/assets/Rodarfondoblanco.png"
+    cta_html = ""
+    if cta_url and cta_label:
+        cta_html = (
+            '<div style="text-align:center;margin:28px 0 8px;">'
+            f'<a href="{cta_url}" style="display:inline-block;background:#185bc1;color:#ffffff;'
+            'padding:13px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;">'
+            f"{cta_label}</a></div>"
+        )
+    # Outlook desktop renders HTML email with Word's engine, which ignores
+    # div max-width/margin:auto centering. A table with an explicit width
+    # attribute (not just CSS) is the only layout Outlook reliably respects,
+    # so the card stays a fixed 480px instead of stretching full window width.
+    return f"""
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f7fc;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:480px;background:#ffffff;border-radius:12px;border:1px solid #c8d8ee;font-family:Arial,Helvetica,sans-serif;">
+            <tr>
+              <td style="background:#185bc1;height:4px;line-height:4px;font-size:0;">&nbsp;</td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:22px 28px 16px;border-bottom:2px solid #185bc1;">
+                <img src="{logo_url}" alt="RODAR Consulting" width="58" height="50" style="display:block;width:58px;height:50px;" />
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:28px;color:#051326;">
+                <h1 style="margin:0 0 16px;font-size:19px;color:#061a35;">{title}</h1>
+                <div style="font-size:14.5px;line-height:1.6;color:#28374d;">{body_html}</div>
+                {cta_html}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:22px 28px;background:#f3f7fc;border-top:1px solid #c8d8ee;border-radius:0 0 12px 12px;">
+                <p style="margin:0;color:#51627b;font-size:11.5px;line-height:1.6;text-align:center;">RODAR Consulting S.A.C. &middot; Radar comercial para procesos de gobierno</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+    """
+
+
+def _send_azure_email(
+    destination: str, message: str, subject: str = "GovRadar · Nueva alerta comercial", html: str | None = None
+) -> str:
     if not settings.azure_communication_connection_string or not settings.azure_email_sender:
         raise RuntimeError("Azure Email no configurado. Definir AZURE_COMMUNICATION_CONNECTION_STRING y AZURE_EMAIL_SENDER.")
     from azure.communication.email import EmailClient
@@ -131,7 +269,7 @@ def _send_azure_email(destination: str, message: str, subject: str = "GovRadar �
         "content": {
             "subject": subject,
             "plainText": message,
-            "html": "<br>".join(message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").splitlines()),
+            "html": html or "<br>".join(message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").splitlines()),
         },
     }
     result = client.begin_send(payload).result()
@@ -141,7 +279,9 @@ def _send_azure_email(destination: str, message: str, subject: str = "GovRadar �
     return str(result.get("id", "") if isinstance(result, dict) else getattr(result, "id", ""))
 
 
-def _send_smtp_email(destination: str, message: str, subject: str = "GovRadar - alerta de oportunidad") -> str:
+def _send_smtp_email(
+    destination: str, message: str, subject: str = "GovRadar - alerta de oportunidad", html: str | None = None
+) -> str:
     if not settings.smtp_host or not settings.smtp_from:
         raise RuntimeError("SMTP no configurado. Definir SMTP_HOST y SMTP_FROM.")
     email = EmailMessage()
@@ -149,6 +289,8 @@ def _send_smtp_email(destination: str, message: str, subject: str = "GovRadar - 
     email["From"] = settings.smtp_from
     email["To"] = destination
     email.set_content(message)
+    if html:
+        email.add_alternative(html, subtype="html")
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
         smtp.starttls()
         if settings.smtp_username:
@@ -157,10 +299,12 @@ def _send_smtp_email(destination: str, message: str, subject: str = "GovRadar - 
     return str(email.get("Message-ID") or "")
 
 
-def _send_email(destination: str, message: str, subject: str = "GovRadar · Nueva alerta comercial") -> str:
+def _send_email(
+    destination: str, message: str, subject: str = "GovRadar · Nueva alerta comercial", html: str | None = None
+) -> str:
     if settings.email_provider == "azure":
-        return _send_azure_email(destination, message, subject)
-    return _send_smtp_email(destination, message, subject)
+        return _send_azure_email(destination, message, subject, html)
+    return _send_smtp_email(destination, message, subject, html)
 
 
 def _send_azure_whatsapp(destination: str) -> str:
@@ -222,6 +366,21 @@ def _send_in_app_message(destination: str, message: str) -> str:
 def send_pending_alerts(db: Session, limit: int | None = None) -> list[Alert]:
     now = datetime.utcnow()
     effective_limit = limit or settings.alert_batch_size
+    stale_new_alerts = list(
+        db.scalars(
+            select(Alert).where(
+                Alert.alert_type == "new_process",
+                Alert.status.not_in(["sent", "skipped"]),
+            )
+        ).all()
+    )
+    for alert in stale_new_alerts:
+        opportunity = db.get(Opportunity, alert.opportunity_id)
+        if opportunity and not _is_active_new_process(opportunity, now):
+            alert.status = "skipped"
+            alert.last_error = "Proceso histórico o vencido; no corresponde a un lanzamiento nuevo"
+            alert.next_attempt_at = None
+    db.flush()
     alerts = list(
         db.scalars(
             select(Alert)
@@ -257,7 +416,10 @@ def send_pending_alerts(db: Session, limit: int | None = None) -> list[Alert]:
         alert.message = clean_message
         try:
             if rule.channel == "email":
-                provider_message_id = _send_email(rule.destination, clean_message)
+                html_body = _build_message_html(opportunity, alert.alert_type) if opportunity else None
+                provider_message_id = _send_email(
+                    rule.destination, clean_message, subject=_email_subject(opportunity), html=html_body
+                )
             elif rule.channel == "whatsapp":
                 provider_message_id = _send_whatsapp(rule.destination, clean_message)
             elif rule.channel in {"message", "mensaje", "in_app"}:

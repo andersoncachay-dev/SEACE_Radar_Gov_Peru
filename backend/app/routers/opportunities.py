@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import tempfile
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -26,6 +26,10 @@ from ..services.seace_excel_service import read_seace_export
 from ..services.entity_catalog_service import find_entity
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
+
+# Baseline de activación del distintivo. Las migraciones anteriores pueden
+# tener snapshots asociados a runs y no deben presentarse como hallazgos nuevos.
+NEW_BADGE_ACTIVATED_AT = datetime(2026, 7, 16, 6, 10)
 
 
 @router.post("/export/xlsx")
@@ -155,12 +159,32 @@ def _enriched_entity_fields(item: Opportunity) -> tuple[str, str]:
     return region or catalog.get("region", ""), buyer_ruc or catalog.get("ruc", "")
 
 
-def _opportunity_out(item: Opportunity) -> dict:
+def _opportunity_out(item: Opportunity, *, is_new: bool = False) -> dict:
     payload = OpportunityOut.model_validate(item).model_dump()
     region, buyer_ruc = _enriched_entity_fields(item)
     payload["region"] = region
     payload["buyer_ruc"] = buyer_ruc
+    payload["is_new"] = is_new
     return payload
+
+
+def _recent_new_opportunity_ids(db: Session) -> set[int]:
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    snapshot_cutoff = max(cutoff, NEW_BADGE_ACTIVATED_AT)
+    snapshot_query = select(OpportunitySnapshot.opportunity_id).where(
+        OpportunitySnapshot.change_type == "created",
+        OpportunitySnapshot.run_id.is_not(None),
+        OpportunitySnapshot.created_at >= snapshot_cutoff,
+    )
+    return set(db.scalars(snapshot_query).all())
+
+
+def _is_active_new_opportunity(item: Opportunity, now: datetime | None = None) -> bool:
+    status = str(item.status or "").strip().casefold()
+    if any(label in status for label in ("culminado", "cerrado", "adjudicado", "revocado", "desierto")):
+        return False
+    deadline = item.quote_deadline or item.proposal_deadline or item.consultation_deadline
+    return deadline is None or deadline > (now or datetime.utcnow())
 
 
 @router.get("/stats")
@@ -253,7 +277,12 @@ def list_opportunities(
     # colección. Un límite global dejaba fuera fuentes menos recientes cuando
     # otra fuente (por ejemplo OCDS) ocupaba primero todo el cupo.
     query = query.order_by(Opportunity.updated_at.desc())
-    return [_opportunity_out(item) for item in db.scalars(query).all()]
+    items = list(db.scalars(query).all())
+    recent_new_ids = _recent_new_opportunity_ids(db)
+    return [
+        _opportunity_out(item, is_new=item.id in recent_new_ids and _is_active_new_opportunity(item))
+        for item in items
+    ]
 
 
 @router.get("/archived", response_model=list[OpportunityOut])

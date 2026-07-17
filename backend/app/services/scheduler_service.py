@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -16,6 +16,22 @@ scheduler = None
 LIMA_TIMEZONE = ZoneInfo("America/Lima")
 SUPPORTED_COUNTRIES = ("peru", "chile")
 DEFAULT_INTERVAL_SECONDS = 15 * 60
+DEFAULT_INCREMENTAL_LOOKBACK_DAYS = 2
+CHILE_INCREMENTAL_FUTURE_DAYS = 38
+
+
+def external_scheduler_next_run(country: str, now: datetime | None = None) -> datetime | None:
+    if not settings.external_scheduler_enabled:
+        return None
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"PaÃ­s de scheduler no soportado: {country}")
+    interval_seconds = max(60, settings.external_scheduler_interval_minutes * 60)
+    offset_seconds = 0 if normalized_country == "peru" else min(5 * 60, interval_seconds // 3)
+    current = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
+    current_epoch = int(current.timestamp())
+    next_epoch = ((current_epoch - offset_seconds) // interval_seconds + 1) * interval_seconds + offset_seconds
+    return datetime.fromtimestamp(next_epoch, timezone.utc)
 
 
 def scheduler_initial_delay(country: str, interval_seconds: int) -> int:
@@ -28,6 +44,62 @@ def scheduler_initial_delay(country: str, interval_seconds: int) -> int:
 
 def _interval_key(country: str) -> str:
     return f"scheduler.{country}.interval_seconds"
+
+
+def _next_update_key(country: str) -> str:
+    return f"scheduler.{country}.next_update_at"
+
+
+def _read_datetime_setting(db, key: str) -> datetime | None:
+    item = db.scalar(select(AppSetting).where(AppSetting.key == key))
+    if item is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(item.value)
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_setting(db, key: str, value: str, user_id: int | None = None) -> None:
+    item = db.scalar(select(AppSetting).where(AppSetting.key == key))
+    if item is None:
+        db.add(AppSetting(key=key, value=value, updated_by_id=user_id))
+    else:
+        item.value = value
+        item.updated_by_id = user_id
+
+
+def get_external_next_update(db, country: str, now: datetime | None = None) -> datetime:
+    """Return the persisted due time used by the minute-level Azure job."""
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"País de scheduler no soportado: {country}")
+    next_update = _read_datetime_setting(db, _next_update_key(normalized_country))
+    if next_update is not None:
+        return next_update
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    next_update = current + timedelta(seconds=get_scheduler_interval(db, normalized_country))
+    _write_setting(db, _next_update_key(normalized_country), next_update.isoformat())
+    db.commit()
+    return next_update
+
+
+def claim_external_scheduler_run(country: str, now: datetime | None = None) -> tuple[bool, datetime]:
+    """Atomically advance one country's due time when its Azure job may run."""
+    normalized_country = str(country or "").strip().lower()
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    db = SessionLocal()
+    try:
+        due_at = get_external_next_update(db, normalized_country, current)
+        if current < due_at:
+            return False, due_at
+        next_update = current + timedelta(seconds=get_scheduler_interval(db, normalized_country))
+        _write_setting(db, _next_update_key(normalized_country), next_update.isoformat())
+        db.commit()
+        return True, next_update
+    finally:
+        db.close()
 
 
 def get_scheduler_interval(db, country: str) -> int:
@@ -54,14 +126,21 @@ def scheduler_interval_config(country: str) -> dict[str, object]:
     days, remainder = divmod(interval_seconds, 86_400)
     hours, remainder = divmod(remainder, 3_600)
     minutes = remainder // 60
+    external_next_run = None
+    if settings.external_scheduler_enabled:
+        db = SessionLocal()
+        try:
+            external_next_run = get_external_next_update(db, normalized_country)
+        finally:
+            db.close()
     return {
         "country": normalized_country,
         "days": days,
         "hours": hours,
         "minutes": minutes,
         "interval_seconds": interval_seconds,
-        "next_update_at": job.next_run_time.isoformat() if job and job.next_run_time else None,
-        "enabled": bool(settings.enable_scheduler and job is not None),
+        "next_update_at": job.next_run_time.isoformat() if job and job.next_run_time else external_next_run,
+        "enabled": bool((settings.enable_scheduler and job is not None) or settings.external_scheduler_enabled),
     }
 
 
@@ -72,13 +151,13 @@ def save_scheduler_interval(country: str, interval_seconds: int, user_id: int | 
     interval_seconds = max(60, int(interval_seconds))
     db = SessionLocal()
     try:
-        key = _interval_key(normalized_country)
-        item = db.scalar(select(AppSetting).where(AppSetting.key == key))
-        if item is None:
-            db.add(AppSetting(key=key, value=str(interval_seconds), updated_by_id=user_id))
-        else:
-            item.value = str(interval_seconds)
-            item.updated_by_id = user_id
+        _write_setting(db, _interval_key(normalized_country), str(interval_seconds), user_id)
+        _write_setting(
+            db,
+            _next_update_key(normalized_country),
+            (datetime.now(timezone.utc) + timedelta(seconds=interval_seconds)).isoformat(),
+            user_id,
+        )
         db.commit()
     finally:
         db.close()
@@ -107,10 +186,13 @@ def current_ingestion_period(now: datetime | None = None) -> dict[str, object]:
 
 def current_ingestion_window(db, country: str, now: datetime | None = None) -> dict[str, object]:
     current = now.astimezone(LIMA_TIMEZONE) if now else datetime.now(LIMA_TIMEZONE)
-    # The overlap is intentionally fixed: it catches late publications without
-    # allowing a delayed scheduler to expand into an increasingly expensive scan.
-    start_date = current.date() - timedelta(days=2)
-    end_date = current.date()
+    normalized_country = str(country or "").strip().lower()
+    start_date = current.date() - timedelta(days=DEFAULT_INCREMENTAL_LOOKBACK_DAYS)
+    # The first ChileCompra result contains the proposal closing date. Searching
+    # that field into the future discovers tenders published today whose closing
+    # date is several weeks away. Peru keeps its publication-date window.
+    is_chile = normalized_country == "chile"
+    end_date = current.date() + timedelta(days=CHILE_INCREMENTAL_FUTURE_DAYS) if is_chile else current.date()
     month_cursor = start_date.replace(day=1)
     covered: list[tuple[int, int]] = []
     while month_cursor <= end_date:
@@ -123,9 +205,10 @@ def current_ingestion_window(db, country: str, now: datetime | None = None) -> d
         "months": sorted({str(month) for _, month in covered}, key=int),
         "publication_date_from": start_date.isoformat(),
         "publication_date_to": end_date.isoformat(),
+        "date_filter_type": "closing" if is_chile else "publication",
         "active_only": True,
         "automatic_incremental": True,
-        "skip_detail_enrichment": True,
+        "skip_detail_enrichment": is_chile,
     }
 
 
@@ -196,7 +279,7 @@ def enqueue_active_profiles(country: str | None = None) -> dict[str, int]:
                     **ingestion_period,
                     "version": profile.version,
                     "max_results": profile.max_results,
-                    "max_details": min(profile.max_results, 15),
+                    "max_details": min(profile.max_results, 30),
                     "enrich_details": False,
                 },
             )
@@ -229,6 +312,8 @@ def scheduler_status(country: str) -> dict[str, object]:
     db = SessionLocal()
     try:
         interval_seconds = get_scheduler_interval(db, normalized_country)
+        if settings.external_scheduler_enabled and next_run is None:
+            next_run = get_external_next_update(db, normalized_country)
         source = RADAR_COUNTRY_CONFIG[normalized_country]["source"]
         active_run_id = db.scalar(
             select(ScrapeRun.id)
@@ -238,7 +323,7 @@ def scheduler_status(country: str) -> dict[str, object]:
     finally:
         db.close()
     return {
-        "enabled": bool(settings.enable_scheduler and job is not None),
+        "enabled": bool((settings.enable_scheduler and job is not None) or settings.external_scheduler_enabled),
         "country": normalized_country,
         "is_running": active_run_id is not None,
         "next_update_at": next_run.isoformat() if next_run is not None else None,

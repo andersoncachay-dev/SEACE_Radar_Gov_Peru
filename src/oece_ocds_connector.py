@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import zipfile
 from io import BytesIO
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ import pandas as pd
 import requests
 
 from .keyword_matching import contains_complete_phrase
+from .proxy_utils import requests_proxies
 
 
 API_BASE = "https://contratacionesabiertas.oece.gob.pe/api/v1"
@@ -30,7 +32,10 @@ def _parse_date(value: Any) -> datetime | None:
     try:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
-        parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
+        # OCDS exports may use either YYYY-MM-DD or YYYY/MM/DD. Both are
+        # year-first; dayfirst=True would turn 2026/07/08 into 7 August.
+        year_first = bool(re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}(?:[T\s]|$)", text))
+        parsed = pd.to_datetime(text, errors="coerce", dayfirst=not year_first)
         if pd.isna(parsed):
             return None
         return parsed.to_pydatetime()
@@ -163,7 +168,7 @@ def _parse_release(release: dict[str, Any], source_id: str) -> dict[str, Any]:
     items = tender.get("items") or []
     item_description = " | ".join(_clean(item.get("description")) for item in items if _clean(item.get("description")))
     description = _clean(tender.get("description") or item_description)
-    return {
+    parsed = {
         "RUC": _ruc(release),
         "Nombre o Sigla de la Entidad": _entity(release),
         "Fecha y Hora de Publicacion": _as_naive(tender.get("datePublished") or release.get("date")),
@@ -186,6 +191,7 @@ def _parse_release(release: dict[str, Any], source_id: str) -> dict[str, Any]:
         "tender_id": _clean(tender.get("id")),
         "source_id": source_id,
     }
+    return parsed
 
 
 def _fetch_releases(source_id: str, max_pages: int, page_size: int) -> tuple[list[dict[str, Any]], list[str]]:
@@ -195,6 +201,7 @@ def _fetch_releases(source_id: str, max_pages: int, page_size: int) -> tuple[lis
     params: dict[str, Any] = {"format": "json", "sourceId": source_id, "size": page_size}
     headers = {"User-Agent": "GovRadar CRM/1.0"}
     with requests.Session() as session:
+        session.proxies = requests_proxies() or {}
         for page in range(1, max_pages + 1):
             response = session.get(url, params=params, timeout=45, headers=headers)
             response.raise_for_status()
@@ -213,7 +220,9 @@ def _fetch_releases(source_id: str, max_pages: int, page_size: int) -> tuple[lis
 def _read_monthly_csv(source_id: str, year: int, month: int) -> tuple[pd.DataFrame, list[str]]:
     diagnostics: list[str] = []
     file_url = f"{API_BASE}/file/{source_id}/csv/{year}/{month:02d}/es"
-    response = requests.get(file_url, timeout=90, headers={"User-Agent": "GovRadar CRM/1.0"})
+    response = requests.get(
+        file_url, timeout=90, headers={"User-Agent": "GovRadar CRM/1.0"}, proxies=requests_proxies()
+    )
     response.raise_for_status()
     content = BytesIO(response.content)
     if not zipfile.is_zipfile(content):
@@ -340,7 +349,7 @@ def _parse_csv_row(row: pd.Series, source_id: str) -> dict[str, Any]:
     release_id = _csv_col(row, "Entrega compilada:ID de Entrega")
     ocid = _csv_col(row, "Open Contracting ID", "Entrega compilada:Open Contracting ID")
     tender_id = _csv_col(row, "Entrega compilada:Licitación:ID de licitación")
-    return {
+    parsed = {
         "RUC": _csv_col(row, "Entrega compilada:Licitación:Entidad contratante:ID de Organización", "Entrega compilada:Comprador:ID de Organización"),
         "Nombre o Sigla de la Entidad": _csv_col(row, "Entrega compilada:Licitación:Entidad contratante:Nombre de la Organización", "Entrega compilada:Comprador:Nombre de la Organización"),
         "Fecha y Hora de Publicacion": _csv_date(row, "compiledRelease/tender/datePublished", "Entrega compilada:Fecha de entrega"),
@@ -364,6 +373,7 @@ def _parse_csv_row(row: pd.Series, source_id: str) -> dict[str, Any]:
         "source_id": source_id,
         "release_id": release_id,
     }
+    return parsed
 
 
 def _search_monthly_downloads(

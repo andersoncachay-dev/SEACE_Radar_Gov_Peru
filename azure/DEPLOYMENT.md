@@ -123,3 +123,27 @@ Usar [alert-job.yaml](alert-job.yaml), reemplazar los marcadores y establecer lo
 - Revisar cuotas y reputacion del dominio de correo.
 - Rotar secretos desde Key Vault; Container Apps puede consumir referencias sin exponer los valores.
 - Mantener el Job con `parallelism: 1` hasta introducir una cola transaccional o Azure Service Bus.
+
+## Despliegue activo (15 de julio de 2026)
+
+GovRadar esta desplegado en el grupo `govradar-rg` y reutiliza, por limite de cuota de la suscripcion, el Container Apps Environment existente de PGI. Las aplicaciones y datos permanecen separados: `govradar-api`, `govradar-frontend`, `govradar-db-rodar`, `govradarkv923fd1` y los jobs `govradar-*`. No se modifican las revisiones de `pgi-backend` ni `pgi-frontend`.
+
+Endpoints temporales de Azure:
+
+- Frontend: `govradar-frontend.lemonwave-7154c3ee.centralus.azurecontainerapps.io`
+- API: `govradar-api.lemonwave-7154c3ee.centralus.azurecontainerapps.io`
+
+Registros activos en la zona `rodarlab.com` de Cloudflare, configurados en modo **Solo DNS**:
+
+| Tipo | Nombre | Destino / valor |
+| --- | --- | --- |
+| CNAME | `crmprocesosgobierno` | `govradar-frontend.lemonwave-7154c3ee.centralus.azurecontainerapps.io` |
+| TXT | `asuid.crmprocesosgobierno` | `C85B11412D36D5CD2B55724CE196C968E2EF1256E3E3914E4AA3346023BB8F9B` |
+| CNAME | `www.crmprocesosgobierno` | `govradar-frontend.lemonwave-7154c3ee.centralus.azurecontainerapps.io` |
+| TXT | `asuid.www.crmprocesosgobierno` | `C85B11412D36D5CD2B55724CE196C968E2EF1256E3E3914E4AA3346023BB8F9B` |
+| CNAME | `api.crmprocesosgobierno` | `govradar-api.lemonwave-7154c3ee.centralus.azurecontainerapps.io` |
+| TXT | `asuid.api.crmprocesosgobierno` | `C85B11412D36D5CD2B55724CE196C968E2EF1256E3E3914E4AA3346023BB8F9B` |
+
+Los tres hostnames estan vinculados a sus Container Apps con certificados administrados de Azure y HTTPS validado extremo a extremo. Mantener los CNAME en **Solo DNS** para que Azure pueda renovar los certificados; cualquier proxy de Cloudflare se evalua posteriormente y con una prueba completa de TLS y cabeceras.
+
+ACR Tasks esta bloqueado en esta suscripcion. Las imagenes se construyen localmente con Docker y se publican mediante `docker push` al registro `pgihughesnetacr.azurecr.io`.

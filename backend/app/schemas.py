@@ -113,6 +113,16 @@ class SearchProfileOut(ORMModel):
     is_active: bool
 
 
+class OpportunityViewStateUpdate(BaseModel):
+    state: dict[str, Any]
+
+
+class OpportunityViewStateOut(BaseModel):
+    scope: str
+    state: dict[str, Any]
+    updated_at: datetime
+
+
 class RadarKeywordCreate(BaseModel):
     keyword: str = Field(min_length=2, max_length=80)
 
@@ -218,6 +228,7 @@ class RunStart(BaseModel):
     max_results: int = 25
     max_details: int = 15
     enrich_details: bool = False
+    revalidate_closed_detail: bool = False
     commercial_mode: str = "active"
 
 
@@ -267,6 +278,9 @@ class OpportunityOut(ORMModel):
     archived_at: datetime | None
     archived_by_id: int | None
     archive_country: str
+    is_new: bool = False
+    created_at: datetime
+    updated_at: datetime
 
 
 class OpportunitySnapshotOut(ORMModel):
@@ -325,6 +339,7 @@ class AlertRuleCreate(BaseModel):
     destination: str = Field(min_length=3, max_length=255)
     keywords: str = Field(default="", max_length=1000)
     min_priority: str = "A"
+    country: str = "both"
     is_active: bool = True
 
     @model_validator(mode="after")
@@ -332,10 +347,13 @@ class AlertRuleCreate(BaseModel):
         self.channel = self.channel.strip().lower()
         self.destination = self.destination.strip()
         self.keywords = self.keywords.strip()
+        self.country = self.country.strip().lower()
         if self.channel not in {"email", "whatsapp", "in_app"}:
             raise ValueError("El canal debe ser email, WhatsApp o notificacion interna")
         if self.min_priority not in {"A", "B", "C"}:
             raise ValueError("La prioridad minima debe ser A, B o C")
+        if self.country not in {"peru", "chile", "both"}:
+            raise ValueError("El pais debe ser peru, chile o both")
         if self.channel == "email":
             TypeAdapter(EmailStr).validate_python(self.destination)
         if self.channel == "whatsapp" and not re.fullmatch(r"\+(?:51|56)\d{9}", self.destination):
@@ -351,6 +369,7 @@ class AlertRuleUpdate(BaseModel):
     destination: str | None = Field(default=None, min_length=3, max_length=255)
     keywords: str | None = Field(default=None, max_length=1000)
     min_priority: str | None = None
+    country: str | None = None
     is_active: bool | None = None
 
 
@@ -361,6 +380,7 @@ class AlertRuleOut(ORMModel):
     destination: str
     keywords: str
     min_priority: str
+    country: str
     is_active: bool
 
 
@@ -377,3 +397,9 @@ class AlertOut(ORMModel):
     last_error: str
     provider_message_id: str
     sent_at: datetime | None
+    created_at: datetime
+    country: str = "peru"
+    channel: str = "email"
+    entity: str = ""
+    description: str = ""
+    rule_is_active: bool = True

@@ -3,7 +3,7 @@ properties:
   configuration:
     triggerType: Schedule
     scheduleTriggerConfig:
-      cronExpression: "5/15 * * * *"
+      cronExpression: "* * * * *"
       parallelism: 1
       replicaCompletionCount: 1
     replicaTimeout: 840
@@ -12,7 +12,7 @@ properties:
     containers:
       - name: ingestion-chile
         image: REGISTRY_NAME.azurecr.io/govradar-api:IMAGE_TAG
-        command: [python, -m, backend.app.ingestion_worker]
+        command: [/app/azure/run-ingestion-worker.sh]
         resources:
           cpu: 1.0
           memory: 2Gi

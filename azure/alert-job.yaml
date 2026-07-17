@@ -12,10 +12,7 @@ properties:
     containers:
       - name: alert-worker
         image: REGISTRY_NAME.azurecr.io/govradar-api:IMAGE_TAG
-        command:
-          - python
-          - -m
-          - backend.app.alert_worker
+        command: [/app/azure/run-alert-worker.sh]
         resources:
           cpu: 0.25
           memory: 0.5Gi

@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Document, Opportunity, OpportunitySnapshot
+from src.proxy_utils import requests_proxies
 
 try:
     from src.seace_browser_scraper import (
@@ -1060,7 +1061,12 @@ def discover_documents_for_opportunity(db: Session, opportunity_id: int) -> list
                 docs_payload = []
         if not docs_payload and opportunity.detail_url:
             try:
-                response = requests.get(opportunity.detail_url, timeout=45, headers={"User-Agent": "GovRadar CRM/1.0"})
+                response = requests.get(
+                    opportunity.detail_url,
+                    timeout=45,
+                    headers={"User-Agent": "GovRadar CRM/1.0"},
+                    proxies=requests_proxies(),
+                )
                 response.raise_for_status()
                 payload = response.json()
                 releases = payload.get("releases") or []

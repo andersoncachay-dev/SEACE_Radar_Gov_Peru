@@ -31,6 +31,7 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     search_profiles: Mapped[list["SearchProfile"]] = relationship(back_populates="owner")
+    opportunity_view_states: Mapped[list["OpportunityViewState"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
 
 
 class PasswordResetToken(TimestampMixin, Base):
@@ -58,6 +59,18 @@ class SearchProfile(TimestampMixin, Base):
 
     owner: Mapped[User | None] = relationship(back_populates="search_profiles")
     runs: Mapped[list["ScrapeRun"]] = relationship(back_populates="search_profile")
+
+
+class OpportunityViewState(TimestampMixin, Base):
+    __tablename__ = "opportunity_view_states"
+    __table_args__ = (UniqueConstraint("owner_id", "scope", name="uq_opportunity_view_states_owner_scope"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    scope: Mapped[str] = mapped_column(String(80), nullable=False)
+    state_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    owner: Mapped[User] = relationship(back_populates="opportunity_view_states")
 
 
 class RadarKeyword(TimestampMixin, Base):
@@ -143,6 +156,8 @@ class Opportunity(TimestampMixin, Base):
     consultation_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     quote_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     proposal_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    schedule_source: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    schedule_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -188,6 +203,7 @@ class AlertRule(TimestampMixin, Base):
     keywords: Mapped[str] = mapped_column(Text, default="", nullable=False)
     min_priority: Mapped[str] = mapped_column(String(10), default="A", nullable=False)
     hours_before_deadline: Mapped[int] = mapped_column(Integer, default=48, nullable=False)
+    country: Mapped[str] = mapped_column(String(10), default="both", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 

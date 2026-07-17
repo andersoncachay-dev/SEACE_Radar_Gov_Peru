@@ -96,6 +96,30 @@ class OpportunityArchiveTests(unittest.TestCase):
         self.assertFalse(self.db.get(Opportunity, chile.id).is_archived)
         self.assertFalse(self.db.get(Opportunity, self.opportunity.id).is_archived)
 
+    def test_lightweight_refresh_preserves_existing_enrichment(self) -> None:
+        self.opportunity.status = "Vigente para Propuesta"
+        self.opportunity.region = "Lima"
+        self.opportunity.detail_url = "https://example.com/detail"
+        self.opportunity.priority = "B"
+        self.opportunity.score = 42
+        self.db.commit()
+
+        upsert_opportunities(
+            self.db,
+            pd.DataFrame([{
+                "nomenclatura": self.opportunity.nomenclature,
+                "descripcion": self.opportunity.description,
+            }]),
+            self.opportunity.source,
+        )
+
+        refreshed = self.db.get(Opportunity, self.opportunity.id)
+        self.assertEqual(refreshed.status, "Vigente para Propuesta")
+        self.assertEqual(refreshed.region, "Lima")
+        self.assertEqual(refreshed.detail_url, "https://example.com/detail")
+        self.assertEqual(refreshed.priority, "B")
+        self.assertEqual(refreshed.score, 42)
+
 
 if __name__ == "__main__":
     unittest.main()

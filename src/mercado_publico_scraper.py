@@ -78,12 +78,14 @@ def _enable_regular_search_filters(
     publication_date_from: str | None = None,
     publication_date_to: str | None = None,
     published_only: bool = False,
+    date_filter_type: str = "publication",
 ) -> None:
     if publication_date_from or publication_date_to:
         checkbox = driver.find_element(By.ID, "chkFecha")
         if not checkbox.is_selected():
             checkbox.click()
-        Select(driver.find_element(By.ID, "ddlDateType")).select_by_value("1")
+        date_type_value = "2" if str(date_filter_type).strip().lower() == "closing" else "1"
+        Select(driver.find_element(By.ID, "ddlDateType")).select_by_value(date_type_value)
         for element_id, value in (("txtFecha1", publication_date_from), ("txtFecha2", publication_date_to)):
             if not value:
                 continue
@@ -171,9 +173,14 @@ def _estado_comercial(state: str, closing: str, questions: str = "") -> str:
     state_norm = _norm(state)
     if any(value in state_norm for value in ("cerrada", "seleccionada", "adjudicada", "desierta", "revocada")):
         return "Proceso Culminado"
-    if questions:
+    now = pd.Timestamp.now()
+    closing_date = pd.to_datetime(closing, errors="coerce", dayfirst=True)
+    questions_date = pd.to_datetime(questions, errors="coerce", dayfirst=True)
+    if not pd.isna(closing_date) and closing_date <= now:
+        return "Proceso Culminado"
+    if not pd.isna(questions_date) and questions_date > now:
         return "Vigente para Consultas y Propuesta"
-    if closing:
+    if not pd.isna(closing_date):
         return "Vigente para Propuesta"
     return "Revisar"
 
@@ -184,6 +191,24 @@ def _is_closed_process(row: dict) -> bool:
         return True
     closing = pd.to_datetime(row.get("propuesta_fin"), errors="coerce", dayfirst=True)
     return not pd.isna(closing) and closing.to_pydatetime() <= pd.Timestamp.now().to_pydatetime()
+
+
+def _detail_row_indexes(
+    rows: List[dict],
+    enrich_details: bool,
+    enrich_closed_details: bool,
+    max_details: int,
+) -> tuple[set[int], set[int]]:
+    """Select active sheets for normal enrichment and closed sheets only on demand."""
+    active_indexes = [index for index, row in enumerate(rows) if not _is_closed_process(row)]
+    if not enrich_details:
+        active_indexes = []
+    elif max_details > 0:
+        active_indexes = active_indexes[:max_details]
+    closed_indexes = {
+        index for index, row in enumerate(rows) if _is_closed_process(row)
+    } if enrich_closed_details else set()
+    return set(active_indexes), closed_indexes
 
 
 def _filter_rows_for_period(rows: List[dict], years: List[int] | None, months: List[int] | None) -> List[dict]:
@@ -380,6 +405,11 @@ def _parse_detail(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     text = _clean(soup.get_text(" ", strip=True))
     fields = {}
+    region_match = re.search(
+        r"Regi[oó]n en que se genera la licitaci[oó]n:\s*(.+?)(?=\s+(?:Subir|3\.\s*Etapas y plazos))",
+        text,
+        re.I,
+    )
     publication = _find_date(text, ["Fecha de Publicacion", "Fecha de Publicación"])
     questions_end = _find_date(text, ["Fecha final de preguntas"])
     close_date = _find_date(text, ["Fecha de cierre de recepcion de la oferta", "Fecha de cierre de recepción de la oferta", "Fecha de Cierre"])
@@ -402,6 +432,8 @@ def _parse_detail(html: str) -> dict:
         fields["buena_pro_fin"] = _date_from_chile(adjudication)
     if amount_match:
         fields["VR / VE / Cuantia de la contratacion"] = _to_float(amount_match.group(1))
+    if region_match:
+        fields["region"] = _clean(region_match.group(1))
     return fields
 
 
@@ -504,12 +536,15 @@ def search_mercado_publico(
     max_results: int = 25,
     enrich_details: bool = False,
     enrich_closed_details: bool = True,
+    include_detail_attachments: bool = True,
     publication_date_from: str | None = None,
     publication_date_to: str | None = None,
+    date_filter_type: str = "publication",
     include_active_revalidation: bool = False,
     max_details: int = 10,
     years: List[int] | None = None,
     months: List[int] | None = None,
+    revalidation_rows: List[dict] | None = None,
     progress_callback: Callable[[float, str], None] | None = None,
     cancel_callback: Callable[[], None] | None = None,
 ) -> Tuple[pd.DataFrame, List[str]]:
@@ -532,6 +567,7 @@ def search_mercado_publico(
                 publication_date_from=publication_date_from,
                 publication_date_to=publication_date_to,
                 published_only=bool(publication_date_from or publication_date_to),
+                date_filter_type=date_filter_type,
             )
             _click_search(driver)
         _wait_results(driver, keyword)
@@ -547,14 +583,26 @@ def search_mercado_publico(
             _click_search(driver)
             _wait_results(driver, keyword)
             time.sleep(0.6)
-            revalidation_rows = _collect_result_rows(driver, mode, max_results, progress_callback, cancel_callback)
+            active_result_rows = _collect_result_rows(driver, mode, max_results, progress_callback, cancel_callback)
             by_key = {str(row.get("Nomenclatura", "")): row for row in rows}
-            for row in revalidation_rows:
+            for row in active_result_rows:
                 by_key.setdefault(str(row.get("Nomenclatura", "")), row)
             diagnostics.append(
-                f"Mercado Publico licitaciones: {len(revalidation_rows)} vigentes listados para revalidacion"
+                f"Mercado Publico licitaciones: {len(active_result_rows)} vigentes listados para revalidacion"
             )
             rows = list(by_key.values())
+        if mode == "licitaciones" and revalidation_rows:
+            by_key = {str(row.get("Nomenclatura", "")): row for row in rows}
+            added = 0
+            for row in revalidation_rows:
+                key = str(row.get("Nomenclatura", ""))
+                if key and key not in by_key:
+                    by_key[key] = row
+                    added += 1
+            rows = list(by_key.values())
+            diagnostics.append(
+                f"Mercado Publico licitaciones: {added} fichas activas guardadas agregadas para revalidacion"
+            )
         if progress_callback:
             progress_callback(0.35, f"{len(rows)} procesos detectados en {mode}")
         diagnostics.append(f"Mercado Publico {mode}: {len(rows)} procesos detectados para keyword={keyword} incluyendo paginas siguientes")
@@ -565,17 +613,19 @@ def search_mercado_publico(
                 f"Mercado Publico {mode}: {len(rows)}/{detected_count} procesos dentro del periodo solicitado"
             )
         elif publication_date_from or publication_date_to:
+            date_label = "cierre" if str(date_filter_type).strip().lower() == "closing" else "publicacion"
             diagnostics.append(
-                f"Mercado Publico {mode}: descubrimiento limitado por fecha de publicacion "
+                f"Mercado Publico {mode}: descubrimiento limitado por fecha de {date_label} "
                 f"{publication_date_from or 'inicio'} a {publication_date_to or 'hoy'}"
             )
 
         if rows and mode == "licitaciones":
-            explicit_limit = min(max_details or len(rows), len(rows)) if enrich_details else 0
-            explicit_indexes = set(range(explicit_limit))
-            closed_indexes = {
-                index for index, row in enumerate(rows) if _is_closed_process(row)
-            } if enrich_closed_details else set()
+            explicit_indexes, closed_indexes = _detail_row_indexes(
+                rows,
+                enrich_details=enrich_details,
+                enrich_closed_details=enrich_closed_details,
+                max_details=max_details,
+            )
             detail_indexes = sorted(explicit_indexes | closed_indexes)
             if closed_indexes:
                 diagnostics.append(
@@ -590,7 +640,7 @@ def search_mercado_publico(
                         driver,
                         rows[index],
                         diagnostics,
-                        include_attachments=index in explicit_indexes,
+                        include_attachments=include_detail_attachments and index in explicit_indexes,
                     )
                 except Exception as exc:
                     if cancel_callback:

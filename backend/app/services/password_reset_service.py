@@ -4,6 +4,7 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta
+from html import escape
 from urllib.parse import urlencode
 
 from sqlalchemy import select, update
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import PasswordResetToken, User
 from ..security import hash_password
-from .notification_service import _send_email
+from .notification_service import _branded_email_html, _send_email
 
 logger = logging.getLogger(__name__)
 
@@ -42,15 +43,25 @@ def request_password_reset(db: Session, email: str) -> None:
     db.commit()
 
     reset_url = f"{settings.frontend_url}/?{urlencode({'reset_token': raw_token})}"
+    display_name = user.first_name or user.full_name
     message = (
-        f"Hola {user.first_name or user.full_name},\n\n"
+        f"Hola {display_name},\n\n"
         "Recibimos una solicitud para cambiar la contraseña de tu cuenta GovRadar.\n\n"
         f"Crear nueva contraseña: {reset_url}\n\n"
         f"Este enlace vence en {settings.password_reset_minutes} minutos y solo puede usarse una vez. "
         "Si no solicitaste el cambio, puedes ignorar este correo."
     )
+    html_body = (
+        f"<p>Hola {escape(display_name)},</p>"
+        "<p>Recibimos una solicitud para cambiar la contraseña de tu cuenta GovRadar.</p>"
+        f"<p>Este enlace vence en {settings.password_reset_minutes} minutos y solo puede usarse una vez. "
+        "Si no solicitaste el cambio, puedes ignorar este correo.</p>"
+    )
+    html = _branded_email_html(
+        "Recuperación de contraseña", html_body, cta_url=reset_url, cta_label="Crear nueva contraseña"
+    )
     try:
-        _send_email(user.email, message, "GovRadar · Recuperación de contraseña")
+        _send_email(user.email, message, "GovRadar · Recuperación de contraseña", html=html)
     except Exception:
         logger.exception("No se pudo enviar el correo de recuperación para el usuario %s", user.id)
         reset_token.used_at = datetime.utcnow()

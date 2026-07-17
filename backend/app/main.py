@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import Base, engine
-from .routers import alerts, app_settings, auth, documents, legal_documents, opportunities, radar_keywords, runs, search_profiles, users
+from .routers import alerts, app_settings, auth, documents, legal_documents, opportunities, opportunity_view_states, radar_keywords, runs, search_profiles, users
 from .services.run_service import reconcile_interrupted_runs
 from .services.scheduler_service import start_scheduler, stop_scheduler
 
@@ -23,11 +23,22 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def prevent_stale_api_responses(request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        response.headers["Vary"] = "Authorization"
+        return response
+
     app.include_router(auth.router)
     app.include_router(users.router)
     app.include_router(search_profiles.router)
     app.include_router(radar_keywords.router)
     app.include_router(opportunities.router)
+    app.include_router(opportunity_view_states.router)
     app.include_router(runs.router)
     app.include_router(alerts.router)
     app.include_router(documents.router)

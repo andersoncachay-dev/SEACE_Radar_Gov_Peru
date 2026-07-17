@@ -18,6 +18,8 @@ class Settings:
     enable_chile_grandes_compras: bool = os.getenv("ENABLE_CHILE_GRANDES_COMPRAS", "false").lower() == "true"
     enable_scheduler: bool = os.getenv("ENABLE_SCHEDULER", "false").lower() == "true"
     scheduler_interval_minutes: int = int(os.getenv("SCHEDULER_INTERVAL_MINUTES", "15"))
+    external_scheduler_enabled: bool = os.getenv("EXTERNAL_SCHEDULER_ENABLED", "false").lower() == "true"
+    external_scheduler_interval_minutes: int = int(os.getenv("EXTERNAL_SCHEDULER_INTERVAL_MINUTES", "15"))
     auto_send_alerts: bool = os.getenv("AUTO_SEND_ALERTS", "false").lower() == "true"
     alert_sender_interval_minutes: int = int(os.getenv("ALERT_SENDER_INTERVAL_MINUTES", "10"))
     alert_batch_size: int = int(os.getenv("ALERT_BATCH_SIZE", "50"))

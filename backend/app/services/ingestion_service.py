@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime
 from typing import Any
 
@@ -31,9 +32,16 @@ def _as_float(value: Any) -> float:
 def _as_datetime(value: Any) -> datetime | None:
     if value is None or _as_text(value) == "":
         return None
-    parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
+    if isinstance(value, (datetime, pd.Timestamp)):
+        parsed = pd.Timestamp(value)
+    else:
+        text = str(value).strip()
+        year_first = bool(re.match(r"^\d{4}-\d{2}-\d{2}(?:[T\s]|$)", text))
+        parsed = pd.to_datetime(text, errors="coerce", dayfirst=not year_first)
     if pd.isna(parsed):
         return None
+    if getattr(parsed, "tzinfo", None) is not None:
+        parsed = parsed.tz_convert("UTC").tz_localize(None)
     return parsed.to_pydatetime()
 
 
@@ -82,17 +90,32 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
         opportunity = existing or Opportunity(source=source, external_id=external_id)
         previous_hash = opportunity.content_hash if existing else ""
 
-        opportunity.entity = _first_text(row, "entidad", "Nombre o Sigla de la Entidad")
-        opportunity.nomenclature = _first_text(row, "nomenclatura", "codigo", "Nomenclatura")
-        opportunity.object_type = _first_text(row, "objeto", "Objeto de Contratacion", "Objeto de Contratación")
-        opportunity.description = _first_text(row, "descripcion", "Descripcion de Objeto", "Descripción de Objeto")
+        incoming_entity = _first_text(row, "entidad", "Nombre o Sigla de la Entidad")
+        incoming_nomenclature = _first_text(row, "nomenclatura", "codigo", "Nomenclatura")
+        incoming_object_type = _first_text(row, "objeto", "Objeto de Contratacion", "Objeto de Contratación")
+        incoming_description = _first_text(row, "descripcion", "Descripcion de Objeto", "Descripción de Objeto")
+        opportunity.entity = incoming_entity or (opportunity.entity if existing else "")
+        opportunity.nomenclature = incoming_nomenclature or (opportunity.nomenclature if existing else external_id)
+        opportunity.object_type = incoming_object_type or (opportunity.object_type if existing else "")
+        opportunity.description = incoming_description or (opportunity.description if existing else "")
         catalog_entity = find_entity(opportunity.entity)
-        opportunity.region = _first_text(row, "region", "Departamento", "Región") or (catalog_entity or {}).get("region", "")
-        opportunity.buyer_ruc = _first_text(row, "ruc", "RUC") or (catalog_entity or {}).get("ruc", "")
-        opportunity.ocid = _as_text(row.get("ocid"))
-        opportunity.tender_id = _as_text(row.get("tender_id"))
-        opportunity.ocds_source_id = _as_text(row.get("source_id"))
-        opportunity.release_id = _as_text(row.get("release_id"))
+        previous_region = opportunity.region if existing else ""
+        opportunity.region = (
+            _first_text(row, "region", "Departamento", "Región")
+            or (catalog_entity or {}).get("region", "")
+            or (opportunity.region if existing else "")
+        )
+        if opportunity.region.strip().casefold() == "chile" and previous_region.strip().casefold() not in ("", "chile"):
+            opportunity.region = previous_region
+        opportunity.buyer_ruc = (
+            _first_text(row, "ruc", "RUC")
+            or (catalog_entity or {}).get("ruc", "")
+            or (opportunity.buyer_ruc if existing else "")
+        )
+        opportunity.ocid = _as_text(row.get("ocid")) or (opportunity.ocid if existing else "")
+        opportunity.tender_id = _as_text(row.get("tender_id")) or (opportunity.tender_id if existing else "")
+        opportunity.ocds_source_id = _as_text(row.get("source_id")) or (opportunity.ocds_source_id if existing else "")
+        opportunity.release_id = _as_text(row.get("release_id")) or (opportunity.release_id if existing else "")
         documents_payload = _as_text(row.get("documentos_ocds"))
         if documents_payload:
             try:
@@ -100,7 +123,7 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
                 opportunity.documents_count = len(parsed_documents) if isinstance(parsed_documents, list) else 0
             except json.JSONDecodeError:
                 opportunity.documents_count = 0
-        else:
+        elif not existing:
             opportunity.documents_count = 0
         incoming_amount = _as_float(
             row.get("monto")
@@ -111,21 +134,48 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
         # collected from the detail page when a later lightweight scan returns 0.
         if incoming_amount > 0 or not existing:
             opportunity.amount = incoming_amount
-        opportunity.currency = _first_text(row, "moneda", "Moneda")
-        opportunity.status = _first_text(row, "estado_operativo", "estado_comercial", "Estado Comercial")
-        opportunity.priority = _first_text(row, "prioridad") or "C"
-        opportunity.score = int(_as_float(row.get("score")))
-        opportunity.reasons = _as_text(row.get("motivos_score"))
-        opportunity.detail_url = _first_text(row, "url_detalle", "detalle_url")
-        opportunity.requirement_pdf_url = _as_text(row.get("requerimiento_pdf"))
-        opportunity.requirement_pdf_local = _as_text(row.get("requerimiento_pdf_local"))
+        incoming_currency = _first_text(row, "moneda", "Moneda")
+        opportunity.currency = incoming_currency or (opportunity.currency if existing else "")
+        incoming_status = _first_text(row, "estado_operativo", "estado_comercial", "Estado Comercial")
+        incoming_schedule_source = _first_text(row, "schedule_source")
+        # A lightweight OCDS refresh deliberately says that its schedule is
+        # pending. It must not downgrade a schedule already validated in SEACE.
+        if existing and opportunity.schedule_source == "seace" and not incoming_schedule_source:
+            if "revisar cronograma seace" in incoming_status.casefold():
+                incoming_status = ""
+        if not incoming_status and not existing:
+            proposal_deadline = _as_datetime(row.get("propuesta_fin"))
+            incoming_status = "Vigente para Propuesta" if proposal_deadline is None or proposal_deadline > datetime.utcnow() else "Proceso Culminado"
+        opportunity.status = incoming_status or (opportunity.status if existing else "Vigente para Propuesta")
+        incoming_priority = _first_text(row, "prioridad")
+        opportunity.priority = incoming_priority or (opportunity.priority if existing else "C")
+        incoming_score = _as_text(row.get("score"))
+        if incoming_score or not existing:
+            opportunity.score = int(_as_float(incoming_score))
+        incoming_reasons = _as_text(row.get("motivos_score"))
+        opportunity.reasons = incoming_reasons or (opportunity.reasons if existing else "")
+        incoming_detail_url = _first_text(row, "url_detalle", "detalle_url")
+        incoming_pdf_url = _as_text(row.get("requerimiento_pdf"))
+        incoming_pdf_local = _as_text(row.get("requerimiento_pdf_local"))
+        opportunity.detail_url = incoming_detail_url or (opportunity.detail_url if existing else "")
+        opportunity.requirement_pdf_url = incoming_pdf_url or (opportunity.requirement_pdf_url if existing else "")
+        opportunity.requirement_pdf_local = incoming_pdf_local or (opportunity.requirement_pdf_local if existing else "")
         opportunity.publication_date = _merge_datetime(
             opportunity.publication_date,
             row.get("fecha_publicacion") or row.get("Fecha y Hora de Publicacion") or row.get("Fecha y Hora de Publicación"),
         )
-        opportunity.consultation_deadline = _merge_datetime(opportunity.consultation_deadline, row.get("consulta_fin"))
-        opportunity.quote_deadline = _merge_datetime(opportunity.quote_deadline, row.get("cotizacion_fin"))
-        opportunity.proposal_deadline = _merge_datetime(opportunity.proposal_deadline, row.get("propuesta_fin"))
+        replace_schedule = str(row.get("replace_schedule", "")).strip().lower() in {"true", "1", "yes"}
+        if replace_schedule:
+            opportunity.consultation_deadline = _as_datetime(row.get("consulta_fin"))
+            opportunity.quote_deadline = _as_datetime(row.get("cotizacion_fin"))
+            opportunity.proposal_deadline = _as_datetime(row.get("propuesta_fin"))
+        else:
+            opportunity.consultation_deadline = _merge_datetime(opportunity.consultation_deadline, row.get("consulta_fin"))
+            opportunity.quote_deadline = _merge_datetime(opportunity.quote_deadline, row.get("cotizacion_fin"))
+            opportunity.proposal_deadline = _merge_datetime(opportunity.proposal_deadline, row.get("propuesta_fin"))
+        if incoming_schedule_source == "seace":
+            opportunity.schedule_source = "seace"
+            opportunity.schedule_validated_at = _as_datetime(row.get("schedule_validated_at")) or datetime.utcnow()
         current_hash = _content_hash(row)
         opportunity.content_hash = current_hash
 

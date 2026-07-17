@@ -1,11 +1,11 @@
 
 from typing import Callable, Tuple, List
+import os
 import time
 import re
 from urllib.parse import urljoin
 import pandas as pd
 from bs4 import BeautifulSoup
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
@@ -14,13 +14,19 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import StaleElementReferenceException
 
+from .proxy_utils import build_chrome_driver
+
 SEACE_PUBLIC_URL = "https://prod2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml"
 BASE_URL = "https://prod2.seace.gob.pe"
 PROCESS_FORM = "tbBuscador:idFormBuscarProceso"
+SEACE_DEBUG_HTML = os.getenv("SEACE_DEBUG_HTML", "false").lower() == "true"
 
-SELECTION_TYPE_VALUES = {
-    "CP-ABR": "Concurso Público Abreviado",
-}
+
+def _write_debug_html(filename: str, html: str) -> None:
+    if not SEACE_DEBUG_HTML:
+        return
+    with open(filename, "w", encoding="utf-8", errors="ignore") as file:
+        file.write(html)
 
 STAGE_MAP = {
     'convocatoria': ('convocatoria_inicio','convocatoria_fin'),
@@ -100,26 +106,6 @@ def _set_select_value(driver, element_id: str, value: str) -> bool:
         return False
 
 
-def _set_select_option_by_text(driver, form_id: str, option_text: str) -> bool:
-    try:
-        return bool(driver.execute_script("""
-            const form=document.getElementById(arguments[0]);
-            const wanted=(arguments[1]||'').trim().toLowerCase();
-            if(!form) return false;
-            for(const el of form.querySelectorAll('select')){
-              const option=Array.from(el.options).find(o => (o.textContent||'').trim().toLowerCase()===wanted);
-              if(option){
-                el.value=option.value;
-                el.dispatchEvent(new Event('change',{bubbles:true}));
-                return el.value===option.value;
-              }
-            }
-            return false;
-        """, form_id, option_text))
-    except Exception:
-        return False
-
-
 def _looks_like_data_row(cells: List[str]) -> bool:
     if not cells or len(cells)<8: return False
     if not re.fullmatch(r"\d{1,3}", cells[0]): return False
@@ -185,7 +171,7 @@ def _parse_primefaces_grid(html: str):
 
 
 def _parse_tables(html:str):
-    with open('debug_browser.html','w',encoding='utf-8',errors='ignore') as f: f.write(html)
+    _write_debug_html("debug_browser.html", html)
     df2,sample=_parse_primefaces_grid(html)
     if not df2.empty: return df2,0,[('primefaces_rows',len(df2),len(df2.columns),sample)]
     try: tables=pd.read_html(html)
@@ -434,25 +420,25 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',nomencl
     try:
         if cancel_callback: cancel_callback()
         if progress_callback: progress_callback(0.05,"Abriendo SEACE")
-        driver=webdriver.Chrome(options=options); wait=WebDriverWait(driver,max_wait); driver.get(url); diagnostics.append(f"GET navegador: {url}")
+        driver=build_chrome_driver(options); wait=WebDriverWait(driver,max_wait); driver.get(url); diagnostics.append(f"GET navegador: {url}")
         time.sleep(3); tabs=driver.find_elements(By.XPATH,"//*[contains(text(),'Buscador de Procedimientos de Selección')]")
         if tabs: driver.execute_script("arguments[0].click();",tabs[0]); diagnostics.append('Pestaña Procedimientos seleccionada'); time.sleep(3)
         desc_id=f"{PROCESS_FORM}:descripcionObjeto"; wait.until(EC.presence_of_element_located((By.ID,desc_id)))
         driver.execute_script("const active=document.getElementById('tbBuscador_activeIndex'); if(active) active.value='1';")
         search_nomen=_clean_text(nomenclature)
         selection_number, call_number=_selection_parts(search_nomen)
-        selection_prefix="-".join(search_nomen.split("-")[:2]).upper() if search_nomen else ""
-        selection_type=SELECTION_TYPE_VALUES.get(selection_prefix, "")
-        ok_type=_set_select_option_by_text(driver,PROCESS_FORM,selection_type) if selection_type else True
-        if selection_type:
-            # Changing procedure type triggers a PrimeFaces AJAX refresh.  Set
-            # text fields only after it has replaced the form controls.
-            time.sleep(2)
+        # "Tipo de Selección" is intentionally left as "[Seleccione]". SEACE now
+        # lists several near-duplicate labels for the same prefix (e.g. "Concurso
+        # Público Abreviado" vs "... Séptima DCF Ley N°32069") that vary by which
+        # law governs the record, so guessing one from the nomenclature prefix
+        # picks the wrong variant and the search silently returns zero rows.
+        # Nro. Selección + Nro. Convocatoria + Año already identify the record
+        # uniquely, matching the working manual search.
         ok_desc=True if search_nomen else _set_input_like_user(driver,desc_id,keyword)
         ok_nomen=_set_input_like_user(driver,f"{PROCESS_FORM}:numeroSeleccion",selection_number) if search_nomen else True
         ok_call=_set_input_like_user(driver,f"{PROCESS_FORM}:numeroConvocatoria",call_number) if call_number else True
         ok_year=_set_input_like_user(driver,f"{PROCESS_FORM}:anioConvocatoria_input",str(year)); _set_input_like_user(driver,f"{PROCESS_FORM}:anioConvocatoria_focus",str(year)); ok_ver=_set_input_like_user(driver,f"{PROCESS_FORM}:j_idt247_input",_version_value(version))
-        diagnostics += [f"Descripción seteada: {ok_desc} -> {'' if search_nomen else keyword}", f"Tipo de selección seteado: {ok_type} -> {selection_prefix}", f"Número de selección seteado: {ok_nomen} -> {selection_number}", f"Convocatoria seteada: {ok_call} -> {call_number}", f"Año seteado: {ok_year} -> {year}", f"Versión seteada: {ok_ver} -> {_version_value(version)}"]
+        diagnostics += [f"Descripción seteada: {ok_desc} -> {'' if search_nomen else keyword}", f"Número de selección seteado: {ok_nomen} -> {selection_number}", f"Convocatoria seteada: {ok_call} -> {call_number}", f"Año seteado: {ok_year} -> {year}", f"Versión seteada: {ok_ver} -> {_version_value(version)}"]
         clicked=False
         # Use the visible token button so SEACE can populate its anti-bot token
         # before invoking the hidden PrimeFaces submit action.
@@ -477,7 +463,7 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',nomencl
             df,tables_count,candidates_info=_parse_tables(html); best_info=candidates_info
             if not df.empty:
                 if progress_callback: progress_callback(0.4,f"{len(df)} procesos detectados en SEACE")
-                with open('respuesta_seace_browser.html','w',encoding='utf-8',errors='ignore') as f: f.write(html)
+                _write_debug_html("respuesta_seace_browser.html", html)
                 df=_normalize(df)
                 for col in [
                     'RUC',
@@ -521,12 +507,195 @@ def search_seace_public_browser(url=SEACE_PUBLIC_URL,keyword='satelital',nomencl
                 if progress_callback: progress_callback(1.0,"Consulta SEACE completada")
                 return df,diagnostics
         html=driver.page_source
-        with open('respuesta_seace_browser.html','w',encoding='utf-8',errors='ignore') as f: f.write(html)
+        _write_debug_html("respuesta_seace_browser.html", html)
         df,tables_count,candidates_info=_parse_tables(html); diagnostics.append(f"Tablas HTML al final: {tables_count}"); diagnostics.append(f"Candidatas al final: {candidates_info or best_info}"); diagnostics.append('No se detectó tabla con navegador.')
         return pd.DataFrame(),diagnostics
     except Exception as e:
         if cancel_callback: cancel_callback()
         diagnostics.append(f"Error navegador: {type(e).__name__} - {e}"); return pd.DataFrame(),diagnostics
+    finally:
+        try:
+            if driver: driver.quit()
+        except Exception: pass
+
+
+_NO_RESULTS_MARKER = 'No se encontraron Datos'
+# The search page always renders other tabs' empty tables (e.g. the ACF
+# search) with this same "no data" text, regardless of what our own search
+# returns. Matching the bare phrase anywhere on the page made the polling
+# loop break on that unrelated placeholder before the real AJAX response for
+# *our* results table (idFormBuscarProceso:dtProcesos) ever arrived - which
+# only showed up as a problem once network latency (e.g. a proxy hop) made
+# the real response slower than the first 1-second poll.
+_PROCESS_TABLE_NO_RESULTS = re.compile(
+    _NO_RESULTS_MARKER + r".{0,300}idFormBuscarProceso:dtProcesos", re.DOTALL
+)
+
+
+def _process_table_has_no_results(html: str) -> bool:
+    return bool(_PROCESS_TABLE_NO_RESULTS.search(html))
+
+
+def _reset_to_search_form(driver, wait, desc_id: str) -> None:
+    """Load a clean copy of the process search tab.
+
+    Reused before every target in ``search_seace_public_browser_targets`` so
+    one target's leftover AJAX/DOM state (and the extra render lag a proxy
+    hop adds) can't produce a stale-element error on the next target.
+    """
+    driver.get(SEACE_PUBLIC_URL)
+    time.sleep(3)
+    tabs = driver.find_elements(By.XPATH, "//*[contains(text(),'Buscador de Procedimientos de Selección')]")
+    if tabs:
+        driver.execute_script("arguments[0].click();", tabs[0])
+        time.sleep(3)
+    wait.until(EC.presence_of_element_located((By.ID, desc_id)))
+    driver.execute_script("const active=document.getElementById('tbBuscador_activeIndex'); if(active) active.value='1';")
+
+
+# A crashed chromedriver session (proxy-added latency makes this more likely
+# over a long-lived session than on a direct connection) fails every command
+# on that same driver identically, so continuing to reuse it would silently
+# skip every remaining target in one shot. Even short of an outright crash,
+# leftover DOM/AJAX state from one target's search made the next target's
+# results wrong often enough (stale elements, no matching row) that reusing
+# a session at all wasn't worth the saved ~5s of Chrome relaunch time - this
+# field feeds a business deadline, so a fresh browser per target is the
+# safer default. Each pending target is retried on the next scheduled run
+# regardless, so occasional slowness here costs nothing but time.
+_TARGETS_PER_BROWSER_SESSION = 1
+
+
+def _launch_search_driver(options, max_wait: int):
+    driver = build_chrome_driver(options)
+    wait = WebDriverWait(driver, max_wait)
+    desc_id = f"{PROCESS_FORM}:descripcionObjeto"
+    _reset_to_search_form(driver, wait, desc_id)
+    return driver, wait, desc_id
+
+
+def _empty_result_columns() -> dict:
+    base = {c: '' for c in [
+        'RUC','Estado Comercial','Vigencia','Dirección Legal','Teléfono de la Entidad',
+        'cronograma_texto','dias_para_consulta','dias_para_propuesta',
+    ]}
+    for c in ['convocatoria_inicio','convocatoria_fin','registro_inicio','registro_fin','consulta_inicio','consulta_fin','absolucion_inicio','absolucion_fin','integracion_inicio','integracion_fin','propuesta_inicio','propuesta_fin','evaluacion_inicio','evaluacion_fin','buena_pro_inicio','buena_pro_fin']:
+        base[c]=''
+    return base
+
+
+def search_seace_public_browser_targets(targets: List[dict], version: str='Seace 3', headless: bool=True, max_wait: int=45, progress_callback: Callable[[float,str],None] | None=None, cancel_callback: Callable[[],None] | None=None) -> Tuple[pd.DataFrame, List[str]]:
+    """Fetch the SEACE schedule for a list of already-known opportunities.
+
+    Each target is searched on its own, filling "Descripción del Objeto" with
+    that record's own literal description text (falling back to its
+    nomenclature) - the same approach a manual search proved reliable with:
+    it returns a single matching row. A single broad keyword shared across
+    many unrelated processes can return far more rows than the scraper reads
+    from the current results page, silently leaving the target out; guessing
+    a "Nro. Selección" + "Tipo de Selección" filter is worse, since SEACE now
+    lists several near-duplicate "Tipo de Selección" labels for the same
+    nomenclature prefix depending on which law governs the record, and
+    picking the wrong one returns zero rows. A browser session is reused
+    across a handful of targets at a time (see
+    ``_TARGETS_PER_BROWSER_SESSION``) to avoid the cost of relaunching Chrome
+    per process while still bounding how many targets a single crashed
+    session can take down with it.
+
+    Each item in ``targets`` is a dict with ``nomenclature``, ``keyword``
+    (the text to type into "Descripción del Objeto") and ``year``.
+    """
+    diagnostics: List[str] = []; options=Options()
+    if headless: options.add_argument('--headless=new')
+    options.add_argument('--start-maximized'); options.add_argument('--disable-notifications'); options.add_argument('--disable-popup-blocking'); options.add_argument('--ignore-certificate-errors')
+    options.add_argument('--no-sandbox'); options.add_argument('--disable-dev-shm-usage')
+    driver=None; rows: List[dict]=[]
+    total=max(1,len(targets))
+    try:
+        if cancel_callback: cancel_callback()
+        if progress_callback: progress_callback(0.02,"Abriendo SEACE")
+        diagnostics.append(f"GET navegador: {SEACE_PUBLIC_URL}")
+        driver,wait,desc_id=_launch_search_driver(options,max_wait)
+        diagnostics.append('Pestaña Procedimientos seleccionada')
+        for position,target in enumerate(targets,start=1):
+            if position>1 and (position-1)%_TARGETS_PER_BROWSER_SESSION==0:
+                try: driver.quit()
+                except Exception: pass
+                diagnostics.append(f"Reiniciando navegador antes del objetivo {position} (sesión con {_TARGETS_PER_BROWSER_SESSION} objetivos)")
+                driver,wait,desc_id=_launch_search_driver(options,max_wait)
+            if cancel_callback: cancel_callback()
+            nomenclature=_clean_text(target.get('nomenclature'))
+            search_text=_clean_text(target.get('keyword') or nomenclature)
+            target_year=str(target.get('year') or '')
+            if progress_callback: progress_callback((position-1)/total,f"Buscando cronograma {position} de {total}: {nomenclature}")
+            if not nomenclature or not search_text:
+                diagnostics.append(f"Objetivo omitido (sin nomenclatura o descripción): {target}"); continue
+            try:
+                _set_input_like_user(driver,desc_id,search_text)
+                _set_input_like_user(driver,f"{PROCESS_FORM}:numeroSeleccion",'')
+                _set_input_like_user(driver,f"{PROCESS_FORM}:numeroConvocatoria",'')
+                _set_input_like_user(driver,f"{PROCESS_FORM}:anioConvocatoria_input",target_year); _set_input_like_user(driver,f"{PROCESS_FORM}:anioConvocatoria_focus",target_year)
+                _set_input_like_user(driver,f"{PROCESS_FORM}:j_idt247_input",_version_value(version))
+                diagnostics.append(f"Objetivo {nomenclature}: descripción='{search_text[:80]}' año={target_year}")
+                clicked=_click_like_user(driver,f"{PROCESS_FORM}:btnBuscarSelToken")
+                if not clicked:
+                    try:
+                        submit=driver.find_element(By.ID,f"{PROCESS_FORM}:btnBuscarSel")
+                        driver.execute_script("arguments[0].click();",submit); clicked=True
+                    except Exception: pass
+                if not clicked:
+                    driver.execute_script("document.getElementById(arguments[0]).submit();",PROCESS_FORM)
+                # A "no results" reading on the very first poll can be a stale
+                # snapshot of dtProcesos taken before the AJAX search response
+                # replaced it - more likely with the extra latency of a proxy
+                # hop. Require it twice in a row (two poll intervals apart)
+                # before trusting it as a genuine empty result.
+                end=time.time()+max_wait; df=pd.DataFrame(); poll=0; last_len=0; consecutive_empty=0
+                while time.time()<end:
+                    if cancel_callback: cancel_callback()
+                    time.sleep(1); html=driver.page_source; poll+=1
+                    df,_,_=_parse_tables(html)
+                    if not df.empty: break
+                    if _process_table_has_no_results(html):
+                        consecutive_empty+=1
+                        diagnostics.append(f"Objetivo {nomenclature}: sondeo {poll} sin filas para dtProcesos (len={len(html)}, consecutivos={consecutive_empty})")
+                        if consecutive_empty>=2: break
+                    else:
+                        consecutive_empty=0
+                    last_len=len(html)
+                if df.empty:
+                    diagnostics.append(f"Objetivo {nomenclature}: SEACE no devolvió filas para esa descripción (sondeos={poll}, ultimo_len={last_len})"); continue
+                df=_normalize(df)
+                for col,default in _empty_result_columns().items():
+                    if col not in df.columns: df[col]=default
+                df=_enrich_details(driver,df,1,diagnostics,None,cancel_callback,[nomenclature])
+                match=df[df['Nomenclatura'].map(_norm)==_norm(nomenclature)]
+                if match.empty:
+                    diagnostics.append(f"Objetivo {nomenclature}: la fila exacta no aparece entre los resultados devueltos"); continue
+                rows.append(match.iloc[0].to_dict())
+                if progress_callback: progress_callback(position/total,f"Cronograma {position} de {total} procesado")
+            except Exception as exc:
+                if cancel_callback: cancel_callback()
+                diagnostics.append(f"Objetivo {nomenclature}: fallo inesperado ({type(exc).__name__}: {exc})")
+                try:
+                    _reset_to_search_form(driver,wait,desc_id)
+                except Exception:
+                    # The page-level reset failed too, which usually means the
+                    # chromedriver session itself died (proxy hiccup, crash).
+                    # Reusing it would fail identically on every remaining
+                    # target, so start a completely fresh browser instead.
+                    diagnostics.append(f"Objetivo {nomenclature}: sesión del navegador perdida, reiniciando Chrome")
+                    try: driver.quit()
+                    except Exception: pass
+                    try:
+                        driver,wait,desc_id=_launch_search_driver(options,max_wait)
+                    except Exception as relaunch_exc:
+                        diagnostics.append(f"No se pudo reiniciar el navegador: {type(relaunch_exc).__name__} - {relaunch_exc}")
+                        break
+        return pd.DataFrame(rows), diagnostics
+    except Exception as e:
+        if cancel_callback: cancel_callback()
+        diagnostics.append(f"Error navegador (multi-objetivo): {type(e).__name__} - {e}"); return pd.DataFrame(rows), diagnostics
     finally:
         try:
             if driver: driver.quit()

@@ -3,6 +3,7 @@ import unittest
 
 from src.mercado_publico_scraper import (
     _estado_comercial,
+    _detail_row_indexes,
     _filter_rows_for_period,
     _is_closed_process,
     _parse_detail,
@@ -40,6 +41,16 @@ class MercadoPublicoScraperTests(unittest.TestCase):
 
         self.assertEqual(fields["VR / VE / Cuantia de la contratacion"], 184120000.0)
 
+    def test_parses_official_tender_region(self):
+        html = """
+        <body>
+          Región en que se genera la licitación: Región Metropolitana de Santiago
+          <div>Subir</div><h2>3. Etapas y plazos</h2>
+        </body>
+        """
+
+        self.assertEqual(_parse_detail(html)["region"], "Región Metropolitana de Santiago")
+
     def test_parses_chilean_thousands_separators(self):
         self.assertEqual(_to_float("$ 184.120.000"), 184120000.0)
         self.assertEqual(_to_float("CLP 1.234,56"), 1234.56)
@@ -63,6 +74,29 @@ class MercadoPublicoScraperTests(unittest.TestCase):
         filtered = _filter_rows_for_period(rows, years=[2026], months=[6, 7])
 
         self.assertEqual([row["Nomenclatura"] for row in filtered], ["JUN", "JUL"])
+
+    def test_normal_detail_enrichment_visits_only_active_processes(self):
+        future = (datetime.now() + timedelta(days=5)).strftime("%d/%m/%Y %H:%M:%S")
+        past = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y %H:%M:%S")
+        rows = [
+            {"Nomenclatura": "ACTIVE-1", "Vigencia": "Publicada", "propuesta_fin": future},
+            {"Nomenclatura": "CLOSED", "Vigencia": "Publicada", "propuesta_fin": past},
+            {"Nomenclatura": "ACTIVE-2", "Vigencia": "Publicada", "propuesta_fin": future},
+        ]
+
+        active, closed = _detail_row_indexes(rows, enrich_details=True, enrich_closed_details=False, max_details=0)
+
+        self.assertEqual(active, {0, 2})
+        self.assertEqual(closed, set())
+
+    def test_closed_detail_is_visited_only_for_explicit_revalidation(self):
+        past = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y %H:%M:%S")
+        rows = [{"Nomenclatura": "CLOSED", "Vigencia": "Publicada", "propuesta_fin": past}]
+
+        active, closed = _detail_row_indexes(rows, enrich_details=True, enrich_closed_details=True, max_details=1)
+
+        self.assertEqual(active, set())
+        self.assertEqual(closed, {0})
 
 
 if __name__ == "__main__":

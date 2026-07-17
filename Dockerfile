@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 
+RUN chmod +x /app/azure/run-ingestion-worker.sh /app/azure/run-alert-worker.sh /app/azure/run-chile-region-backfill.sh /app/azure/run-chile-region-report.sh /app/azure/run-chile-region-manual-patch.sh
+
 EXPOSE 8000
 
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

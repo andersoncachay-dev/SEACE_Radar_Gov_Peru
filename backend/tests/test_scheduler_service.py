@@ -11,21 +11,26 @@ from backend.app.models import AppSetting, RadarKeyword, SearchProfile
 from backend.app.radar_config import AUTO_PROFILE_PREFIX, DEFAULT_RADAR_KEYWORDS
 from backend.app.services.scheduler_service import (
     DEFAULT_INTERVAL_SECONDS,
+    claim_external_scheduler_run,
     current_ingestion_period,
     current_ingestion_window,
     get_scheduler_interval,
     scheduler_initial_delay,
     sync_radar_profiles,
 )
+from backend.app.services import scheduler_service
 
 
 class RadarProfileSyncTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.original_session_local = scheduler_service.SessionLocal
         engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
         Base.metadata.create_all(engine)
-        self.db = sessionmaker(bind=engine, future=True)()
+        self.session_factory = sessionmaker(bind=engine, future=True)
+        self.db = self.session_factory()
 
     def tearDown(self) -> None:
+        scheduler_service.SessionLocal = self.original_session_local
         self.db.close()
 
     def test_country_interval_defaults_to_fifteen_minutes_and_accepts_persisted_value(self) -> None:
@@ -38,6 +43,29 @@ class RadarProfileSyncTests(unittest.TestCase):
         self.assertEqual(scheduler_initial_delay("peru", 900), 900)
         self.assertEqual(scheduler_initial_delay("chile", 900), 1200)
         self.assertEqual(scheduler_initial_delay("chile", 60), 90)
+
+    def test_external_jobs_honor_each_country_persisted_interval(self) -> None:
+        scheduler_service.SessionLocal = self.session_factory
+        self.db.add_all(
+            [
+                AppSetting(key="scheduler.peru.interval_seconds", value="1800"),
+                AppSetting(key="scheduler.chile.interval_seconds", value="3600"),
+            ]
+        )
+        self.db.commit()
+        initial = datetime(2026, 7, 16, 1, 0, tzinfo=timezone.utc)
+
+        peru_due, _ = claim_external_scheduler_run("peru", initial)
+        chile_due, _ = claim_external_scheduler_run("chile", initial)
+        self.assertFalse(peru_due)
+        self.assertFalse(chile_due)
+
+        peru_due, peru_next = claim_external_scheduler_run("peru", initial.replace(minute=30))
+        chile_due, chile_next = claim_external_scheduler_run("chile", initial.replace(minute=30))
+        self.assertTrue(peru_due)
+        self.assertFalse(chile_due)
+        self.assertEqual(peru_next, datetime(2026, 7, 16, 2, 0, tzinfo=timezone.utc))
+        self.assertEqual(chile_next, datetime(2026, 7, 16, 2, 0, tzinfo=timezone.utc))
 
     def test_creates_country_profiles_and_tracks_custom_keywords(self) -> None:
         sync_radar_profiles(self.db)
@@ -75,7 +103,7 @@ class RadarProfileSyncTests(unittest.TestCase):
             {"year": "2026", "month": "7", "years": ["2026"], "months": ["7"]},
         )
 
-    def test_incremental_window_is_anteayer_through_today_in_lima(self) -> None:
+    def test_chile_incremental_window_uses_closing_dates_into_the_future(self) -> None:
         window = current_ingestion_window(
             self.db,
             "chile",
@@ -83,11 +111,25 @@ class RadarProfileSyncTests(unittest.TestCase):
         )
 
         self.assertEqual(window["publication_date_from"], "2026-07-29")
-        self.assertEqual(window["publication_date_to"], "2026-07-31")
+        self.assertEqual(window["publication_date_to"], "2026-09-07")
         self.assertEqual(window["years"], ["2026"])
-        self.assertEqual(window["months"], ["7"])
+        self.assertEqual(window["months"], ["7", "8", "9"])
+        self.assertEqual(window["date_filter_type"], "closing")
+        self.assertTrue(window["skip_detail_enrichment"])
         self.assertTrue(window["active_only"])
         self.assertTrue(window["automatic_incremental"])
+
+    def test_peru_incremental_window_remains_anteayer_through_today(self) -> None:
+        window = current_ingestion_window(
+            self.db,
+            "peru",
+            datetime(2026, 8, 1, 2, 30, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(window["publication_date_from"], "2026-07-29")
+        self.assertEqual(window["publication_date_to"], "2026-07-31")
+        self.assertEqual(window["date_filter_type"], "publication")
+        self.assertFalse(window["skip_detail_enrichment"])
 
     def test_radio_enlace_is_not_a_base_keyword(self) -> None:
         self.assertNotIn("radio enlace", {item.casefold() for item in DEFAULT_RADAR_KEYWORDS})

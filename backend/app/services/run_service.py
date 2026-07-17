@@ -89,12 +89,22 @@ def _filter_dataframe_period(rows: Any, payload: dict):
     months = _period_values(payload, "months", "month")
     if not years and not months and not payload.get("publication_date_from") and not payload.get("publication_date_to"):
         return rows
-    date_column = "fecha_publicacion" if "fecha_publicacion" in rows.columns else "Fecha y Hora de Publicacion"
-    if date_column not in rows.columns:
+    publication_column = "fecha_publicacion" if "fecha_publicacion" in rows.columns else "Fecha y Hora de Publicacion"
+    proposal_column = "propuesta_fin" if "propuesta_fin" in rows.columns else None
+    is_chile = str(payload.get("source") or "").lower().startswith("mercado_publico")
+    if publication_column not in rows.columns and proposal_column is None:
         return rows
-    dates = rows[date_column]
-    if getattr(dates, "isna", None) is not None and dates.isna().all() and "propuesta_fin" in rows.columns:
-        dates = rows["propuesta_fin"]
+    publication_dates = rows[publication_column] if publication_column in rows.columns else None
+    proposal_dates = rows[proposal_column] if proposal_column else None
+    # Mercado Publico presents searches by their closing date. For Chile, a
+    # selected month therefore means the complete month of proposal closing,
+    # including future months, even when the tender was published earlier.
+    if is_chile and proposal_dates is not None:
+        dates = proposal_dates if publication_dates is None else proposal_dates.combine_first(publication_dates)
+    elif publication_dates is not None:
+        dates = publication_dates if proposal_dates is None else publication_dates.combine_first(proposal_dates)
+    else:
+        dates = proposal_dates
     mask = True
     if years:
         mask = dates.dt.year.isin(years)
@@ -109,6 +119,11 @@ def _filter_dataframe_period(rows: Any, payload: dict):
     if publication_to:
         to_mask = dates.dt.normalize() <= datetime.strptime(publication_to, "%Y-%m-%d")
         mask = to_mask if mask is True else mask & to_mask
+    if "force_revalidation" in rows.columns:
+        # A saved row may reveal a corrected deadline outside the selected
+        # month after its sheet is opened. Keep it so the correction reaches
+        # the database instead of preserving the stale date forever.
+        mask = mask | rows["force_revalidation"].fillna(False).astype(bool)
     return rows[mask].copy()
 
 
@@ -148,6 +163,58 @@ def _existing_active_nomenclatures(db: Session, source: str) -> set[str]:
     }
 
 
+def _manual_chile_revalidation_rows(db: Session, source: str, keyword: str, payload: dict) -> list[dict[str, Any]]:
+    """Return saved active Chile rows whose detail dates still need enrichment.
+
+    Mercado Publico can stop returning a tender in a later text search while its
+    saved detail URL remains valid. Manual searches must still refresh those
+    matching rows for the selected closing month.
+    """
+    if payload.get("automatic_incremental") or not payload.get("enrich_details"):
+        return []
+    years = _period_values(payload, "years", "year")
+    months = _period_values(payload, "months", "month")
+    now = datetime.utcnow()
+    candidates = db.scalars(
+        select(Opportunity).where(
+            Opportunity.source == source,
+            Opportunity.is_archived.is_(False),
+            Opportunity.detail_url != "",
+            Opportunity.proposal_deadline.is_not(None),
+            Opportunity.proposal_deadline > now,
+        )
+    ).all()
+    rows: list[dict[str, Any]] = []
+    for item in candidates:
+        deadline = item.proposal_deadline
+        if deadline is None:
+            continue
+        if years and deadline.year not in years:
+            continue
+        if months and deadline.month not in months:
+            continue
+        searchable = " ".join((item.entity or "", item.nomenclature or "", item.description or ""))
+        if not contains_complete_phrase(searchable, keyword):
+            continue
+        if item.publication_date is not None and item.consultation_deadline is not None:
+            continue
+        rows.append({
+            "Nomenclatura": item.nomenclature or item.external_id,
+            "Nombre o Sigla de la Entidad": item.entity,
+            "Descripcion de Objeto": item.description,
+            "Fecha y Hora de Publicacion": item.publication_date,
+            "consulta_fin": item.consultation_deadline,
+            "propuesta_fin": item.proposal_deadline,
+            "Estado Comercial": item.status,
+            "Vigencia": item.status,
+            "url_detalle": item.detail_url,
+            "Moneda": item.currency or "CLP",
+            "region": item.region or "Chile",
+            "force_revalidation": True,
+        })
+    return rows
+
+
 def _finalize_expired_opportunities(db: Session, source: str) -> int:
     now = datetime.utcnow()
     items = db.scalars(
@@ -160,6 +227,34 @@ def _finalize_expired_opportunities(db: Session, source: str) -> int:
     ).all()
     changed = 0
     for item in items:
+        if not _terminal_status(item.status):
+            item.status = "Proceso Culminado"
+            changed += 1
+    if changed:
+        db.commit()
+    return changed
+
+
+def _finalize_stale_peru_consultations(db: Session, source: str, days: int = 30) -> int:
+    """Close Peru candidates whose enquiry window expired over ``days`` ago.
+
+    A future proposal deadline already validated in SEACE takes precedence. A
+    closed row remains available for explicit manual revalidation from the UI.
+    """
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days)
+    items = db.scalars(
+        select(Opportunity).where(
+            Opportunity.source == source,
+            Opportunity.is_archived.is_(False),
+            Opportunity.consultation_deadline.is_not(None),
+            Opportunity.consultation_deadline < cutoff,
+        )
+    ).all()
+    changed = 0
+    for item in items:
+        if item.proposal_deadline is not None and item.proposal_deadline > now:
+            continue
         if not _terminal_status(item.status):
             item.status = "Proceso Culminado"
             changed += 1
@@ -254,6 +349,17 @@ def _schedule_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
+def _year_for_nomenclature(nomenclature: str, default: str) -> str:
+    """SEACE's search requires a specific "Año de la Convocatoria".
+
+    Most nomenclatures embed their own convocation year (e.g.
+    ``CP-ABR-5-2026-MDL/DEC-1``); prefer that over the run's overall
+    ``details_year`` so a target from a different year still resolves.
+    """
+    match = re.search(r"-(20\d{2})-", str(nomenclature or ""))
+    return match.group(1) if match else default
+
+
 def _recent_consultation_mask(raw: Any, days: int = 30) -> list[bool]:
     if raw is None or getattr(raw, "empty", True) or "consulta_fin" not in raw.columns:
         return []
@@ -281,6 +387,125 @@ def _recent_consultation_mask(raw: Any, days: int = 30) -> list[bool]:
 
 def _recent_consultation_rows(raw: Any, days: int = 30) -> int:
     return sum(_recent_consultation_mask(raw, days))
+
+
+def _peru_schedule_targets(
+    db: Session, source: str, raw: Any, *, allow_older: bool = False, only_new: bool = False
+) -> list[str]:
+    """Mark Peru rows that still need an authoritative SEACE schedule.
+
+    OCDS discovers the process and its publication date. A proposal deadline is
+    only considered validated after SEACE supplied it, so missing proposal dates
+    form a progressive queue across automatic runs.
+
+    ``only_new`` restricts eligibility to nomenclatures that are not yet saved
+    at all - used by automatic scheduled runs so they spend time/proxy budget
+    on genuinely new processes instead of re-searching SEACE for ones already
+    in the opportunities table (whether validated or still pending). Manual
+    revalidation (the per-row "Revalidar" action) does not set this flag, so it
+    can still target an already-saved, still-pending row on demand.
+    """
+    if raw is None or getattr(raw, "empty", True) or "Nomenclatura" not in raw.columns:
+        return []
+    nomenclatures = [str(value).strip() for value in raw["Nomenclatura"].dropna() if str(value).strip()]
+    if not nomenclatures:
+        return []
+    existing = db.scalars(
+        select(Opportunity).where(
+            Opportunity.source == source,
+            Opportunity.external_id.in_(nomenclatures),
+        )
+    ).all()
+    if only_new:
+        validated = {
+            str(item.external_id or item.nomenclature).strip().casefold() for item in existing
+        }
+    else:
+        validated = {
+            str(item.external_id or item.nomenclature).strip().casefold()
+            for item in existing
+            if item.schedule_source == "seace" and item.schedule_validated_at is not None
+        }
+    consultation_column = "consulta_fin"
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    ceiling = datetime.utcnow() + timedelta(days=30)
+    eligible: set[str] = set()
+    for _, row in raw.iterrows():
+        nomenclature = str(row.get("Nomenclatura") or "").strip()
+        if not nomenclature or nomenclature.casefold() in validated:
+            continue
+        if allow_older:
+            eligible.add(nomenclature.casefold())
+            continue
+        consultation_date = row.get(consultation_column)
+        try:
+            import pandas as pd
+            from src.normalizer import _parse_datetime_value
+
+            parsed = _parse_datetime_value(consultation_date)
+            consultation = None if pd.isna(parsed) else parsed.to_pydatetime()
+        except Exception:
+            consultation = None
+        if consultation is not None and cutoff <= consultation <= ceiling:
+            eligible.add(nomenclature.casefold())
+    target_keys = eligible
+    raw["replace_schedule"] = raw["Nomenclatura"].fillna("").astype(str).str.strip().str.casefold().isin(target_keys)
+    return [nomenclature for nomenclature in nomenclatures if nomenclature.casefold() in target_keys]
+
+
+def _peru_pending_schedule_rows(
+    db: Session,
+    source: str,
+    keyword: str,
+    limit: int,
+    *,
+    allow_older: bool = False,
+) -> list[dict[str, Any]]:
+    """Return saved Peru rows whose schedule has not been proven by SEACE.
+
+    This queue is independent from the current OCDS response. Consequently a
+    temporary empty OCDS window cannot prevent correction of stored deadlines.
+    """
+    candidates = db.scalars(
+        select(Opportunity).where(
+            Opportunity.source == source,
+            Opportunity.is_archived.is_(False),
+        ).order_by(Opportunity.updated_at.asc())
+    ).all()
+    rows: list[dict[str, Any]] = []
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=30)
+    ceiling = now + timedelta(days=30)
+    for item in candidates:
+        if item.schedule_source == "seace" and item.schedule_validated_at is not None:
+            continue
+        searchable = " ".join((item.entity or "", item.nomenclature or "", item.description or ""))
+        if keyword and not contains_complete_phrase(searchable, keyword):
+            continue
+        if item.consultation_deadline is None:
+            continue
+        if not allow_older and not (cutoff <= item.consultation_deadline <= ceiling):
+            continue
+        rows.append(
+            {
+                "Nomenclatura": item.nomenclature or item.external_id,
+                "Nombre o Sigla de la Entidad": item.entity,
+                "Descripcion de Objeto": item.description,
+                "Fecha y Hora de Publicacion": item.publication_date,
+                "consulta_fin": item.consultation_deadline,
+                "propuesta_fin": None,
+                "Estado Comercial": item.status,
+                "Vigencia": item.status,
+                "url_detalle": item.detail_url,
+                "Moneda": item.currency or "PEN",
+                "region": item.region or "Peru",
+                "replace_schedule": True,
+                "force_revalidation": True,
+            }
+        )
+        if len(rows) >= max(1, limit):
+            break
+    return rows
 
 
 def _merge_seace_schedule(raw, seace_raw, diagnostics: list[str]):
@@ -337,9 +562,66 @@ def _merge_seace_schedule(raw, seace_raw, diagnostics: list[str]):
                 merged.at[idx, column] = value
                 touched = True
         if touched:
+            # This marker is the authoritative distinction between an OCDS
+            # discovery date and a schedule actually read from SEACE/SV3.
+            merged.at[idx, "schedule_source"] = "seace"
+            merged.at[idx, "schedule_validated_at"] = datetime.utcnow()
             applied += 1
     diagnostics.append(f"OCDS cronograma SEACE aplicado por nomenclatura: {applied}/{len(merged)}")
     return merged
+
+
+def _seace_has_proposal_schedule(seace_raw, nomenclature: str) -> bool:
+    """Confirm that SEACE returned the requested process with Fin Propuesta.
+
+    A SEACE search can return a non-empty results table even when the exact
+    process was not enriched. Treating that table as success prevents the
+    keyword fallback and leaves the saved opportunity without its deadline.
+    """
+    if seace_raw is None or seace_raw.empty:
+        return False
+    requested_key = _schedule_key(nomenclature)
+    if not requested_key or "Nomenclatura" not in seace_raw.columns:
+        return False
+    for _, row in seace_raw.iterrows():
+        candidate_key = _schedule_key(row.get("Nomenclatura", ""))
+        if candidate_key != requested_key:
+            continue
+        proposal_end = row.get("propuesta_fin")
+        normalized_end = str(proposal_end).strip().casefold() if proposal_end is not None else ""
+        if normalized_end and normalized_end not in {"nan", "nat", "none"}:
+            return True
+    return False
+
+
+def _persist_peru_opportunities(
+    db: Session, raw, payload: dict, ocds_keyword: str, max_results: int, source: str, run_id: int
+) -> int:
+    """Normalize, score and upsert the current Peru dataframe.
+
+    Called twice per run: once right after OCDS discovery (before SEACE
+    enrichment, which is slower and more failure-prone - a proxy hiccup or
+    container restart there must not cost the OCDS discoveries themselves),
+    and again at the end once SEACE has filled in what proposal deadlines it
+    could. upsert_opportunities matches by nomenclature, so the second call
+    updates the same rows in place rather than duplicating them.
+    """
+    from src.normalizer import normalize_columns
+    from src.scoring import enriquecer_oportunidades
+    from .scoring_config_service import get_scoring_config
+
+    normalized = normalize_columns(raw) if raw is not None and not raw.empty else raw
+    normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
+    normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
+    normalized = _filter_dataframe_keyword(normalized, ocds_keyword)
+    enriched = (
+        enriquecer_oportunidades(normalized, get_scoring_config(db, "peru"))
+        if normalized is not None and not normalized.empty
+        else normalized
+    )
+    if enriched is not None and not enriched.empty and max_results:
+        enriched = enriched.head(max_results).copy()
+    return upsert_opportunities(db, enriched, source, run_id=run_id)
 
 
 def _mercado_publico_modes(include_grandes_compras: bool) -> list[tuple[str, str]]:
@@ -383,8 +665,9 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
         if payload.get("year") or payload.get("month") or payload.get("years") or payload.get("months"):
             period_text = f" | anos={payload.get('years') or payload.get('year') or '-'} | meses={payload.get('months') or payload.get('month') or '-'}"
         if payload.get("publication_date_from") or payload.get("publication_date_to"):
+            date_label = "cierres" if payload.get("date_filter_type") == "closing" else "publicados"
             period_text += (
-                f" | publicados={payload.get('publication_date_from') or '-'}.."
+                f" | {date_label}={payload.get('publication_date_from') or '-'}.."
                 f"{payload.get('publication_date_to') or '-'}"
             )
         if payload.get("active_only"):
@@ -462,17 +745,23 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                         f"Mercado Publico {mode}: {expired_count} procesos vencidos cerrados localmente"
                     )
                 try:
+                    saved_revalidation_rows = _manual_chile_revalidation_rows(
+                        db, persisted_source, keyword, payload
+                    ) if mode == "licitaciones" else []
                     raw, mode_diagnostics = search_mercado_publico(
                         keyword=keyword,
                         mode=mode,
                         headless=True,
                         max_results=max_results,
                         enrich_details=bool(payload.get("enrich_details", False)) and mode == "licitaciones",
-                        enrich_closed_details=not bool(payload.get("skip_detail_enrichment", False)),
+                        enrich_closed_details=bool(payload.get("revalidate_closed_detail", False)) and mode == "licitaciones",
+                        include_detail_attachments=False,
                         publication_date_from=payload.get("publication_date_from"),
                         publication_date_to=payload.get("publication_date_to"),
+                        date_filter_type=payload.get("date_filter_type", "publication"),
                         include_active_revalidation=bool(payload.get("automatic_incremental")) and mode == "licitaciones",
                         max_details=max_details,
+                        revalidation_rows=saved_revalidation_rows,
                         years=sorted(_period_values(payload, "years", "year")),
                         months=sorted(_period_values(payload, "months", "month")),
                         progress_callback=lambda value, message, start=stage_start: update_progress(start + value * 35, message),
@@ -488,7 +777,9 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                 normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
                 normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
                 normalized = _filter_incremental_rows(normalized, payload, existing_active, all_diagnostics)
-                normalized = _filter_dataframe_keyword(normalized, keyword)
+                # Mercado Publico already applied its own text search, which
+                # also matches indexed tender content not visible in the title.
+                # A second literal filter here discarded valid portal results.
                 from .scoring_config_service import get_scoring_config
                 enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "chile")) if normalized is not None and not normalized.empty else normalized
                 if enriched is not None and not enriched.empty and max_results:
@@ -511,9 +802,11 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                 headless=True,
                 max_results=max_results,
                 enrich_details=bool(payload.get("enrich_details", False)),
-                enrich_closed_details=not bool(payload.get("skip_detail_enrichment", False)),
+                enrich_closed_details=bool(payload.get("revalidate_closed_detail", False)),
+                include_detail_attachments=False,
                 publication_date_from=payload.get("publication_date_from"),
                 publication_date_to=payload.get("publication_date_to"),
+                date_filter_type=payload.get("date_filter_type", "publication"),
                 include_active_revalidation=bool(payload.get("automatic_incremental")) and mode == "licitaciones",
                 max_details=max_details,
                 years=sorted(_period_values(payload, "years", "year")),
@@ -538,9 +831,7 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                 enriched = enriched.head(max_results).copy()
             rows_found = upsert_opportunities(db, enriched, source, run_id=run.id)
         elif source == "oece_ocds_api":
-            from src.normalizer import normalize_columns
             from src.oece_ocds_connector import search_oece_ocds
-            from src.scoring import enriquecer_oportunidades
 
             selected_years = _int_list(payload, "years", "year", datetime.utcnow().year)
             selected_months = _int_list(payload, "months", "month", None)
@@ -558,53 +849,144 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
                 progress_callback=lambda value, message: update_progress(5 + value * 45, message),
                 cancel_callback=check_cancelled,
             )
-            existing_active = _existing_active_nomenclatures(db, source)
             expired_count = _finalize_expired_opportunities(db, source)
             if expired_count:
                 diagnostics.append(f"OCDS: {expired_count} procesos vencidos cerrados localmente")
+            stale_count = _finalize_stale_peru_consultations(db, source, days=30)
+            if stale_count:
+                diagnostics.append(f"OCDS: {stale_count} procesos cerrados por consultas vencidas hace mas de 30 dias")
+            existing_active = _existing_active_nomenclatures(db, source)
             raw = _filter_incremental_rows(raw, payload, existing_active, diagnostics)
-            update_progress(55, f"{len(raw)} coincidencias encontradas en OCDS")
-            recent_mask = _recent_consultation_mask(raw, days=30)
-            recent_rows = sum(recent_mask)
-            target_nomenclatures = (
-                raw.loc[recent_mask, "Nomenclatura"].dropna().astype(str).tolist()
-                if recent_mask and "Nomenclatura" in raw.columns
-                else []
+            import pandas as pd
+
+            requested_nomenclature = str(payload.get("nomenclature") or "").strip()
+            is_automatic_run = bool(payload.get("automatic_incremental")) and not requested_nomenclature
+            # Automatic scheduled runs skip this: re-injecting already-saved,
+            # still-pending rows here is what used to send known processes back
+            # into SEACE on every cycle. Manual revalidation (requested_nomenclature
+            # set, or an explicit non-automatic search) still wants it.
+            pending_rows = (
+                []
+                if is_automatic_run
+                else _peru_pending_schedule_rows(
+                    db,
+                    source,
+                    requested_nomenclature or keyword,
+                    max_details,
+                    allow_older=bool(requested_nomenclature),
+                )
             )
+            if pending_rows:
+                raw = pd.concat([raw, pd.DataFrame(pending_rows)], ignore_index=True, sort=False)
+                raw = raw.drop_duplicates(subset=["Nomenclatura"], keep="first")
+                diagnostics.append(f"Cola SEACE por fin de consultas incorporada: {len(pending_rows)} procesos")
+            update_progress(55, f"{len(raw)} coincidencias encontradas en OCDS")
+            target_nomenclatures = _peru_schedule_targets(
+                db,
+                source,
+                raw,
+                allow_older=bool(requested_nomenclature),
+                only_new=is_automatic_run,
+            )
+            if is_automatic_run:
+                diagnostics.append(
+                    f"Automático: solo procesos nuevos entran a SEACE ({len(target_nomenclatures)} nuevos)"
+                )
+            recent_rows = len(target_nomenclatures)
+            # Save what OCDS already found right away - the SEACE step below is
+            # slower and the one prone to proxy/browser interruptions. If it
+            # never finishes, these opportunities (status "Revisar cronograma
+            # SEACE", no proposal deadline yet) still land in the frontend for
+            # manual "Revalidar fecha" instead of being silently lost.
+            baseline_rows_found = _persist_peru_opportunities(
+                db, raw, payload, ocds_keyword, max_results, source, run.id
+            )
+            if baseline_rows_found:
+                diagnostics.append(f"OCDS guardado antes de SEACE: {baseline_rows_found} procesos")
             should_enrich_details = bool(payload.get("enrich_details", False)) or (
-                recent_rows > 0 and not bool(payload.get("skip_detail_enrichment", False))
+                recent_rows > 0
             )
             effective_max_details = max(max_details, recent_rows)
-            if should_enrich_details and raw is not None and not raw.empty and effective_max_details > 0:
-                from src.seace_browser_scraper import search_seace_public_browser
+            if not target_nomenclatures and should_enrich_details and raw is not None and not raw.empty:
+                # An explicit "leer detalles" toggle with no pending-schedule
+                # queue: still enrich individually, picking whichever rows in
+                # this result set have no proposal deadline yet.
+                missing_mask = (
+                    raw["propuesta_fin"].isna()
+                    if "propuesta_fin" in raw.columns
+                    else pd.Series([True] * len(raw), index=raw.index)
+                )
+                target_nomenclatures = [
+                    str(value).strip()
+                    for value in raw.loc[missing_mask, "Nomenclatura"].dropna().tolist()
+                    if str(value).strip()
+                ][:effective_max_details]
+            if should_enrich_details and raw is not None and not raw.empty and target_nomenclatures:
+                from src.seace_browser_scraper import search_seace_public_browser, search_seace_public_browser_targets
 
                 details_year = str(selected_years[0] if selected_years else year or datetime.utcnow().year)
-                seace_raw, seace_diagnostics = search_seace_public_browser(
-                    keyword=keyword,
-                    nomenclature=str(payload.get("nomenclature") or ""),
-                    year=details_year,
+                raw_by_key: dict[str, Any] = {}
+                for _, row in raw.iterrows():
+                    key = _schedule_key(row.get("Nomenclatura", ""))
+                    if key and key not in raw_by_key:
+                        raw_by_key[key] = row
+                seace_targets = []
+                for nomenclature in target_nomenclatures[:effective_max_details]:
+                    row = raw_by_key.get(_schedule_key(nomenclature))
+                    description = str(row.get("Descripcion de Objeto") or "").strip() if row is not None else ""
+                    seace_targets.append({
+                        "nomenclature": nomenclature,
+                        "keyword": (description or nomenclature)[:250],
+                        "year": _year_for_nomenclature(nomenclature, details_year),
+                    })
+                seace_raw, seace_diagnostics = search_seace_public_browser_targets(
+                    seace_targets,
                     version="Seace 3",
                     headless=True,
-                    enrich_details=True,
-                    max_details=effective_max_details,
-                    target_nomenclatures=target_nomenclatures,
                     progress_callback=lambda value, message: update_progress(58 + value * 27, message),
                     cancel_callback=check_cancelled,
                 )
                 diagnostics.extend([f"OCDS detalle SEACE: {item}" for item in (seace_diagnostics or [])])
+                if requested_nomenclature and not _seace_has_proposal_schedule(seace_raw, requested_nomenclature):
+                    from backend.app.radar_config import DEFAULT_RADAR_KEYWORDS
+
+                    target_row = raw[
+                        raw["Nomenclatura"].fillna("").astype(str).str.strip().str.casefold()
+                        == requested_nomenclature.casefold()
+                    ]
+                    searchable = " ".join(target_row.get("Descripcion de Objeto", pd.Series(dtype=str)).fillna("").astype(str))
+                    fallback_keywords = [
+                        candidate
+                        for candidate in DEFAULT_RADAR_KEYWORDS
+                        if contains_complete_phrase(searchable, candidate)
+                    ]
+                    for fallback_keyword in fallback_keywords:
+                        diagnostics.append(f"SEACE exacto sin fin de propuesta; reintento por palabra: {fallback_keyword}")
+                        fallback_raw, fallback_diagnostics = search_seace_public_browser(
+                            keyword=fallback_keyword,
+                            nomenclature="",
+                            year=_year_for_nomenclature(requested_nomenclature, details_year),
+                            version="Seace 3",
+                            headless=True,
+                            enrich_details=True,
+                            max_details=1,
+                            target_nomenclatures=[requested_nomenclature],
+                            progress_callback=lambda value, message: update_progress(58 + value * 27, message),
+                            cancel_callback=check_cancelled,
+                        )
+                        diagnostics.extend([f"OCDS detalle SEACE fallback: {item}" for item in (fallback_diagnostics or [])])
+                        if _seace_has_proposal_schedule(fallback_raw, requested_nomenclature):
+                            seace_raw = (
+                                pd.concat([seace_raw, fallback_raw], ignore_index=True, sort=False)
+                                if seace_raw is not None and not seace_raw.empty
+                                else fallback_raw
+                            )
+                            break
                 if recent_rows:
                     diagnostics.append(f"OCDS revalidacion automatica SEACE por consultas recientes: {recent_rows} procesos")
                 raw = _merge_seace_schedule(raw, seace_raw, diagnostics)
             update_progress(86, "Priorizando oportunidades Perú")
-            normalized = normalize_columns(raw) if raw is not None and not raw.empty else raw
-            normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
-            normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
-            normalized = _filter_dataframe_keyword(normalized, ocds_keyword)
-            from .scoring_config_service import get_scoring_config
-            enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "peru")) if normalized is not None and not normalized.empty else normalized
-            if enriched is not None and not enriched.empty and max_results:
-                enriched = enriched.head(max_results).copy()
-            rows_found = upsert_opportunities(db, enriched, source, run_id=run.id)
+            rows_found = _persist_peru_opportunities(db, raw, payload, ocds_keyword, max_results, source, run.id)
         else:
             raise RuntimeError(f"Fuente no soportada aun: {source}")
 
