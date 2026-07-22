@@ -27,6 +27,9 @@ properties:
       - identity: /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourcegroups/govradar-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/govradar-identity
         keyVaultUrl: https://govradarkv923fd1.vault.azure.net/secrets/smtp-password
         name: smtp-password
+      - identity: /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourcegroups/govradar-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/govradar-identity
+        keyVaultUrl: https://govradarkv923fd1.vault.azure.net/secrets/outbound-proxy-url
+        name: outbound-proxy-url
   environmentId: /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourceGroups/pgi-hughesnet-rg/providers/Microsoft.App/managedEnvironments/managedEnvironment-pgihughesnetrg-8fab
   template:
     containers:
@@ -39,6 +42,8 @@ properties:
         env:
           - name: DATABASE_URL
             secretRef: database-url
+          - name: OUTBOUND_PROXY_URL
+            secretRef: outbound-proxy-url
           - name: ENVIRONMENT
             value: azure
           - name: TRACKING_DATE_REFRESH_COUNTRY
