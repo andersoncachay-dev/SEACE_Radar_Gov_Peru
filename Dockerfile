@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 
-RUN chmod +x /app/azure/run-ingestion-worker.sh /app/azure/run-alert-worker.sh /app/azure/run-chile-region-backfill.sh /app/azure/run-chile-region-report.sh /app/azure/run-chile-region-manual-patch.sh
+RUN chmod +x /app/azure/run-ingestion-worker.sh /app/azure/run-alert-worker.sh /app/azure/run-chile-region-backfill.sh /app/azure/run-chile-region-report.sh /app/azure/run-chile-region-manual-patch.sh /app/azure/run-tracking-alerts-worker.sh /app/azure/run-tracking-date-refresh-worker.sh
 
 EXPOSE 8000
 

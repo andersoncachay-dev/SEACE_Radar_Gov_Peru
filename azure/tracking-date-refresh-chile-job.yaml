@@ -1,0 +1,64 @@
+identity:
+  type: UserAssigned
+  userAssignedIdentities:
+    ? /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourcegroups/govradar-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/govradar-identity
+    : {}
+location: Central US
+name: govradar-date-refresh-chile
+properties:
+  configuration:
+    triggerType: Schedule
+    scheduleTriggerConfig:
+      cronExpression: "*/15 * * * *"
+      parallelism: 1
+      replicaCompletionCount: 1
+    replicaTimeout: 840
+    replicaRetryLimit: 1
+    registries:
+      - identity: /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourcegroups/govradar-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/govradar-identity
+        server: pgihughesnetacr.azurecr.io
+    secrets:
+      - identity: /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourcegroups/govradar-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/govradar-identity
+        keyVaultUrl: https://govradarkv923fd1.vault.azure.net/secrets/database-url
+        name: database-url
+      - identity: /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourcegroups/govradar-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/govradar-identity
+        keyVaultUrl: https://govradarkv923fd1.vault.azure.net/secrets/smtp-username
+        name: smtp-username
+      - identity: /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourcegroups/govradar-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/govradar-identity
+        keyVaultUrl: https://govradarkv923fd1.vault.azure.net/secrets/smtp-password
+        name: smtp-password
+  environmentId: /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourceGroups/pgi-hughesnet-rg/providers/Microsoft.App/managedEnvironments/managedEnvironment-pgihughesnetrg-8fab
+  template:
+    containers:
+      - name: govradar-date-refresh-chile
+        image: pgihughesnetacr.azurecr.io/govradar-api:IMAGE_TAG
+        command: [/app/azure/run-tracking-date-refresh-worker.sh]
+        resources:
+          cpu: 1.0
+          memory: 2Gi
+        env:
+          - name: DATABASE_URL
+            secretRef: database-url
+          - name: ENVIRONMENT
+            value: azure
+          - name: TRACKING_DATE_REFRESH_COUNTRY
+            value: chile
+          - name: EMAIL_PROVIDER
+            value: smtp
+          - name: SMTP_HOST
+            value: smtp-relay.brevo.com
+          - name: SMTP_PORT
+            value: "587"
+          - name: SMTP_FROM
+            value: anderson.cachay08@gmail.com
+          - name: SMTP_USERNAME
+            secretRef: smtp-username
+          - name: SMTP_PASSWORD
+            secretRef: smtp-password
+          - name: FRONTEND_URL
+            value: https://crmprocesosgobierno.rodarlab.com
+          - name: TRACKING_DATE_REFRESH_INTERVAL_MINUTES
+            value: "180"
+          - name: ENABLE_SCHEDULER
+            value: "false"
+  workloadProfileName: Consumption

@@ -332,6 +332,41 @@ def _tracking_date_refresh_job_id(country: str) -> str:
     return f"tracking-date-refresh-{country}"
 
 
+def _tracking_date_refresh_next_key(country: str) -> str:
+    return f"tracking.date_refresh.{country}.next_update_at"
+
+
+def get_tracking_date_refresh_next_update(db, country: str, now: datetime | None = None) -> datetime:
+    """Due time persisted for the Azure Job's claim check (mirrors get_external_next_update)."""
+    next_update = _read_datetime_setting(db, _tracking_date_refresh_next_key(country))
+    if next_update is not None:
+        return next_update
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    next_update = current + timedelta(seconds=get_date_refresh_interval_seconds(db, country))
+    _write_setting(db, _tracking_date_refresh_next_key(country), next_update.isoformat())
+    db.commit()
+    return next_update
+
+
+def claim_tracking_date_refresh_run(country: str, now: datetime | None = None) -> tuple[bool, datetime]:
+    """Atomically advance one country's date-refresh due time when its Azure job may run."""
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"País no soportado: {country}")
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    db = SessionLocal()
+    try:
+        due_at = get_tracking_date_refresh_next_update(db, normalized_country, current)
+        if current < due_at:
+            return False, due_at
+        next_update = current + timedelta(seconds=get_date_refresh_interval_seconds(db, normalized_country))
+        _write_setting(db, _tracking_date_refresh_next_key(normalized_country), next_update.isoformat())
+        db.commit()
+        return True, next_update
+    finally:
+        db.close()
+
+
 def tracking_date_refresh_status(country: str) -> dict[str, object]:
     normalized_country = str(country or "").strip().lower()
     if normalized_country not in SUPPORTED_COUNTRIES:
@@ -340,18 +375,22 @@ def tracking_date_refresh_status(country: str) -> dict[str, object]:
     db = SessionLocal()
     try:
         interval_seconds = get_date_refresh_interval_seconds(db, normalized_country)
+        external_next_run = (
+            get_tracking_date_refresh_next_update(db, normalized_country) if settings.external_scheduler_enabled else None
+        )
     finally:
         db.close()
     days, remainder = divmod(interval_seconds, 86_400)
     hours, remainder = divmod(remainder, 3_600)
     minutes = remainder // 60
+    next_run = job.next_run_time if job and job.next_run_time else external_next_run
     return {
-        "enabled": bool(settings.enable_scheduler and job is not None),
+        "enabled": bool((settings.enable_scheduler and job is not None) or settings.external_scheduler_enabled),
         "days": days,
         "hours": hours,
         "minutes": minutes,
         "interval_seconds": interval_seconds,
-        "next_update_at": job.next_run_time.isoformat() if job and job.next_run_time else None,
+        "next_update_at": next_run.isoformat() if next_run is not None else None,
     }
 
 
@@ -362,6 +401,13 @@ def update_tracking_date_refresh_interval(country: str, interval_seconds: int, u
     db = SessionLocal()
     try:
         save_date_refresh_interval_seconds(db, normalized_country, interval_seconds, user_id)
+        _write_setting(
+            db,
+            _tracking_date_refresh_next_key(normalized_country),
+            (datetime.now(timezone.utc) + timedelta(seconds=interval_seconds)).isoformat(),
+            user_id,
+        )
+        db.commit()
     finally:
         db.close()
     if scheduler is not None:
@@ -376,6 +422,32 @@ def update_tracking_date_refresh_interval(country: str, interval_seconds: int, u
             max_instances=1,
         )
     return tracking_date_refresh_status(normalized_country)
+
+
+def _tracking_time_alerts_next_key() -> str:
+    return "tracking.time_alerts.next_update_at"
+
+
+def claim_tracking_time_alerts_run(now: datetime | None = None) -> tuple[bool, datetime]:
+    """Atomically advance the time-status alert due time when its Azure job may run."""
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    interval_seconds = max(60, settings.tracking_alert_interval_minutes * 60)
+    db = SessionLocal()
+    try:
+        key = _tracking_time_alerts_next_key()
+        due_at = _read_datetime_setting(db, key)
+        if due_at is None:
+            due_at = current + timedelta(seconds=interval_seconds)
+            _write_setting(db, key, due_at.isoformat())
+            db.commit()
+        if current < due_at:
+            return False, due_at
+        next_update = current + timedelta(seconds=interval_seconds)
+        _write_setting(db, key, next_update.isoformat())
+        db.commit()
+        return True, next_update
+    finally:
+        db.close()
 
 
 def scheduler_status(country: str) -> dict[str, object]:

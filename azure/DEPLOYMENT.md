@@ -106,6 +106,15 @@ Usar [ingestion-peru-job.yaml](ingestion-peru-job.yaml) y [ingestion-chile-job.y
 
 Usar [alert-job.yaml](alert-job.yaml), reemplazar los marcadores y establecer los mismos secretos de base de datos y comunicaciones. El cron `*/5 * * * *` se evalua en UTC, aunque en este caso el intervalo no depende de la zona horaria.
 
+### 9. Workers del modulo Seguimiento de Oportunidades
+
+El scheduler embebido esta desactivado en Azure (`ENABLE_SCHEDULER=false`), asi que estas dos automatizaciones del modulo de Seguimiento tambien corren como Container Apps Jobs, con el mismo patron "claim" que ya usa la ingesta (`claim_external_scheduler_run`): el cron dispara con frecuencia, pero el trabajo real solo se ejecuta cuando ya se cumplio el intervalo guardado en `app_settings` (el mismo intervalo editable desde Sistema > Verificacion automatica de fechas).
+
+- [tracking-alerts-job.yaml](tracking-alerts-job.yaml): alertas por correo "Atender"/"Urgente" cuando una etapa sin completar se acerca a su fecha limite. Intervalo por defecto 30 minutos (`TRACKING_ALERT_INTERVAL_MINUTES`), sin panel de administracion propio todavia.
+- [tracking-date-refresh-peru-job.yaml](tracking-date-refresh-peru-job.yaml) y [tracking-date-refresh-chile-job.yaml](tracking-date-refresh-chile-job.yaml): revalidan contra SEACE/Mercado Publico las fechas de oportunidades en seguimiento activo cuya propuesta aun no vence. Intervalo por defecto 3 horas, editable por pais desde Sistema > Verificacion automatica de fechas.
+
+Reemplazar los marcadores igual que en los jobs anteriores y establecer los mismos secretos de base de datos y comunicaciones.
+
 ### 9. Prueba de aceptacion
 
 1. Crear una regla interna y verificar estado `sent`.
