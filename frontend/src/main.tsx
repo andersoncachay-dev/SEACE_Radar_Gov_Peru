@@ -10,15 +10,17 @@ const ArchivedProcesses = lazy(() => import("./pages/OpportunitiesPage").then((m
 const Alerts = lazy(() => import("./pages/AlertsPage"));
 const Users = lazy(() => import("./pages/UsersPage"));
 const System = lazy(() => import("./pages/SystemPage"));
+const OpportunityTrackingChile = lazy(() => import("./pages/OpportunityTrackingPage"));
+const OpportunityTrackingPeru = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingPeru })));
 
-type Page = "Inicio Peru" | "Inicio Chile" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Alertas" | "Usuarios" | "Sistema";
+type Page = "Inicio Peru" | "Inicio Chile" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Alertas" | "Seguimiento de Oportunidades Peru" | "Seguimiento de Oportunidades Chile" | "Usuarios" | "Sistema";
 
 type NavIconName = "home" | "target" | "globe" | "database" | "money" | "bell" | "users" | "settings";
 
 const profilePages: Record<AccessProfile, Page[]> = {
-  peru: ["Inicio Peru", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Alertas"],
-  chile: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Alertas"],
-  both: ["Inicio Peru", "Inicio Chile", "Oportunidades Chile LMP-GC", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Histórico Procesos Eliminados CL", "Alertas"],
+  peru: ["Inicio Peru", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Alertas", "Seguimiento de Oportunidades Peru"],
+  chile: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Alertas", "Seguimiento de Oportunidades Chile"],
+  both: ["Inicio Peru", "Inicio Chile", "Oportunidades Chile LMP-GC", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Histórico Procesos Eliminados CL", "Alertas", "Seguimiento de Oportunidades Peru", "Seguimiento de Oportunidades Chile"],
 };
 
 const rodarLogoUrl = "/assets/Rodarfondoblanco.png";
@@ -32,13 +34,15 @@ const navIcons: Record<Page, NavIconName> = {
   "Histórico Procesos Eliminados PE": "database",
   "Histórico Procesos Eliminados CL": "database",
   Alertas: "bell",
+  "Seguimiento de Oportunidades Peru": "target",
+  "Seguimiento de Oportunidades Chile": "target",
   Usuarios: "users",
   Sistema: "settings",
 };
 
 const launcherNavGroups: Array<{ label: string; pages: Page[] }> = [
-  { label: "Perú", pages: ["Inicio Peru", "Oportunidades OCDS Peru", "Oportunidades", "Histórico Procesos Eliminados PE"] },
-  { label: "Chile", pages: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL"] },
+  { label: "Perú", pages: ["Inicio Peru", "Oportunidades OCDS Peru", "Oportunidades", "Histórico Procesos Eliminados PE", "Seguimiento de Oportunidades Peru"] },
+  { label: "Chile", pages: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Seguimiento de Oportunidades Chile"] },
   { label: "Operación", pages: ["Alertas"] },
   { label: "Administración", pages: ["Usuarios", "Sistema"] },
 ];
@@ -52,6 +56,8 @@ const launcherLabels: Record<Page, string> = {
   "Histórico Procesos Eliminados PE": "Histórico Procesos Eliminados PE",
   "Histórico Procesos Eliminados CL": "Histórico Procesos Eliminados CL",
   Alertas: "Alertas",
+  "Seguimiento de Oportunidades Peru": "Seguimiento de Oportunidades Perú",
+  "Seguimiento de Oportunidades Chile": "Seguimiento de Oportunidades Chile",
   Usuarios: "Usuarios",
   Sistema: "Sistema",
 };
@@ -65,6 +71,8 @@ const launcherDescriptions: Record<Page, string> = {
   "Histórico Procesos Eliminados PE": "Respaldo de procesos retirados de Perú",
   "Histórico Procesos Eliminados CL": "Respaldo de procesos retirados de Chile",
   Alertas: "Reglas, canales y notificaciones",
+  "Seguimiento de Oportunidades Peru": "Fases, etapas y responsables — Perú",
+  "Seguimiento de Oportunidades Chile": "Fases, etapas y responsables — Chile",
   Usuarios: "Accesos, perfiles y permisos",
   Sistema: "Ejecuciones y configuración",
 };
@@ -381,9 +389,9 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   }, [currentUser, page, visibleNav]);
 
   useEffect(() => {
-    if (page === "Inicio Chile" || page === "Oportunidades Chile LMP-GC" || page === "Histórico Procesos Eliminados CL") {
+    if (page === "Inicio Chile" || page === "Oportunidades Chile LMP-GC" || page === "Histórico Procesos Eliminados CL" || page === "Seguimiento de Oportunidades Chile") {
       setCountry("Chile");
-    } else if (page === "Inicio Peru" || page === "Oportunidades" || page === "Oportunidades OCDS Peru" || page === "Histórico Procesos Eliminados PE") {
+    } else if (page === "Inicio Peru" || page === "Oportunidades" || page === "Oportunidades OCDS Peru" || page === "Histórico Procesos Eliminados PE" || page === "Seguimiento de Oportunidades Peru") {
       setCountry("Peru");
     }
   }, [page]);
@@ -544,14 +552,16 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
         {backend.error ? <div className="notice danger">{backend.error}</div> : null}
         <Suspense fallback={<div className="panel module-loading" role="status">Cargando módulo…</div>}>
         {!currentUser ? <div className="panel module-loading" role="status">Validando sesión y perfil…</div> : null}
-        {currentUser && page === "Inicio Peru" ? <Home country="Peru" token={token} isAdmin={currentUser.role === "admin"} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} onSearchKeyword={(keyword) => openKeywordSearch("Peru", keyword)} onOpenLegal={setLegalView} /> : null}
-        {currentUser && page === "Inicio Chile" ? <Home country="Chile" token={token} isAdmin={currentUser.role === "admin"} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} onSearchKeyword={(keyword) => openKeywordSearch("Chile", keyword)} onOpenLegal={setLegalView} /> : null}
+        {currentUser && page === "Inicio Peru" ? <Home country="Peru" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} /> : null}
+        {currentUser && page === "Inicio Chile" ? <Home country="Chile" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} /> : null}
         {currentUser && page === "Oportunidades" ? <Opportunities country="Peru" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} /> : null}
         {currentUser && page === "Oportunidades Chile LMP-GC" ? <Opportunities country="Chile" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} prefillKeyword={keywordSearchHandoff?.country === "Chile" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
         {currentUser && page === "Oportunidades OCDS Peru" ? <Opportunities country="Peru" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} variant="ocds" prefillKeyword={keywordSearchHandoff?.country === "Peru" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
         {page === "Histórico Procesos Eliminados PE" ? <ArchivedProcesses country="Peru" token={token} onRestored={backend.refresh} /> : null}
         {page === "Histórico Procesos Eliminados CL" ? <ArchivedProcesses country="Chile" token={token} onRestored={backend.refresh} /> : null}
         {page === "Alertas" ? <Alerts token={token} rules={backend.rules} alerts={backend.alerts} refresh={backend.refresh} /> : null}
+        {currentUser && page === "Seguimiento de Oportunidades Peru" ? <OpportunityTrackingPeru token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
+        {currentUser && page === "Seguimiento de Oportunidades Chile" ? <OpportunityTrackingChile token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
         {page === "Usuarios" && currentUser?.role === "admin" ? <Users token={token} currentUserId={currentUser.id} /> : null}
         {page === "Sistema" ? (
           <System
@@ -562,6 +572,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
             legalLoadError={legalDocuments.error}
             onLegalDocumentUpdated={(document) => legalDocuments.setDocuments((current) => ({ ...current, [document.key]: document }))}
             onOpenLegal={setLegalView}
+            onSearchKeyword={openKeywordSearch}
             versionLabel={versionLabel}
             onVersionUpdated={setVersionLabel}
           />

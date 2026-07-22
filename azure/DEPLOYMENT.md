@@ -37,6 +37,7 @@ En Azure Communication Services:
 2. Verificar el dominio corporativo o comenzar con el dominio administrado por Azure.
 3. Conectar el dominio al recurso de Communication Services.
 4. Registrar el WhatsApp Business Account y el numero emisor.
+   - Numero de negocio para Chile (20 de julio de 2026): `+56 9 4899 9539`.
 5. Crear y conseguir aprobacion para una plantilla `govradar_alert` en español.
 
 WhatsApp no permite iniciar una conversacion comercial con texto libre. Fuera de la ventana de 24 horas se debe enviar una plantilla aprobada. El worker usa esa plantilla para alertas proactivas.

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api, LegalDocumentRecord, Run, SchedulerIntervalConfig } from "../api";
-import { ConfidentialityContent, Empty, LegalDialog, LegalDocumentsMap, LegalView, LockIcon, formatDate, updateIntervalLabel } from "../shared";
+import { api, LegalDocumentRecord, RadarKeyword, Run, SchedulerIntervalConfig, TrackingDateRefreshStatus } from "../api";
+import { ConfidentialityContent, Country, Empty, LegalDialog, LegalDocumentsMap, LegalView, LockIcon, formatDate, updateIntervalLabel, useRadarKeywords } from "../shared";
 
 export function SchedulerScheduleAdmin({ token }: { token: string }) {
   const [configs, setConfigs] = useState<Record<"peru" | "chile", SchedulerIntervalConfig | null>>({ peru: null, chile: null });
@@ -86,6 +86,218 @@ export function SchedulerScheduleAdmin({ token }: { token: string }) {
   );
 }
 
+export function RadarKeywordsAdmin({
+  token,
+  onOpenLegal,
+  onSearchKeyword,
+}: {
+  token: string;
+  onOpenLegal: (view: LegalView) => void;
+  onSearchKeyword: (country: Country, keyword: string) => void;
+}) {
+  const [keywordCountry, setKeywordCountry] = useState<Country>("Peru");
+  const [newKeyword, setNewKeyword] = useState("");
+  const [keywordSaving, setKeywordSaving] = useState(false);
+  const [keywordNotice, setKeywordNotice] = useState("");
+  const radarKeywordState = useRadarKeywords(token, keywordCountry);
+
+  useEffect(() => {
+    setNewKeyword("");
+    setKeywordNotice("");
+  }, [keywordCountry]);
+
+  async function addRadarKeyword(event: React.FormEvent) {
+    event.preventDefault();
+    const cleanKeyword = newKeyword.trim();
+    if (!cleanKeyword) return;
+    setKeywordSaving(true);
+    setKeywordNotice("");
+    radarKeywordState.setError("");
+    try {
+      await radarKeywordState.add(cleanKeyword);
+      setNewKeyword("");
+      setKeywordNotice(`“${cleanKeyword}” se agregó a ${keywordCountry}.`);
+    } catch (err) {
+      radarKeywordState.setError(err instanceof Error ? err.message : "No se pudo agregar la palabra clave");
+    } finally {
+      setKeywordSaving(false);
+    }
+  }
+
+  async function removeRadarKeyword(item: RadarKeyword) {
+    if (item.id === null) return;
+    setKeywordSaving(true);
+    setKeywordNotice("");
+    radarKeywordState.setError("");
+    try {
+      await radarKeywordState.remove(item.id);
+      setKeywordNotice(`“${item.keyword}” dejó de usarse en nuevas búsquedas.`);
+    } catch (err) {
+      radarKeywordState.setError(err instanceof Error ? err.message : "No se pudo retirar la palabra clave");
+    } finally {
+      setKeywordSaving(false);
+    }
+  }
+
+  return (
+    <section className="panel keyword-manager-panel" aria-labelledby="keyword-manager-title">
+      <div className="keyword-manager-heading">
+        <div>
+          <p className="overline">Radar automático</p>
+          <h2 id="keyword-manager-title">Palabras clave de {keywordCountry === "Peru" ? "Perú" : "Chile"}</h2>
+          <p>Todas las palabras son editables. Retirarlas no borra los procesos históricos ya detectados.</p>
+        </div>
+        <div className="country-config-tabs" role="tablist" aria-label="País a configurar">
+          {(["Peru", "Chile"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={keywordCountry === option}
+              className={keywordCountry === option ? "active" : ""}
+              onClick={() => setKeywordCountry(option)}
+            >
+              {option === "Peru" ? "Perú" : "Chile"}
+            </button>
+          ))}
+        </div>
+      </div>
+      {radarKeywordState.loading ? <span className="keyword-loading">Actualizando…</span> : null}
+      <div className="keyword-chip-list">
+        {radarKeywordState.keywords.map((item) => (
+          <span className="keyword-config-chip" key={`${item.id ?? "pending"}-${item.keyword}`}>
+            {item.keyword}
+            <span className="keyword-chip-actions">
+              <button className="keyword-search-button" type="button" onClick={() => onSearchKeyword(keywordCountry, item.keyword)}>Buscar y sumar</button>
+              <button
+                className="keyword-remove-button"
+                type="button"
+                aria-label={`Retirar ${item.keyword}`}
+                disabled={keywordSaving || item.id === null}
+                onClick={() => removeRadarKeyword(item)}
+              >
+                ×
+              </button>
+            </span>
+          </span>
+        ))}
+      </div>
+      <form className="keyword-add-form" onSubmit={addRadarKeyword}>
+        <label htmlFor={`new-keyword-${keywordCountry}`}>Nueva palabra o frase</label>
+        <div>
+          <input
+            id={`new-keyword-${keywordCountry}`}
+            value={newKeyword}
+            onChange={(event) => setNewKeyword(event.target.value)}
+            placeholder="Ej. banda ancha satelital"
+            maxLength={80}
+          />
+          <button className="primary" type="submit" disabled={keywordSaving || newKeyword.trim().length < 2}>
+            {keywordSaving ? "Guardando…" : "Agregar"}
+          </button>
+        </div>
+      </form>
+      {radarKeywordState.error ? <div className="notice danger" role="alert">{radarKeywordState.error}</div> : null}
+      {keywordNotice ? <div className="notice success" role="status">{keywordNotice}</div> : null}
+      <div className="keyword-confidentiality-note">
+        <LockIcon className="keyword-lock-icon" />
+        <p>
+          Tus palabras clave y criterios de búsqueda están protegidos bajo nuestra estricta{" "}
+          <button type="button" onClick={() => onOpenLegal("confidentiality")}>Cláusula de Confidencialidad</button>.
+          Rodar Consulting no comparte tus estrategias comerciales.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+export function TrackingDateRefreshAdmin({ token }: { token: string }) {
+  const [configs, setConfigs] = useState<Record<"peru" | "chile", TrackingDateRefreshStatus | null>>({ peru: null, chile: null });
+  const [savingCountry, setSavingCountry] = useState<"peru" | "chile" | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    Promise.all((["peru", "chile"] as const).map((country) => api.trackingDateRefreshStatus(token, country)))
+      .then(([peru, chile]) => { if (active) setConfigs({ peru, chile }); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "No se pudo cargar la verificación automática de fechas"); });
+    return () => { active = false; };
+  }, [token]);
+
+  function updateValue(country: "peru" | "chile", field: "days" | "hours" | "minutes", value: number) {
+    setConfigs((current) => {
+      const existing = current[country];
+      if (!existing) return current;
+      const updated = { ...existing, [field]: value };
+      updated.interval_seconds = updated.days * 86_400 + updated.hours * 3_600 + updated.minutes * 60;
+      return { ...current, [country]: updated };
+    });
+    setNotice("");
+    setError("");
+  }
+
+  async function save(country: "peru" | "chile") {
+    const config = configs[country];
+    if (!config) return;
+    if (config.days === 0 && config.hours === 0 && config.minutes === 0) {
+      setError("El intervalo debe ser de al menos un minuto.");
+      return;
+    }
+    setSavingCountry(country);
+    setError("");
+    setNotice("");
+    try {
+      const updated = await api.updateTrackingDateRefreshInterval(token, country, config);
+      setConfigs((current) => ({ ...current, [country]: updated }));
+      setNotice(`Verificación automática de ${country === "peru" ? "Perú" : "Chile"} actualizada. La próxima corrida ya usa el nuevo intervalo.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo actualizar la verificación automática de fechas");
+    } finally {
+      setSavingCountry(null);
+    }
+  }
+
+  return (
+    <section className="panel scheduler-admin-panel" aria-labelledby="tracking-date-refresh-admin-title">
+      <div className="scheduler-admin-heading">
+        <div>
+          <p className="overline">Seguimiento de Oportunidades</p>
+          <h2 id="tracking-date-refresh-admin-title">Verificación automática de fechas (SEACE Perú / Mercado Público Chile)</h2>
+          <p>
+            Mientras una oportunidad en seguimiento activo no venza su fecha de propuesta, revisamos su ficha en el portal por si
+            la entidad movió el Fin de Consultas, la Buena Pro u otra fecha. Define cada cuánto se ejecuta esta revisión, por país.
+          </p>
+        </div>
+      </div>
+      <div className="scheduler-country-grid">
+        {(["peru", "chile"] as const).map((country) => {
+          const config = configs[country];
+          const label = country === "peru" ? "Perú (SEACE)" : "Chile (Mercado Público)";
+          return (
+            <article className="scheduler-country-config" key={country} aria-busy={!config}>
+              <div className="scheduler-country-heading"><strong>{label}</strong><span>{config ? `Cada ${updateIntervalLabel(config.interval_seconds)}` : "Cargando…"}</span></div>
+              {config ? <>
+                <div className="scheduler-duration-fields">
+                  <label>Días<input type="number" min="0" max="30" value={config.days} onChange={(event) => updateValue(country, "days", Math.max(0, Math.min(30, Number(event.target.value))))} /></label>
+                  <label>Horas<input type="number" min="0" max="23" value={config.hours} onChange={(event) => updateValue(country, "hours", Math.max(0, Math.min(23, Number(event.target.value))))} /></label>
+                  <label>Minutos<input type="number" min="0" max="59" value={config.minutes} onChange={(event) => updateValue(country, "minutes", Math.max(0, Math.min(59, Number(event.target.value))))} /></label>
+                </div>
+                <div className="scheduler-country-actions">
+                  <small>{config.next_update_at ? `Próxima verificación: ${new Date(config.next_update_at).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })}` : "El scheduler se encuentra pausado"}</small>
+                  <button className="primary" type="button" onClick={() => void save(country)} disabled={savingCountry !== null}>{savingCountry === country ? "Guardando…" : `Guardar ${country === "peru" ? "Perú" : "Chile"}`}</button>
+                </div>
+              </> : <p>Cargando configuración…</p>}
+            </article>
+          );
+        })}
+      </div>
+      {error ? <div className="notice danger" role="alert">{error}</div> : null}
+      {notice ? <div className="notice success" role="status">{notice}</div> : null}
+    </section>
+  );
+}
+
 export function System({
   token,
   runs,
@@ -94,6 +306,7 @@ export function System({
   legalLoadError,
   onLegalDocumentUpdated,
   onOpenLegal,
+  onSearchKeyword,
   versionLabel,
   onVersionUpdated,
 }: {
@@ -104,6 +317,7 @@ export function System({
   legalLoadError: string;
   onLegalDocumentUpdated: (document: LegalDocumentRecord) => void;
   onOpenLegal: (view: LegalView) => void;
+  onSearchKeyword: (country: Country, keyword: string) => void;
   versionLabel: string;
   onVersionUpdated: (versionLabel: string) => void;
 }) {
@@ -237,6 +451,8 @@ export function System({
   return (
     <div className="system-module">
       <SchedulerScheduleAdmin token={token} />
+      <RadarKeywordsAdmin token={token} onOpenLegal={onOpenLegal} onSearchKeyword={onSearchKeyword} />
+      <TrackingDateRefreshAdmin token={token} />
       <section className="panel scoring-admin-panel" aria-labelledby="scoring-admin-title">
         <div className="scoring-admin-heading">
           <div>

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, ApiError, DocumentRecord, Opportunity, Run } from "../api";
-import { CommercialClass, ConfirmModal, Country, Empty, HighlightedText, RunProgress, addKeyword, commercialSignal, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, normalizedSearchTerm, parseDate, presentationDeadline, sourceBelongsToCountry, uniqueKeywords, useRadarKeywords } from "../shared";
+import { CommercialClass, ConfirmModal, Country, Empty, HighlightedText, RunProgress, addKeyword, commercialSignal, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, normalizedSearchTerm, parseDate, presentationDeadline, sourceBelongsToCountry, uniqueKeywords, useDismissableMenu, useRadarKeywords } from "../shared";
 
 export function documentTypeLabel(doc: DocumentRecord): string {
   const fromType = (doc.document_type || "").trim().toLowerCase();
@@ -360,9 +360,9 @@ export function Opportunities({
   const [keywordRemovalError, setKeywordRemovalError] = useState("");
   const [prefillNotice, setPrefillNotice] = useState("");
   const [periodValidationError, setPeriodValidationError] = useState("");
-  const [opportunitySummaryOpen, setOpportunitySummaryOpen] = useState(() => !window.matchMedia("(max-width: 720px)").matches);
-  const [requiredFiltersOpen, setRequiredFiltersOpen] = useState(() => !window.matchMedia("(max-width: 720px)").matches);
-  const [optionalFiltersOpen, setOptionalFiltersOpen] = useState(() => !window.matchMedia("(max-width: 720px)").matches);
+  const [opportunitySummaryOpen, setOpportunitySummaryOpen] = useState(false);
+  const [requiredFiltersOpen, setRequiredFiltersOpen] = useState(false);
+  const [optionalFiltersOpen, setOptionalFiltersOpen] = useState(false);
   const [runResultRows, setRunResultRows] = useState<Opportunity[]>([]);
   const [focusedRunResultIds, setFocusedRunResultIds] = useState<Set<number> | null>(null);
   const visibleRuns = useMemo(() => runs.filter((run) => sourceBelongsToView(run.source, country, variant)), [runs, country, variant]);
@@ -1321,7 +1321,7 @@ export function Opportunities({
               </>
             ) : null}
             <datalist id={keywordSuggestionListId}>
-              {radarKeywordState.keywords.map((item) => <option value={item.keyword} key={`${item.is_default ? "base" : item.id}-${item.keyword}`} />)}
+              {radarKeywordState.keywords.map((item) => <option value={item.keyword} key={`${item.id ?? "base"}-${item.keyword}`} />)}
             </datalist>
           </div>
           <div className="required-filter-grid">
@@ -2042,8 +2042,32 @@ export function OpportunityTable({
   const [revalidatingIds, setRevalidatingIds] = useState<Set<number>>(new Set());
   const [unavailableProposalIds, setUnavailableProposalIds] = useState<Set<number>>(new Set());
   const [manualProposalUpdates, setManualProposalUpdates] = useState<Map<number, string>>(new Map());
+  const [reviewStatusMap, setReviewStatusMap] = useState<Map<number, "standby" | "resolved">>(new Map());
+  const [trackedOpportunityIds, setTrackedOpportunityIds] = useState<Set<number>>(new Set());
+  const [reviewHistoryOpportunityId, setReviewHistoryOpportunityId] = useState<number | null>(null);
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (actionMode !== "archive" || !rows.length) return;
+    const ids = rows.map((item) => item.id);
+    api.opportunityReviews(token, ids)
+      .then((reviews) => setReviewStatusMap(new Map(reviews.map((review) => [review.opportunity_id, review.status]))))
+      .catch(() => undefined);
+    api.opportunityTrackings(token, { opportunityIds: ids })
+      .then((trackings) => setTrackedOpportunityIds(new Set(trackings.map((tracking) => tracking.opportunity_id))))
+      .catch(() => undefined);
+  }, [actionMode, token, rows]);
+
+  async function handleSendToTracking(item: Opportunity) {
+    await api.startOpportunityTracking(token, item.id);
+    setTrackedOpportunityIds((current) => new Set(current).add(item.id));
+  }
+
+  async function handleLeaveInReview(item: Opportunity, comment: string) {
+    await api.startOpportunityReview(token, item.id, comment);
+    setReviewStatusMap((current) => new Map(current).set(item.id, "standby"));
+  }
 
   useEffect(() => {
     setPendingRemoval(null);
@@ -2281,6 +2305,11 @@ export function OpportunityTable({
                 onUpdateArchiveReason={onUpdateArchiveReason}
                 isActive={activeRowId === item.id}
                 onActivate={() => setActiveRowId(item.id)}
+                isTracked={trackedOpportunityIds.has(item.id)}
+                hasReview={reviewStatusMap.get(item.id) === "standby"}
+                onSendToTracking={actionMode === "archive" ? handleSendToTracking : undefined}
+                onLeaveInReview={actionMode === "archive" ? handleLeaveInReview : undefined}
+                onOpenReviewHistory={actionMode === "archive" ? (target) => setReviewHistoryOpportunityId(target.id) : undefined}
               />
             ))}
           </tbody>
@@ -2292,6 +2321,13 @@ export function OpportunityTable({
           opportunity={selectedOpportunity}
           token={token}
           onClose={() => setSelectedOpportunity(null)}
+        />
+      ) : null}
+      {reviewHistoryOpportunityId !== null ? (
+        <OpportunityReviewHistoryModal
+          opportunityId={reviewHistoryOpportunityId}
+          token={token}
+          onClose={() => setReviewHistoryOpportunityId(null)}
         />
       ) : null}
       {pendingRemoval && actionMode === "archive" ? (
@@ -2416,6 +2452,200 @@ export function ArchiveReasonCell({ item, onSave }: { item: Opportunity; onSave:
   );
 }
 
+export function ManageOpportunityMenu({
+  item,
+  isTracked,
+  hasReview,
+  onSendToTracking,
+  onLeaveInReview,
+}: {
+  item: Opportunity;
+  isTracked: boolean;
+  hasReview: boolean;
+  onSendToTracking: (item: Opportunity) => Promise<void>;
+  onLeaveInReview: (item: Opportunity, comment: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"menu" | "review">("menu");
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const menuRef = useDismissableMenu(open, () => {
+    setOpen(false);
+    setMode("menu");
+    setError("");
+  });
+
+  async function handleSendToTracking() {
+    setBusy(true);
+    setError("");
+    try {
+      await onSendToTracking(item);
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo enviar a seguimiento");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleLeaveInReview() {
+    setBusy(true);
+    setError("");
+    try {
+      await onLeaveInReview(item, comment.trim());
+      setOpen(false);
+      setMode("menu");
+      setComment("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo dejar en revisión");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="manage-menu-anchor" ref={menuRef as React.RefObject<HTMLDivElement>}>
+      <button className="manage-menu-button" type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="true" aria-expanded={open}>
+        Gestionar
+      </button>
+      {open ? (
+        <div className="manage-menu-panel" role="menu">
+          {mode === "menu" ? (
+            <>
+              <button className="manage-menu-item" type="button" onClick={() => setMode("review")}>
+                {hasReview ? "Actualizar Revisión" : "Dejar en Revisión"}
+              </button>
+              <button className="manage-menu-item" type="button" disabled={isTracked || busy} onClick={handleSendToTracking}>
+                {isTracked ? "Ya en Seguimiento" : "Enviar a Seguimiento"}
+              </button>
+            </>
+          ) : (
+            <div className="manage-menu-review">
+              <textarea
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                placeholder="Comentario (opcional)"
+                rows={3}
+                maxLength={2000}
+                autoFocus
+              />
+              <div className="manage-menu-review-actions">
+                <button className="ghost" type="button" onClick={() => setMode("menu")}>Volver</button>
+                <button className="primary" type="button" onClick={handleLeaveInReview} disabled={busy}>
+                  {busy ? "Guardando..." : "Guardar"}
+                </button>
+              </div>
+            </div>
+          )}
+          {error ? <small className="manage-menu-error" role="alert">{error}</small> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function ReviewBadge({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button className="review-badge" type="button" onClick={onOpen} title="Ver comentarios de revisión" aria-label="Ver comentarios de revisión">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"
+        />
+      </svg>
+    </button>
+  );
+}
+
+export function OpportunityReviewHistoryModal({
+  opportunityId,
+  token,
+  onClose,
+}: {
+  opportunityId: number;
+  token: string;
+  onClose: () => void;
+}) {
+  const [detail, setDetail] = useState<Awaited<ReturnType<typeof api.opportunityReview>> | null>(null);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.opportunityReview(token, opportunityId)
+      .then(setDetail)
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cargar la revisión"));
+  }, [token, opportunityId]);
+
+  async function addComment() {
+    const trimmed = comment.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await api.addOpportunityReviewComment(token, opportunityId, trimmed);
+      setDetail(updated);
+      setComment("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo agregar el comentario");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Historial de revisión">
+      <section className="process-modal review-history-modal">
+        <div className="modal-header">
+          <h3>Historial de Revisión</h3>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          {error ? <div className="notice danger">{error}</div> : null}
+          {!detail ? (
+            <Empty text="Cargando..." />
+          ) : (
+            <>
+              <div className="review-comment-list">
+                {detail.comments.length ? (
+                  detail.comments.map((item) => (
+                    <div className="review-comment" key={item.id}>
+                      <div className="review-comment-meta">
+                        <strong>{item.author_name || "Usuario"}</strong>
+                        <small>{formatDate(item.created_at)}</small>
+                      </div>
+                      <p>{item.comment}</p>
+                    </div>
+                  ))
+                ) : (
+                  <Empty text="Sin comentarios registrados" />
+                )}
+              </div>
+              <div className="review-comment-form">
+                <textarea
+                  value={comment}
+                  onChange={(event) => setComment(event.target.value)}
+                  placeholder="Agregar comentario"
+                  rows={3}
+                  maxLength={2000}
+                />
+                <button className="primary" type="button" onClick={addComment} disabled={busy || !comment.trim()}>
+                  {busy ? "Guardando..." : "Agregar comentario"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function NumberRangeFilter({ unit, minimum, maximum, disabled = false, onMinimumChange, onMaximumChange }: { unit: string; minimum: string; maximum: string; disabled?: boolean; onMinimumChange: (value: string) => void; onMaximumChange: (value: string) => void }) {
   return <div className="column-filter-fields"><span className="column-filter-unit">Rango en {unit}</span><label>Desde<input type="number" value={minimum} disabled={disabled} onChange={(event) => onMinimumChange(event.target.value)} placeholder="Mínimo" /></label><label>Hasta<input type="number" value={maximum} disabled={disabled} min={minimum || undefined} onChange={(event) => onMaximumChange(event.target.value)} placeholder="Máximo" /></label></div>;
 }
@@ -2437,6 +2667,11 @@ export function OpportunityRow({
   onUpdateArchiveReason,
   isActive = false,
   onActivate,
+  isTracked = false,
+  hasReview = false,
+  onSendToTracking,
+  onLeaveInReview,
+  onOpenReviewHistory,
 }: {
   item: Opportunity;
   signal: ReturnType<typeof commercialSignal>;
@@ -2454,6 +2689,11 @@ export function OpportunityRow({
   onUpdateArchiveReason?: (item: Opportunity, reason: string) => Promise<void>;
   isActive?: boolean;
   onActivate?: () => void;
+  isTracked?: boolean;
+  hasReview?: boolean;
+  onSendToTracking?: (item: Opportunity) => Promise<void>;
+  onLeaveInReview?: (item: Opportunity, comment: string) => Promise<void>;
+  onOpenReviewHistory?: (item: Opportunity) => void;
 }) {
   const proposalDeadline = presentationDeadline(item);
   const isLargePurchase = item.source.toLowerCase() === "mercado_publico_grandes_compras";
@@ -2507,6 +2747,18 @@ export function OpportunityRow({
           <div className="chile-ml-meta">
             {item.source_status ? <span className={`chile-ml-status ${chileStatusSlug(item.source_status)}`}>{item.source_status}</span> : null}
             {item.contract_duration ? <span className="chile-ml-contract">Duración de contrato: {item.contract_duration}</span> : null}
+          </div>
+        ) : null}
+        {onSendToTracking && onLeaveInReview ? (
+          <div className="description-actions">
+            <ManageOpportunityMenu
+              item={item}
+              isTracked={isTracked}
+              hasReview={hasReview}
+              onSendToTracking={onSendToTracking}
+              onLeaveInReview={onLeaveInReview}
+            />
+            {hasReview && onOpenReviewHistory ? <ReviewBadge onOpen={() => onOpenReviewHistory(item)} /> : null}
           </div>
         ) : null}
       </td>

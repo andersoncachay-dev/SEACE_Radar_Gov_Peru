@@ -226,3 +226,156 @@ class Alert(TimestampMixin, Base):
     last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
     provider_message_id: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TrackingArea(TimestampMixin, Base):
+    __tablename__ = "tracking_areas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(40), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class TrackingResponsible(TimestampMixin, Base):
+    __tablename__ = "tracking_responsibles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    full_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    country_scope: Mapped[str] = mapped_column(String(10), default="ambos", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    areas: Mapped[list["TrackingArea"]] = relationship(secondary="tracking_area_responsibles", viewonly=True, order_by="TrackingArea.sort_order")
+
+
+class TrackingAreaResponsible(TimestampMixin, Base):
+    __tablename__ = "tracking_area_responsibles"
+    __table_args__ = (UniqueConstraint("area_id", "responsible_id", name="uq_tracking_area_responsible"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    area_id: Mapped[int] = mapped_column(ForeignKey("tracking_areas.id", ondelete="CASCADE"), index=True, nullable=False)
+    responsible_id: Mapped[int] = mapped_column(ForeignKey("tracking_responsibles.id", ondelete="CASCADE"), index=True, nullable=False)
+
+
+class TrackingPhase(TimestampMixin, Base):
+    __tablename__ = "tracking_phases"
+    __table_args__ = (Index("ix_tracking_phases_country_key", "country", "key", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    country: Mapped[str] = mapped_column(String(10), default="peru", nullable=False)
+    key: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class TrackingStageTemplate(TimestampMixin, Base):
+    __tablename__ = "tracking_stage_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    phase_id: Mapped[int] = mapped_column(ForeignKey("tracking_phases.id", ondelete="CASCADE"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_outcome_step: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    default_duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    areas: Mapped[list["TrackingArea"]] = relationship(secondary="tracking_stage_template_areas", viewonly=True, order_by="TrackingArea.sort_order")
+
+
+class TrackingStageTemplateArea(TimestampMixin, Base):
+    __tablename__ = "tracking_stage_template_areas"
+    __table_args__ = (UniqueConstraint("stage_template_id", "area_id", name="uq_tracking_stage_template_area"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stage_template_id: Mapped[int] = mapped_column(ForeignKey("tracking_stage_templates.id", ondelete="CASCADE"), index=True, nullable=False)
+    area_id: Mapped[int] = mapped_column(ForeignKey("tracking_areas.id", ondelete="CASCADE"), index=True, nullable=False)
+
+
+class OpportunityTracking(TimestampMixin, Base):
+    __tablename__ = "opportunity_trackings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    current_phase_id: Mapped[int | None] = mapped_column(ForeignKey("tracking_phases.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
+    quotation_outcome: Mapped[str] = mapped_column(String(10), default="pendiente", nullable=False)
+    quotation_outcome_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    quotation_outcome_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    started_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    co_responsible_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    stages: Mapped[list["OpportunityTrackingStage"]] = relationship(viewonly=True, order_by="OpportunityTrackingStage.sort_order")
+
+
+class OpportunityTrackingStage(TimestampMixin, Base):
+    __tablename__ = "opportunity_tracking_stages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tracking_id: Mapped[int] = mapped_column(ForeignKey("opportunity_trackings.id", ondelete="CASCADE"), index=True, nullable=False)
+    phase_id: Mapped[int] = mapped_column(ForeignKey("tracking_phases.id"), nullable=False)
+    stage_template_id: Mapped[int | None] = mapped_column(ForeignKey("tracking_stage_templates.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_outcome_step: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pendiente", nullable=False)
+    outcome: Mapped[str] = mapped_column(String(10), default="", nullable=False)
+    alert_atender_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    alert_urgente_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_time_alert_status: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+
+    areas: Mapped[list["TrackingArea"]] = relationship(secondary="opportunity_tracking_stage_areas", viewonly=True, order_by="TrackingArea.sort_order")
+    assignees: Mapped[list["TrackingResponsible"]] = relationship(secondary="opportunity_tracking_stage_assignees", viewonly=True, order_by="TrackingResponsible.full_name")
+
+
+class OpportunityTrackingStageArea(TimestampMixin, Base):
+    __tablename__ = "opportunity_tracking_stage_areas"
+    __table_args__ = (UniqueConstraint("stage_id", "area_id", name="uq_tracking_stage_area"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stage_id: Mapped[int] = mapped_column(ForeignKey("opportunity_tracking_stages.id", ondelete="CASCADE"), index=True, nullable=False)
+    area_id: Mapped[int] = mapped_column(ForeignKey("tracking_areas.id"), nullable=False)
+
+
+class OpportunityTrackingStageAssignee(TimestampMixin, Base):
+    __tablename__ = "opportunity_tracking_stage_assignees"
+    __table_args__ = (UniqueConstraint("stage_id", "responsible_id", name="uq_tracking_stage_assignee"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stage_id: Mapped[int] = mapped_column(ForeignKey("opportunity_tracking_stages.id", ondelete="CASCADE"), index=True, nullable=False)
+    responsible_id: Mapped[int] = mapped_column(ForeignKey("tracking_responsibles.id"), nullable=False)
+    area_id: Mapped[int | None] = mapped_column(ForeignKey("tracking_areas.id"), nullable=True)
+    assigned_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notification_status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    notification_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notification_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class OpportunityReview(TimestampMixin, Base):
+    __tablename__ = "opportunity_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="standby", nullable=False)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class OpportunityReviewComment(TimestampMixin, Base):
+    __tablename__ = "opportunity_review_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id", ondelete="CASCADE"), index=True, nullable=False)
+    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    comment: Mapped[str] = mapped_column(Text, default="", nullable=False)

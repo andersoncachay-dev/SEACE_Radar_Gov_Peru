@@ -7,9 +7,17 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..dependencies import require_admin
 from ..models import AppSetting, User
-from ..schemas import AppSettingsOut, AppSettingsUpdate, SchedulerIntervalOut, SchedulerIntervalUpdate, ScoringConfigOut, ScoringConfigUpdate
+from ..schemas import (
+    AppSettingsOut,
+    AppSettingsUpdate,
+    SchedulerIntervalOut,
+    SchedulerIntervalUpdate,
+    ScoringConfigOut,
+    ScoringConfigUpdate,
+    TrackingDateRefreshStatusOut,
+)
 from ..services.scoring_config_service import FACTOR_DEFAULTS, get_scoring_config, save_scoring_config
-from ..services.scheduler_service import save_scheduler_interval, scheduler_interval_config
+from ..services.scheduler_service import save_scheduler_interval, scheduler_interval_config, update_tracking_date_refresh_interval
 
 router = APIRouter(prefix="/app-settings", tags=["app settings"])
 
@@ -71,6 +79,18 @@ def update_scheduler_interval_settings(
         raise HTTPException(status_code=404, detail="País no soportado")
     interval_seconds = payload.days * 86_400 + payload.hours * 3_600 + payload.minutes * 60
     return save_scheduler_interval(country, interval_seconds, current_user.id)
+
+
+@router.put("/tracking-date-refresh/{country}", response_model=TrackingDateRefreshStatusOut)
+def update_tracking_date_refresh_settings(
+    country: str,
+    payload: SchedulerIntervalUpdate,
+    current_user: User = Depends(require_admin),
+):
+    if country not in {"peru", "chile"}:
+        raise HTTPException(status_code=404, detail="País no soportado")
+    interval_seconds = payload.days * 86_400 + payload.hours * 3_600 + payload.minutes * 60
+    return update_tracking_date_refresh_interval(country, interval_seconds, current_user.id)
 
 
 @router.get("/scoring/{country}", response_model=ScoringConfigOut)

@@ -11,12 +11,9 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..dependencies import get_current_user, require_admin
 from ..models import RadarKeyword, User
-from ..radar_config import DEFAULT_RADAR_KEYWORDS
 from ..schemas import RadarKeywordCreate, RadarKeywordOut
 
 router = APIRouter(prefix="/radar-keywords", tags=["radar keywords"])
-
-DEFAULT_KEYWORDS = DEFAULT_RADAR_KEYWORDS
 
 
 def _country(value: str) -> str:
@@ -37,25 +34,18 @@ def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", plain)
 
 
-def _default_rows(country: str) -> list[RadarKeywordOut]:
-    return [RadarKeywordOut(country=country, keyword=keyword, is_default=True) for keyword in DEFAULT_KEYWORDS]
-
-
 @router.get("/{country}", response_model=list[RadarKeywordOut])
 def list_keywords(country: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     normalized_country = _country(country)
     _require_country_access(current_user, normalized_country)
-    custom = list(
+    items = list(
         db.scalars(
             select(RadarKeyword)
             .where(RadarKeyword.country == normalized_country)
             .order_by(RadarKeyword.created_at.asc(), RadarKeyword.id.asc())
         ).all()
     )
-    return _default_rows(normalized_country) + [
-        RadarKeywordOut(id=item.id, country=item.country, keyword=item.keyword, is_default=False)
-        for item in custom
-    ]
+    return [RadarKeywordOut(id=item.id, country=item.country, keyword=item.keyword) for item in items]
 
 
 @router.post("/{country}", response_model=RadarKeywordOut, status_code=status.HTTP_201_CREATED)
@@ -71,8 +61,6 @@ def create_keyword(
     normalized_keyword = _normalize(keyword)
     if len(normalized_keyword) < 2 or not any(char.isalpha() for char in normalized_keyword):
         raise HTTPException(status_code=422, detail="Ingresa una palabra o frase válida")
-    if normalized_keyword in {_normalize(item) for item in DEFAULT_KEYWORDS}:
-        raise HTTPException(status_code=409, detail="La palabra ya forma parte de la configuración base")
     item = RadarKeyword(
         country=normalized_country,
         keyword=keyword,
@@ -86,7 +74,7 @@ def create_keyword(
         db.rollback()
         raise HTTPException(status_code=409, detail="La palabra ya está configurada para este país") from None
     db.refresh(item)
-    return RadarKeywordOut(id=item.id, country=item.country, keyword=item.keyword, is_default=False)
+    return RadarKeywordOut(id=item.id, country=item.country, keyword=item.keyword)
 
 
 @router.delete("/{country}/{keyword_id}", status_code=status.HTTP_204_NO_CONTENT)

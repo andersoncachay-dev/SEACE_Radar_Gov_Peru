@@ -8,9 +8,11 @@ from sqlalchemy import select
 from ..config import settings
 from ..database import SessionLocal
 from ..models import AppSetting, RadarKeyword, ScrapeRun, SearchProfile
-from ..radar_config import AUTO_PROFILE_PREFIX, DEFAULT_RADAR_KEYWORDS, RADAR_COUNTRY_CONFIG
+from ..radar_config import AUTO_PROFILE_PREFIX, RADAR_COUNTRY_CONFIG
 from .notification_service import send_pending_alerts
 from .run_service import execute_scrape_run
+from .tracking_date_refresh_service import get_date_refresh_interval_seconds, refresh_active_opportunity_dates, save_date_refresh_interval_seconds
+from .tracking_service import evaluate_time_status_alerts
 
 scheduler = None
 LIMA_TIMEZONE = ZoneInfo("America/Lima")
@@ -230,7 +232,7 @@ def sync_radar_profiles(db) -> list[SearchProfile]:
     }
     current_year = str(datetime.utcnow().year)
     for country, config in RADAR_COUNTRY_CONFIG.items():
-        keywords = [*DEFAULT_RADAR_KEYWORDS, *(item.keyword for item in custom_by_country[country])]
+        keywords = [item.keyword for item in custom_by_country[country]]
         for keyword in keywords:
             name = f"{AUTO_PROFILE_PREFIX} · {config['label']} · {keyword}"
             expected_names.add(name)
@@ -310,6 +312,72 @@ def send_pending_alerts_job() -> None:
         db.close()
 
 
+def send_tracking_time_alerts_job() -> None:
+    db = SessionLocal()
+    try:
+        evaluate_time_status_alerts(db)
+    finally:
+        db.close()
+
+
+def refresh_tracking_dates_job(country: str) -> None:
+    db = SessionLocal()
+    try:
+        refresh_active_opportunity_dates(db, country)
+    finally:
+        db.close()
+
+
+def _tracking_date_refresh_job_id(country: str) -> str:
+    return f"tracking-date-refresh-{country}"
+
+
+def tracking_date_refresh_status(country: str) -> dict[str, object]:
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"País no soportado: {country}")
+    job = scheduler.get_job(_tracking_date_refresh_job_id(normalized_country)) if scheduler is not None else None
+    db = SessionLocal()
+    try:
+        interval_seconds = get_date_refresh_interval_seconds(db, normalized_country)
+    finally:
+        db.close()
+    days, remainder = divmod(interval_seconds, 86_400)
+    hours, remainder = divmod(remainder, 3_600)
+    minutes = remainder // 60
+    return {
+        "enabled": bool(settings.enable_scheduler and job is not None),
+        "days": days,
+        "hours": hours,
+        "minutes": minutes,
+        "interval_seconds": interval_seconds,
+        "next_update_at": job.next_run_time.isoformat() if job and job.next_run_time else None,
+    }
+
+
+def update_tracking_date_refresh_interval(country: str, interval_seconds: int, user_id: int | None) -> dict[str, object]:
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"País no soportado: {country}")
+    db = SessionLocal()
+    try:
+        save_date_refresh_interval_seconds(db, normalized_country, interval_seconds, user_id)
+    finally:
+        db.close()
+    if scheduler is not None:
+        scheduler.add_job(
+            refresh_tracking_dates_job,
+            trigger="interval",
+            seconds=max(60, int(interval_seconds)),
+            kwargs={"country": normalized_country},
+            id=_tracking_date_refresh_job_id(normalized_country),
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
+    return tracking_date_refresh_status(normalized_country)
+
+
 def scheduler_status(country: str) -> dict[str, object]:
     normalized_country = str(country or "").strip().lower()
     if normalized_country not in SUPPORTED_COUNTRIES:
@@ -370,6 +438,29 @@ def start_scheduler() -> None:
         id="pending-alert-sender",
         replace_existing=True,
     )
+    scheduler.add_job(
+        send_tracking_time_alerts_job,
+        trigger="interval",
+        minutes=settings.tracking_alert_interval_minutes,
+        id="tracking-time-alert-sender",
+        replace_existing=True,
+    )
+    db = SessionLocal()
+    try:
+        date_refresh_intervals = {country: get_date_refresh_interval_seconds(db, country) for country in SUPPORTED_COUNTRIES}
+    finally:
+        db.close()
+    for country, interval_seconds in date_refresh_intervals.items():
+        scheduler.add_job(
+            refresh_tracking_dates_job,
+            trigger="interval",
+            seconds=interval_seconds,
+            kwargs={"country": country},
+            id=_tracking_date_refresh_job_id(country),
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
     scheduler.start()
 
 

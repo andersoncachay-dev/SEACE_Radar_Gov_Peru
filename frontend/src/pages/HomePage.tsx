@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, chileStatusSlug, Alert, Opportunity, RadarKeyword, Run, SchedulerStatus, Stats } from "../api";
-import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, LegalView, LockIcon, RunProgress, commercialSignal, countryFlagUrls, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, parseDate, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
+import { api, chileStatusSlug, Alert, Opportunity, Run, SchedulerStatus, Stats } from "../api";
+import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, RunProgress, commercialSignal, countryFlagUrls, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, parseDate, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
 import { alertStatusLabel, ChannelSymbol } from "./AlertsPage";
 import { excelLogoUrl, exportOpportunitiesToExcel, isOpportunityNew } from "./OpportunitiesPage";
 
@@ -594,37 +594,27 @@ export function Kpis({
 export function Home({
   country,
   token,
-  isAdmin,
   runs,
   alerts,
   opportunities,
   refresh,
-  onSearchKeyword,
-  onOpenLegal,
 }: {
   country: Country;
   token: string;
-  isAdmin: boolean;
   runs: Run[];
   alerts: Alert[];
   opportunities: Opportunity[];
   refresh: () => Promise<void>;
-  onSearchKeyword: (keyword: string) => void;
-  onOpenLegal: (view: LegalView) => void;
 }) {
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [processSort, setProcessSort] = useState<ProcessSortMode>("date-desc");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [nomenclatureSearchOpen, setNomenclatureSearchOpen] = useState(false);
-  const [nomenclatureSearch, setNomenclatureSearch] = useState("");
+  const [processSearchOpen, setProcessSearchOpen] = useState(false);
+  const [processSearch, setProcessSearch] = useState("");
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const [homeFilter, setHomeFilter] = useState<HomeStatusFilter>("all");
   const [selectedYear, setSelectedYear] = useState<string | null>(() => currentAnalysisYear());
   const [yearBreakdownMode, setYearBreakdownMode] = useState<YearBreakdownMode | null>(null);
-  const [keywordEditorOpen, setKeywordEditorOpen] = useState(false);
-  const [newKeyword, setNewKeyword] = useState("");
-  const [keywordSaving, setKeywordSaving] = useState(false);
-  const [keywordNotice, setKeywordNotice] = useState("");
   const [pendingHomeRemoval, setPendingHomeRemoval] = useState<Opportunity | null>(null);
   const [archiveError, setArchiveError] = useState("");
   const [copyNotice, setCopyNotice] = useState("");
@@ -734,9 +724,9 @@ export function Home({
       : selectedRegion
         ? filteredHomeOpportunities.filter((item) => normalizeRegionName(item.region) === selectedRegion)
         : filteredHomeOpportunities;
-    const nomenclatureNeedle = nomenclatureSearch.trim().toLowerCase();
-    const searched = nomenclatureNeedle
-      ? filtered.filter((item) => item.nomenclature.toLowerCase().includes(nomenclatureNeedle))
+    const searchNeedle = processSearch.trim().toLowerCase();
+    const searched = searchNeedle
+      ? filtered.filter((item) => item.nomenclature.toLowerCase().includes(searchNeedle) || item.entity.toLowerCase().includes(searchNeedle))
       : filtered;
     return searched
       .slice()
@@ -753,7 +743,7 @@ export function Home({
         const leftDate = parseDate(left.publication_date) || parseDate(left.proposal_deadline) || parseDate(left.quote_deadline) || 0;
         return processSort === "date-asc" ? leftDate - rightDate : rightDate - leftDate;
       });
-  }, [filteredHomeOpportunities, selectedRegion, processSort, nomenclatureSearch]);
+  }, [filteredHomeOpportunities, selectedRegion, processSort, processSearch]);
   const regionAmountBreakdown = useMemo(() => summarizeByRegion(filteredHomeOpportunities, country), [filteredHomeOpportunities, country]);
 
   async function copyProcessNomenclature(item: Opportunity) {
@@ -774,39 +764,6 @@ export function Home({
       await refresh();
     } catch (error) {
       setArchiveError(error instanceof Error ? error.message : "No se pudo retirar el proceso");
-    }
-  }
-
-  async function addRadarKeyword(event: React.FormEvent) {
-    event.preventDefault();
-    const cleanKeyword = newKeyword.trim();
-    if (!cleanKeyword) return;
-    setKeywordSaving(true);
-    setKeywordNotice("");
-    radarKeywordState.setError("");
-    try {
-      await radarKeywordState.add(cleanKeyword);
-      setNewKeyword("");
-      setKeywordNotice(`“${cleanKeyword}” se agregó a ${country}.`);
-    } catch (err) {
-      radarKeywordState.setError(err instanceof Error ? err.message : "No se pudo agregar la palabra clave");
-    } finally {
-      setKeywordSaving(false);
-    }
-  }
-
-  async function removeRadarKeyword(item: RadarKeyword) {
-    if (item.id === null) return;
-    setKeywordSaving(true);
-    setKeywordNotice("");
-    radarKeywordState.setError("");
-    try {
-      await radarKeywordState.remove(item.id);
-      setKeywordNotice(`“${item.keyword}” dejó de usarse en nuevas búsquedas.`);
-    } catch (err) {
-      radarKeywordState.setError(err instanceof Error ? err.message : "No se pudo retirar la palabra clave");
-    } finally {
-      setKeywordSaving(false);
     }
   }
 
@@ -895,66 +852,7 @@ export function Home({
         onYearChange={setSelectedYear}
         onToggleYearBreakdown={(mode) => setYearBreakdownMode((current) => current === mode ? null : mode)}
         contextLabel={homeContextLabel}
-        contextAction={isAdmin ? (
-          <button
-            className="keyword-manage-button"
-            type="button"
-            aria-expanded={keywordEditorOpen}
-            onClick={() => setKeywordEditorOpen((current) => !current)}
-          >
-            {keywordEditorOpen ? "Cerrar gestión" : "Gestionar palabras clave"}
-          </button>
-        ) : undefined}
       />
-      {keywordEditorOpen && isAdmin ? (
-        <section className="keyword-manager" aria-label={`Palabras clave del radar ${country}`}>
-          <div className="keyword-manager-heading">
-            <div>
-              <strong>Palabras clave de {country}</strong>
-              <span>Las palabras base están protegidas. Las personalizadas pueden retirarse sin borrar procesos históricos.</span>
-            </div>
-            {radarKeywordState.loading ? <span className="keyword-loading">Actualizando…</span> : null}
-          </div>
-          <div className="keyword-chip-list">
-            {radarKeywordState.keywords.map((item) => (
-              <span className={`keyword-config-chip ${item.is_default ? "is-default" : ""}`} key={`${item.is_default ? "base" : item.id}-${item.keyword}`}>
-                {item.keyword}
-                {item.is_default ? <small>Base</small> : (
-                  <span className="keyword-chip-actions">
-                    <button className="keyword-search-button" type="button" onClick={() => onSearchKeyword(item.keyword)}>Buscar y sumar</button>
-                    <button className="keyword-remove-button" type="button" aria-label={`Retirar ${item.keyword}`} disabled={keywordSaving} onClick={() => removeRadarKeyword(item)}>×</button>
-                  </span>
-                )}
-              </span>
-            ))}
-          </div>
-          <form className="keyword-add-form" onSubmit={addRadarKeyword}>
-            <label htmlFor={`new-keyword-${country}`}>Nueva palabra o frase</label>
-            <div>
-              <input
-                id={`new-keyword-${country}`}
-                value={newKeyword}
-                onChange={(event) => setNewKeyword(event.target.value)}
-                placeholder="Ej. banda ancha satelital"
-                maxLength={80}
-              />
-              <button className="primary" type="submit" disabled={keywordSaving || newKeyword.trim().length < 2}>
-                {keywordSaving ? "Guardando…" : "Agregar"}
-              </button>
-            </div>
-          </form>
-          {radarKeywordState.error ? <div className="notice danger">{radarKeywordState.error}</div> : null}
-          {keywordNotice ? <div className="notice success">{keywordNotice}</div> : null}
-          <div className="keyword-confidentiality-note">
-            <LockIcon className="keyword-lock-icon" />
-            <p>
-              Tus palabras clave y criterios de búsqueda están protegidos bajo nuestra estricta{" "}
-              <button type="button" onClick={() => onOpenLegal("confidentiality")}>Cláusula de Confidencialidad</button>.
-              Rodar Consulting no comparte tus estrategias comerciales.
-            </p>
-          </div>
-        </section>
-      ) : null}
       <section className="home-intelligence-grid">
         <article className="panel map-panel">
           <div className="panel-title">
@@ -1031,31 +929,31 @@ export function Home({
               <span>{selectedRegionProcesses.length} procesos visualizados</span>
             </div>
             <div className="panel-title-actions">
-              <div className={`process-nomenclature-search ${nomenclatureSearchOpen ? "is-open" : ""}`}>
-                {nomenclatureSearchOpen ? (
+              <div className={`process-search ${processSearchOpen ? "is-open" : ""}`}>
+                {processSearchOpen ? (
                   <input
                     autoFocus
                     type="text"
-                    value={nomenclatureSearch}
-                    onChange={(event) => setNomenclatureSearch(event.target.value)}
+                    value={processSearch}
+                    onChange={(event) => setProcessSearch(event.target.value)}
                     onBlur={() => {
-                      if (!nomenclatureSearch.trim()) setNomenclatureSearchOpen(false);
+                      if (!processSearch.trim()) setProcessSearchOpen(false);
                     }}
-                    placeholder="Buscar por nomenclatura"
-                    aria-label="Buscar proceso por nomenclatura"
+                    placeholder="Buscar por nomenclatura o entidad"
+                    aria-label="Buscar proceso por nomenclatura o entidad"
                   />
                 ) : null}
                 <button
                   type="button"
                   className="process-search-icon-button"
-                  title="Buscar por nomenclatura"
-                  aria-label="Buscar por nomenclatura"
+                  title="Buscar por nomenclatura o entidad"
+                  aria-label="Buscar por nomenclatura o entidad"
                   onClick={() => {
-                    if (nomenclatureSearchOpen) {
-                      setNomenclatureSearch("");
-                      setNomenclatureSearchOpen(false);
+                    if (processSearchOpen) {
+                      setProcessSearch("");
+                      setProcessSearchOpen(false);
                     } else {
-                      setNomenclatureSearchOpen(true);
+                      setProcessSearchOpen(true);
                     }
                   }}
                 >

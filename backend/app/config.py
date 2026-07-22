@@ -25,6 +25,8 @@ class Settings:
     alert_batch_size: int = int(os.getenv("ALERT_BATCH_SIZE", "50"))
     alert_max_attempts: int = int(os.getenv("ALERT_MAX_ATTEMPTS", "5"))
     alert_retry_base_minutes: int = int(os.getenv("ALERT_RETRY_BASE_MINUTES", "5"))
+    tracking_alert_interval_minutes: int = int(os.getenv("TRACKING_ALERT_INTERVAL_MINUTES", "30"))
+    tracking_date_refresh_interval_minutes: int = int(os.getenv("TRACKING_DATE_REFRESH_INTERVAL_MINUTES", "180"))
     email_provider: str = os.getenv("EMAIL_PROVIDER", "smtp").lower()
     smtp_host: str = os.getenv("SMTP_HOST", "")
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))

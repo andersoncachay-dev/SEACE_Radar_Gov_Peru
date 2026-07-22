@@ -7,12 +7,25 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import require_admin
+from ..dependencies import get_current_user, require_admin
 from ..models import User
-from ..schemas import UserCreate, UserOut, UserUpdate
+from ..schemas import AssignableUserOut, UserCreate, UserOut, UserUpdate
 from ..security import hash_password
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("/assignable", response_model=list[AssignableUserOut])
+def list_assignable_users(
+    country: str | None = None,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    query = select(User).where(User.is_active.is_(True))
+    if country in {"peru", "chile"}:
+        query = query.where(User.access_profile.in_([country, "both"]))
+    users = list(db.scalars(query.order_by(User.full_name)).all())
+    return [AssignableUserOut(id=user.id, full_name=user.full_name, access_profile=user.access_profile) for user in users]
 
 
 def _normalize_phone(value: str, country_code: str, country_name: str) -> str:

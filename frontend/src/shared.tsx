@@ -22,6 +22,34 @@ export const homeKeywordHints = [
   { label: "\u00f3rbita", terms: ["\u00f3rbita", "orbita"] },
 ];
 
+export function useDismissableMenu(open: boolean, onClose: () => void) {
+  const ref = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeOnOutsidePointer(event: PointerEvent) {
+      const target = event.target as Node;
+      if (!ref.current?.contains(target)) {
+        onClose();
+      }
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open, onClose]);
+
+  return ref;
+}
+
 export function sourceBelongsToCountry(source: string, country: Country) {
   const normalized = source.toLowerCase();
   if (country === "Chile") return normalized.startsWith("mercado_publico");
@@ -237,7 +265,6 @@ export function defaultRadarKeywords(country: Country): RadarKeyword[] {
       id: null,
       country: country.toLowerCase() as "peru" | "chile",
       keyword: item.label,
-      is_default: true,
     }));
 }
 

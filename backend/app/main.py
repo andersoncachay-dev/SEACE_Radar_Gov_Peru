@@ -5,7 +5,24 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import Base, engine
-from .routers import alerts, app_settings, auth, documents, legal_documents, opportunities, opportunity_view_states, radar_keywords, runs, search_profiles, users
+from .routers import (
+    alerts,
+    app_settings,
+    auth,
+    documents,
+    legal_documents,
+    opportunities,
+    opportunity_reviews,
+    opportunity_tracking,
+    opportunity_view_states,
+    radar_keywords,
+    runs,
+    search_profiles,
+    tracking_areas,
+    tracking_responsibles,
+    tracking_templates,
+    users,
+)
 from .services.run_service import reconcile_interrupted_runs
 from .services.scheduler_service import start_scheduler, stop_scheduler
 
@@ -44,6 +61,11 @@ def create_app() -> FastAPI:
     app.include_router(documents.router)
     app.include_router(legal_documents.router)
     app.include_router(app_settings.router)
+    app.include_router(tracking_areas.router)
+    app.include_router(tracking_responsibles.router)
+    app.include_router(tracking_templates.router)
+    app.include_router(opportunity_tracking.router)
+    app.include_router(opportunity_reviews.router)
 
     @app.get("/")
     def root():

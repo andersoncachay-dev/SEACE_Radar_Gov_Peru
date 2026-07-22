@@ -128,10 +128,9 @@ class RadarKeywordCreate(BaseModel):
 
 
 class RadarKeywordOut(BaseModel):
-    id: int | None = None
+    id: int
     country: str
     keyword: str
-    is_default: bool = False
 
 
 class LegalDocumentUpdate(BaseModel):
@@ -414,3 +413,265 @@ class AlertOut(ORMModel):
     keywords: str = ""
     run_id: int | None = None
     rule_is_active: bool = True
+
+
+class TrackingAreaOut(ORMModel):
+    id: int
+    key: str
+    name: str
+    sort_order: int
+    is_active: bool
+
+
+class TrackingAreaCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    sort_order: int = 0
+
+
+class TrackingAreaUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=80)
+    sort_order: int | None = None
+    is_active: bool | None = None
+
+
+class TrackingResponsibleCreate(BaseModel):
+    full_name: str = Field(min_length=2, max_length=160)
+    email: EmailStr
+    country_scope: str = "ambos"
+    is_active: bool = True
+    area_ids: list[int] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_country_scope(self):
+        if self.country_scope not in {"peru", "chile", "ambos"}:
+            raise ValueError("El pais debe ser peru, chile o ambos")
+        if not self.area_ids:
+            raise ValueError("Debe asignar al menos un area")
+        return self
+
+
+class TrackingResponsibleUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=160)
+    email: EmailStr | None = None
+    country_scope: str | None = None
+    is_active: bool | None = None
+    area_ids: list[int] | None = Field(default=None, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_country_scope(self):
+        if self.country_scope is not None and self.country_scope not in {"peru", "chile", "ambos"}:
+            raise ValueError("El pais debe ser peru, chile o ambos")
+        return self
+
+
+class TrackingResponsibleOut(ORMModel):
+    id: int
+    full_name: str
+    email: str
+    country_scope: str
+    is_active: bool
+    areas: list[TrackingAreaOut] = Field(default_factory=list)
+
+
+class TrackingPhaseOut(ORMModel):
+    id: int
+    country: str
+    key: str
+    name: str
+    sort_order: int
+
+
+class TrackingStageTemplateCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    sort_order: int = 0
+    is_outcome_step: bool = False
+    default_duration_days: int | None = Field(default=None, ge=0, le=365)
+    area_ids: list[int] = Field(default_factory=list, max_length=20)
+
+
+class TrackingStageTemplateUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    sort_order: int | None = None
+    is_active: bool | None = None
+    is_outcome_step: bool | None = None
+    default_duration_days: int | None = Field(default=None, ge=0, le=365)
+    area_ids: list[int] | None = Field(default=None, max_length=20)
+
+
+class TrackingStageTemplateReorderIn(BaseModel):
+    ordered_stage_template_ids: list[int] = Field(min_length=1, max_length=50)
+
+
+class TrackingStageTemplateOut(ORMModel):
+    id: int
+    phase_id: int
+    name: str
+    sort_order: int
+    is_active: bool
+    is_outcome_step: bool
+    default_duration_days: int | None
+    areas: list[TrackingAreaOut] = Field(default_factory=list)
+
+
+class TrackingStageAreasUpdate(BaseModel):
+    area_ids: list[int] = Field(default_factory=list, max_length=20)
+
+
+class TrackingStageAssigneesUpdate(BaseModel):
+    responsible_ids: list[int] = Field(default_factory=list, max_length=20)
+
+
+class TrackingStageUpdate(BaseModel):
+    due_date: datetime | None = None
+    status: str | None = None
+    completed: bool | None = None
+    alert_atender_enabled: bool | None = None
+    alert_urgente_enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_status(self):
+        if self.status is not None and self.status not in {"pendiente", "en_progreso", "completado", "bloqueado"}:
+            raise ValueError("Estado de etapa invalido")
+        return self
+
+
+class TrackingStageOut(ORMModel):
+    id: int
+    phase_id: int
+    stage_template_id: int | None
+    name: str
+    sort_order: int
+    is_outcome_step: bool
+    due_date: datetime | None
+    completed: bool
+    completed_at: datetime | None
+    status: str
+    outcome: str
+    alert_atender_enabled: bool
+    alert_urgente_enabled: bool
+    areas: list[TrackingAreaOut] = Field(default_factory=list)
+    assignees: list[TrackingResponsibleOut] = Field(default_factory=list)
+
+
+class OpportunityTrackingOut(ORMModel):
+    id: int
+    opportunity_id: int
+    status: str
+    current_phase_id: int | None
+    quotation_outcome: str
+    started_at: datetime
+    started_by_id: int | None = None
+    started_by_name: str = ""
+    co_responsible_id: int | None = None
+    co_responsible_name: str = ""
+    stages: list[TrackingStageOut] = Field(default_factory=list)
+
+
+class OpportunityTrackingSummaryOut(BaseModel):
+    opportunity_id: int
+    entity: str
+    nomenclature: str
+    description: str = ""
+    source: str
+    status: str
+    current_phase_id: int | None
+    quotation_outcome: str
+    publication_date: datetime | None = None
+    proposal_deadline: datetime | None = None
+    quote_deadline: datetime | None = None
+    documents_count: int = 0
+    requirement_pdf_url: str = ""
+    started_by_id: int | None = None
+    started_by_name: str = ""
+    co_responsible_id: int | None = None
+    co_responsible_name: str = ""
+
+
+class TrackingExcelExportIn(BaseModel):
+    title: str = Field(default="Consolidado de Seguimiento", max_length=100)
+    headers: list[str] = Field(max_length=200)
+    rows: list[list[str | int | float | None]] = Field(max_length=10000)
+
+
+class TrackingDateRefreshChangeOut(BaseModel):
+    field: str
+    label: str
+    old: datetime | None = None
+    new: datetime | None = None
+
+
+class TrackingDateRefreshedOpportunityOut(BaseModel):
+    opportunity_id: int
+    entity: str = ""
+    nomenclature: str = ""
+    changes: list[TrackingDateRefreshChangeOut] = Field(default_factory=list)
+
+
+class TrackingDateRefreshLastRunOut(BaseModel):
+    ran_at: datetime | None = None
+    checked: int = 0
+    changed: list[TrackingDateRefreshedOpportunityOut] = Field(default_factory=list)
+    errors: int = 0
+
+
+class TrackingDateRefreshStatusOut(BaseModel):
+    days: int
+    hours: int
+    minutes: int
+    interval_seconds: int
+    next_update_at: datetime | None = None
+    enabled: bool = False
+    last_run: TrackingDateRefreshLastRunOut | None = None
+
+
+class CoResponsibleUpdateIn(BaseModel):
+    user_id: int | None = None
+
+
+class StageSupportRequestIn(BaseModel):
+    responsible_ids: list[int] = Field(min_length=1, max_length=20)
+    message: str = Field(default="", max_length=1000)
+
+
+class StageSupportRequestOut(BaseModel):
+    sent: int
+    failed: int
+
+
+class AssignableUserOut(BaseModel):
+    id: int
+    full_name: str
+    access_profile: str
+
+
+class QuotationOutcomeIn(BaseModel):
+    outcome: str
+
+    @model_validator(mode="after")
+    def validate_outcome(self):
+        if self.outcome not in {"ganado", "perdido", "pendiente"}:
+            raise ValueError("El resultado debe ser ganado, perdido o pendiente")
+        return self
+
+
+class OpportunityReviewCommentIn(BaseModel):
+    comment: str = Field(default="", max_length=2000)
+
+
+class OpportunityReviewCommentOut(ORMModel):
+    id: int
+    author_id: int | None
+    author_name: str = ""
+    comment: str
+    created_at: datetime
+
+
+class OpportunityReviewOut(BaseModel):
+    opportunity_id: int
+    status: str
+
+
+class OpportunityReviewDetailOut(BaseModel):
+    opportunity_id: int
+    status: str
+    comments: list[OpportunityReviewCommentOut] = Field(default_factory=list)

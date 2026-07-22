@@ -68,6 +68,14 @@ class RadarProfileSyncTests(unittest.TestCase):
         self.assertEqual(chile_next, datetime(2026, 7, 16, 2, 0, tzinfo=timezone.utc))
 
     def test_creates_country_profiles_and_tracks_custom_keywords(self) -> None:
+        # Base keywords are seeded as regular radar_keywords rows (by the
+        # 20260721_0030 migration in real deployments) rather than hardcoded,
+        # so admins can edit/retire them like any other keyword.
+        for country in ("peru", "chile"):
+            for keyword in DEFAULT_RADAR_KEYWORDS:
+                self.db.add(RadarKeyword(country=country, keyword=keyword, normalized_keyword=keyword.casefold()))
+        self.db.commit()
+
         sync_radar_profiles(self.db)
         profiles = list(
             self.db.scalars(select(SearchProfile).where(SearchProfile.name.startswith(f"{AUTO_PROFILE_PREFIX} ·"))).all()

@@ -90,6 +90,37 @@ export type SchedulerIntervalConfig = {
   enabled: boolean;
 };
 
+export type TrackingDateRefreshChange = {
+  field: string;
+  label: string;
+  old: string | null;
+  new: string | null;
+};
+
+export type TrackingDateRefreshedOpportunity = {
+  opportunity_id: number;
+  entity: string;
+  nomenclature: string;
+  changes: TrackingDateRefreshChange[];
+};
+
+export type TrackingDateRefreshLastRun = {
+  ran_at: string | null;
+  checked: number;
+  changed: TrackingDateRefreshedOpportunity[];
+  errors: number;
+};
+
+export type TrackingDateRefreshStatus = {
+  days: number;
+  hours: number;
+  minutes: number;
+  interval_seconds: number;
+  next_update_at: string | null;
+  enabled: boolean;
+  last_run: TrackingDateRefreshLastRun | null;
+};
+
 export type AlertRule = {
   id: number;
   name: string;
@@ -181,7 +212,6 @@ export type RadarKeyword = {
   id: number | null;
   country: "peru" | "chile";
   keyword: string;
-  is_default: boolean;
 };
 
 export type LegalDocumentKey = "terms" | "privacy" | "confidentiality";
@@ -196,6 +226,144 @@ export type LegalDocumentRecord = {
 export type AppSettingsRecord = {
   version_label: string;
   updated_at: string | null;
+};
+
+export type CountryScope = "peru" | "chile" | "ambos";
+
+export type TrackingArea = {
+  id: number;
+  key: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+};
+
+export type TrackingAreaPayload = {
+  name: string;
+  sort_order?: number;
+  is_active?: boolean;
+};
+
+export type TrackingResponsible = {
+  id: number;
+  full_name: string;
+  email: string;
+  country_scope: CountryScope;
+  is_active: boolean;
+  areas: TrackingArea[];
+};
+
+export type TrackingResponsiblePayload = {
+  full_name: string;
+  email: string;
+  country_scope: CountryScope;
+  is_active: boolean;
+  area_ids: number[];
+};
+
+export type TrackingPhase = {
+  id: number;
+  country: "peru" | "chile";
+  key: string;
+  name: string;
+  sort_order: number;
+};
+
+export type TrackingStageTemplate = {
+  id: number;
+  phase_id: number;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+  is_outcome_step: boolean;
+  default_duration_days: number | null;
+  areas: TrackingArea[];
+};
+
+export type TrackingStageTemplatePayload = {
+  name?: string;
+  sort_order?: number;
+  is_active?: boolean;
+  is_outcome_step?: boolean;
+  default_duration_days?: number | null;
+  area_ids?: number[];
+};
+
+export type OpportunityTrackingStage = {
+  id: number;
+  phase_id: number;
+  stage_template_id: number | null;
+  name: string;
+  sort_order: number;
+  is_outcome_step: boolean;
+  due_date: string | null;
+  completed: boolean;
+  completed_at: string | null;
+  status: "pendiente" | "en_progreso" | "completado" | "bloqueado" | string;
+  outcome: "" | "ganado" | "perdido" | "pendiente";
+  alert_atender_enabled: boolean;
+  alert_urgente_enabled: boolean;
+  areas: TrackingArea[];
+  assignees: TrackingResponsible[];
+};
+
+export type OpportunityTracking = {
+  id: number;
+  opportunity_id: number;
+  status: string;
+  current_phase_id: number | null;
+  quotation_outcome: "pendiente" | "ganado" | "perdido";
+  started_at: string;
+  started_by_id: number | null;
+  started_by_name: string;
+  co_responsible_id: number | null;
+  co_responsible_name: string;
+  stages: OpportunityTrackingStage[];
+};
+
+export type AssignableUser = {
+  id: number;
+  full_name: string;
+  access_profile: "peru" | "chile" | "both";
+};
+
+export type OpportunityTrackingSummary = {
+  opportunity_id: number;
+  entity: string;
+  nomenclature: string;
+  description: string;
+  source: string;
+  status: string;
+  current_phase_id: number | null;
+  quotation_outcome: string;
+  publication_date: string | null;
+  proposal_deadline: string | null;
+  quote_deadline: string | null;
+  documents_count: number;
+  requirement_pdf_url: string;
+  started_by_id: number | null;
+  started_by_name: string;
+  co_responsible_id: number | null;
+  co_responsible_name: string;
+};
+
+export type OpportunityReview = {
+  opportunity_id: number;
+  status: "standby" | "resolved";
+};
+
+export type OpportunityReviewComment = {
+  id: number;
+  author_id: number | null;
+  author_name: string;
+  comment: string;
+  created_at: string;
+};
+
+export type OpportunityReviewDetail = {
+  opportunity_id: number;
+  status: "standby" | "resolved";
+  comments: OpportunityReviewComment[];
 };
 
 export type ScoringFactor = { label: string; points: number; enabled: boolean; value: string; value_type: "list" | "number" | "text"; field: "description" | "entity" | "region" | "amount" | "origin" | "status" };
@@ -375,6 +543,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config),
     }),
+  trackingDateRefreshStatus: (token: string, country: "peru" | "chile") =>
+    request<TrackingDateRefreshStatus>(`/opportunity-tracking/date-refresh/status?country=${country}`, token),
+  updateTrackingDateRefreshInterval: (token: string, country: "peru" | "chile", config: { days: number; hours: number; minutes: number }) =>
+    request<TrackingDateRefreshStatus>(`/app-settings/tracking-date-refresh/${country}`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }),
   radarKeywords: (token: string, country: "peru" | "chile") =>
     request<RadarKeyword[]>(`/radar-keywords/${country}`, token),
   createRadarKeyword: (token: string, country: "peru" | "chile", keyword: string) =>
@@ -442,4 +618,157 @@ export const api = {
     }),
   deleteAlertRule: (token: string, ruleId: number) =>
     request<void>(`/alerts/rules/${ruleId}`, token, { method: "DELETE" }),
+  trackingAreas: (token: string, options: { activeOnly?: boolean } = {}) => {
+    const query = options.activeOnly === false ? "?active_only=false" : "";
+    return request<TrackingArea[]>(`/tracking-areas${query}`, token);
+  },
+  createTrackingArea: (token: string, payload: TrackingAreaPayload) =>
+    request<TrackingArea>("/tracking-areas", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  updateTrackingArea: (token: string, areaId: number, payload: Partial<TrackingAreaPayload>) =>
+    request<TrackingArea>(`/tracking-areas/${areaId}`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  trackingResponsibles: (token: string, options: { areaId?: number; country?: string; activeOnly?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (options.areaId) params.set("area_id", String(options.areaId));
+    if (options.country) params.set("country", options.country);
+    if (options.activeOnly === false) params.set("active_only", "false");
+    const query = params.toString();
+    return request<TrackingResponsible[]>(`/tracking-responsibles${query ? `?${query}` : ""}`, token);
+  },
+  createTrackingResponsible: (token: string, payload: TrackingResponsiblePayload) =>
+    request<TrackingResponsible>("/tracking-responsibles", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  updateTrackingResponsible: (token: string, responsibleId: number, payload: Partial<TrackingResponsiblePayload>) =>
+    request<TrackingResponsible>(`/tracking-responsibles/${responsibleId}`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  trackingPhases: (token: string, country?: "peru" | "chile") =>
+    request<TrackingPhase[]>(`/tracking-templates/phases${country ? `?country=${country}` : ""}`, token),
+  trackingStageTemplates: (token: string, phaseId: number) =>
+    request<TrackingStageTemplate[]>(`/tracking-templates/phases/${phaseId}/stages`, token),
+  createStageTemplate: (token: string, phaseId: number, payload: TrackingStageTemplatePayload) =>
+    request<TrackingStageTemplate>(`/tracking-templates/phases/${phaseId}/stages`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  updateStageTemplate: (token: string, stageTemplateId: number, payload: TrackingStageTemplatePayload) =>
+    request<TrackingStageTemplate>(`/tracking-templates/stages/${stageTemplateId}`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  reorderStageTemplates: (token: string, orderedStageTemplateIds: number[]) =>
+    request<TrackingStageTemplate[]>("/tracking-templates/stages/reorder", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ordered_stage_template_ids: orderedStageTemplateIds }),
+    }),
+  deleteStageTemplate: (token: string, stageTemplateId: number) =>
+    request<void>(`/tracking-templates/stages/${stageTemplateId}`, token, { method: "DELETE" }),
+  opportunityTrackings: (token: string, options: { opportunityIds?: number[]; country?: "peru" | "chile"; mineOnly?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (options.opportunityIds?.length) params.set("opportunity_ids", options.opportunityIds.join(","));
+    if (options.country) params.set("country", options.country);
+    if (options.mineOnly) params.set("mine_only", "true");
+    const query = params.toString();
+    return request<OpportunityTrackingSummary[]>(`/opportunity-tracking${query ? `?${query}` : ""}`, token);
+  },
+  opportunityTracking: (token: string, opportunityId: number) =>
+    request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}`, token),
+  setCoResponsible: (token: string, opportunityId: number, userId: number | null) =>
+    request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}/co-responsible`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    }),
+  withdrawTracking: (token: string, opportunityId: number) =>
+    request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}/withdraw`, token, { method: "POST" }),
+  assignableUsers: (token: string, country?: "peru" | "chile") =>
+    request<AssignableUser[]>(`/users/assignable${country ? `?country=${country}` : ""}`, token),
+  startOpportunityTracking: (token: string, opportunityId: number) =>
+    request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}/start`, token, { method: "POST" }),
+  updateTrackingStage: (
+    token: string,
+    stageId: number,
+    payload: {
+      due_date?: string | null;
+      status?: string;
+      completed?: boolean;
+      alert_atender_enabled?: boolean;
+      alert_urgente_enabled?: boolean;
+    },
+  ) =>
+    request<OpportunityTrackingStage>(`/opportunity-tracking/stages/${stageId}`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  updateTrackingStageAreas: (token: string, stageId: number, areaIds: number[]) =>
+    request<OpportunityTrackingStage>(`/opportunity-tracking/stages/${stageId}/areas`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ area_ids: areaIds }),
+    }),
+  updateTrackingStageAssignees: (token: string, stageId: number, responsibleIds: number[]) =>
+    request<OpportunityTrackingStage>(`/opportunity-tracking/stages/${stageId}/assignees`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ responsible_ids: responsibleIds }),
+    }),
+  setQuotationOutcome: (token: string, opportunityId: number, outcome: "ganado" | "perdido" | "pendiente") =>
+    request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}/quotation-outcome`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcome }),
+    }),
+  advanceTrackingPhase: (token: string, opportunityId: number) =>
+    request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}/advance-phase`, token, { method: "POST" }),
+  sendStageSupportRequest: (token: string, stageId: number, responsibleIds: number[], message: string = "") =>
+    request<{ sent: number; failed: number }>(`/opportunity-tracking/stages/${stageId}/notify`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ responsible_ids: responsibleIds, message }),
+    }),
+  opportunityReviews: (token: string, opportunityIds?: number[]) => {
+    const query = opportunityIds?.length ? `?opportunity_ids=${opportunityIds.join(",")}` : "";
+    return request<OpportunityReview[]>(`/opportunity-reviews${query}`, token);
+  },
+  opportunityReview: (token: string, opportunityId: number) =>
+    request<OpportunityReviewDetail>(`/opportunity-reviews/${opportunityId}`, token),
+  startOpportunityReview: (token: string, opportunityId: number, comment: string = "") =>
+    request<OpportunityReviewDetail>(`/opportunity-reviews/${opportunityId}`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment }),
+    }),
+  addOpportunityReviewComment: (token: string, opportunityId: number, comment: string) =>
+    request<OpportunityReviewDetail>(`/opportunity-reviews/${opportunityId}/comments`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment }),
+    }),
+  resolveOpportunityReview: (token: string, opportunityId: number) =>
+    request<OpportunityReviewDetail>(`/opportunity-reviews/${opportunityId}/resolve`, token, { method: "POST" }),
+  exportTrackingXlsx: async (token: string, payload: { title: string; headers: string[]; rows: Array<Array<string | number | null>> }) => {
+    const response = await fetch(`${API_URL}/opportunity-tracking/export/xlsx`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new ApiError("No se pudo generar el archivo Excel", response.status);
+    return response.blob();
+  },
 };
