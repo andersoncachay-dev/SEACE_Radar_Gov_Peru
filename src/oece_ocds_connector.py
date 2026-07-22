@@ -16,7 +16,7 @@ from .proxy_utils import requests_proxies
 
 
 API_BASE = "https://contratacionesabiertas.oece.gob.pe/api/v1"
-DEFAULT_SOURCES = ("seace_v3", "seace_v2")
+DEFAULT_SOURCES = ("seace_v3",)
 
 
 def _clean(value: Any) -> str:
