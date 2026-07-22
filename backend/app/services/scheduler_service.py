@@ -104,6 +104,21 @@ def claim_external_scheduler_run(country: str, now: datetime | None = None) -> t
         db.close()
 
 
+def force_scheduler_run(country: str) -> datetime:
+    """Trigger a country's ingestion right now and push its next automatic run forward."""
+    normalized_country = str(country or "").strip().lower()
+    if normalized_country not in SUPPORTED_COUNTRIES:
+        raise ValueError(f"País de scheduler no soportado: {country}")
+    db = SessionLocal()
+    try:
+        next_update = datetime.now(timezone.utc) + timedelta(seconds=get_scheduler_interval(db, normalized_country))
+        _write_setting(db, _next_update_key(normalized_country), next_update.isoformat())
+        db.commit()
+        return next_update
+    finally:
+        db.close()
+
+
 def get_scheduler_interval(db, country: str) -> int:
     normalized_country = str(country or "").strip().lower()
     if normalized_country not in SUPPORTED_COUNTRIES:

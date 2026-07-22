@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import get_current_user, require_source_access, source_access_condition
-from ..models import Opportunity, OpportunityTracking, OpportunityTrackingStage, User
+from ..models import Opportunity, OpportunityTracking, OpportunityTrackingStage, TrackingPhase, User
 from ..schemas import (
     CoResponsibleUpdateIn,
     OpportunityTrackingOut,
@@ -156,6 +156,23 @@ def list_trackings(
     user_ids |= {tracking.co_responsible_id for tracking, _ in rows if tracking.co_responsible_id}
     user_names = {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_(user_ids)))} if user_ids else {}
 
+    tracking_ids = [tracking.id for tracking, _ in rows]
+    current_stage_names: dict[int, str] = {}
+    if tracking_ids:
+        last_stage_names: dict[int, str] = {}
+        stage_rows = db.execute(
+            select(OpportunityTrackingStage)
+            .join(TrackingPhase, TrackingPhase.id == OpportunityTrackingStage.phase_id)
+            .where(OpportunityTrackingStage.tracking_id.in_(tracking_ids))
+            .order_by(TrackingPhase.sort_order, OpportunityTrackingStage.sort_order)
+        ).scalars()
+        for stage in stage_rows:
+            last_stage_names[stage.tracking_id] = stage.name
+            if stage.tracking_id not in current_stage_names and stage.status != "completado":
+                current_stage_names[stage.tracking_id] = stage.name
+        for tracking_id, name in last_stage_names.items():
+            current_stage_names.setdefault(tracking_id, name)
+
     return [
         OpportunityTrackingSummaryOut(
             opportunity_id=opportunity.id,
@@ -165,6 +182,7 @@ def list_trackings(
             source=opportunity.source,
             status=tracking.status,
             current_phase_id=tracking.current_phase_id,
+            current_stage_name=current_stage_names.get(tracking.id, ""),
             quotation_outcome=tracking.quotation_outcome,
             publication_date=opportunity.publication_date,
             proposal_deadline=opportunity.proposal_deadline,

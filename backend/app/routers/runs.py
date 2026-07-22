@@ -12,7 +12,7 @@ from ..dependencies import get_current_user, require_source_access, source_acces
 from ..models import ScrapeRun, SearchProfile, User
 from ..schemas import RunStart, ScrapeRunOut
 from ..services.run_service import execute_scrape_run, request_run_cancel
-from ..services.scheduler_service import scheduler_status
+from ..services.scheduler_service import enqueue_active_profiles, force_scheduler_run, scheduler_status
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -29,6 +29,19 @@ def get_scheduler_status(
     country: Literal["peru", "chile"],
     current_user: User = Depends(get_current_user),
 ):
+    return scheduler_status(country)
+
+
+@router.post("/scheduler/trigger")
+def trigger_scheduler_run(
+    country: Literal["peru", "chile"],
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
+    if scheduler_status(country)["is_running"]:
+        raise HTTPException(status_code=409, detail="Ya hay una actualización en curso para este país.")
+    force_scheduler_run(country)
+    background_tasks.add_task(enqueue_active_profiles, country=country)
     return scheduler_status(country)
 
 

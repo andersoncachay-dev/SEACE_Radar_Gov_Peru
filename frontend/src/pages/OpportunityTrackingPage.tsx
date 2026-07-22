@@ -22,6 +22,10 @@ function countryScopeLabel(scope: CountryScope) {
 }
 
 // Ventana de una etapa: desde el vencimiento de la etapa anterior (o el inicio de la fase) hasta su propio vencimiento.
+// Las etapas informativas (cronograma SEACE sin gestión propia) no participan de la
+// cadena de "días asignados"/semáforo de tiempo -se saltan al buscar la etapa anterior-
+// para no romper el cálculo de la siguiente etapa gestionable cuando su fecha todavía
+// no llegó del cronograma (o llega antes que la de la etapa gestionable previa).
 function stageWindowStart(
   stagesInPhase: OpportunityTrackingStage[],
   stage: OpportunityTrackingStage,
@@ -30,7 +34,11 @@ function stageWindowStart(
   const ordered = [...stagesInPhase].sort((left, right) => left.sort_order - right.sort_order);
   const index = ordered.findIndex((item) => item.id === stage.id);
   if (index <= 0) return phaseRangeStart;
-  return ordered[index - 1].due_date;
+  for (let i = index - 1; i >= 0; i -= 1) {
+    if (ordered[i].is_informational) continue;
+    return ordered[i].due_date;
+  }
+  return phaseRangeStart;
 }
 
 function daysAllocated(stage: OpportunityTrackingStage, windowStart: string | null): number | null {
@@ -205,6 +213,26 @@ function StageCard({
 
   const showTimeStatus = !stage.is_outcome_step && effectiveStatus !== "completado" && effectiveStatus !== "bloqueado";
   const outcomeCardClass = stage.is_outcome_step ? `outcome-card-${stage.outcome || "pendiente"}` : "";
+
+  if (stage.is_informational) {
+    return (
+      <div className="tracking-stage-card tracking-stage-card-informational">
+        <div className="tracking-stage-header">
+          <span className="tracking-stage-title">
+            <strong>{stage.name}</strong>
+            <span className="tracking-informational-badge" title="Etapa informativa del cronograma SEACE: se revalida sola, no requiere gestión">
+              Informativo
+            </span>
+          </span>
+        </div>
+        <div className="tracking-stage-meta">
+          <span className="tracking-stage-informational-date">
+            {stage.due_date ? formatDate(stage.due_date) : "Aún sin fecha publicada por SEACE"}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`tracking-stage-card status-${effectiveStatus} ${outcomeCardClass} ${stage.completed ? "completed" : ""}`}>
@@ -381,8 +409,16 @@ function TrackingTimeline({
   if (!stages.length) {
     return <Empty text="Esta fase todavía no tiene etapas registradas." />;
   }
-  const outcomeIndex = stages.findIndex((stage) => stage.is_outcome_step);
-  const proposalDeadlineIndex = rangeEnd && outcomeIndex > 0 ? outcomeIndex - 1 : -1;
+  // La bandera de "Fecha fin de presentación de propuesta" debe marcar el corte real
+  // -justo después de la última etapa gestionable (Envío de Propuesta)-, no simplemente
+  // la posición anterior a "Resultado de la convocatoria": las etapas informativas del
+  // cronograma SEACE (Calificación y Evaluación, Otorgamiento de la Buena Pro) van
+  // después de ese corte, no antes.
+  const lastActionableIndex = stages.reduce(
+    (acc, stage, idx) => (!stage.is_informational && !stage.is_outcome_step ? idx : acc),
+    -1,
+  );
+  const proposalDeadlineIndex = rangeEnd && lastActionableIndex >= 0 ? lastActionableIndex + 1 : -1;
 
   const rangeStartMs = rangeStart ? new Date(rangeStart).getTime() : null;
   const rangeEndMs = rangeEnd ? new Date(rangeEnd).getTime() : null;
@@ -410,7 +446,9 @@ function TrackingTimeline({
         </div>
       ) : null}
       <ol className="tracking-timeline-list">
-        {stages.map((stage, index) => (
+        {stages.map((stage, index) => {
+          const windowStart = stageWindowStart(stages, stage, rangeStart);
+          return (
           <li key={stage.id} className={`tracking-stage-node ${stage.completed ? "completed" : ""}`}>
             <span className="tracking-stage-dot" aria-hidden="true" />
             {index === proposalDeadlineIndex ? (
@@ -421,9 +459,9 @@ function TrackingTimeline({
             <StageCard
               token={token}
               stage={stage}
-              daysAllocated={daysAllocated(stage, index === 0 ? rangeStart : stages[index - 1].due_date)}
-              timeStatus={computeTimeStatus(stage.due_date, index === 0 ? rangeStart : stages[index - 1].due_date)}
-              effectiveStatus={deriveEffectiveStatus(stage, index === 0 ? rangeStart : stages[index - 1].due_date)}
+              daysAllocated={daysAllocated(stage, windowStart)}
+              timeStatus={computeTimeStatus(stage.due_date, windowStart)}
+              effectiveStatus={deriveEffectiveStatus(stage, windowStart)}
               areas={areas}
               responsibles={responsibles}
               busy={busy}
@@ -435,7 +473,8 @@ function TrackingTimeline({
               onToggleAlert={onToggleAlert}
             />
           </li>
-        ))}
+          );
+        })}
       </ol>
     </div>
   );
@@ -543,6 +582,8 @@ function TrackingWorkspace({
   const [areas, setAreas] = useState<TrackingArea[]>([]);
   const [responsibles, setResponsibles] = useState<TrackingResponsible[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [opportunities, setOpportunities] = useState<Map<number, Opportunity>>(new Map());
+  const [documentsOpportunity, setDocumentsOpportunity] = useState<Opportunity | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [tracking, setTracking] = useState<OpportunityTrackingRecord | null>(null);
   const [selectedPhaseId, setSelectedPhaseId] = useState<number | null>(null);
@@ -565,13 +606,15 @@ function TrackingWorkspace({
       api.trackingAreas(token),
       api.trackingResponsibles(token, { country }),
       api.assignableUsers(token, country),
+      api.opportunities(token),
     ])
-      .then(([trackings, phaseList, areaList, responsibleList, userList]) => {
+      .then(([trackings, phaseList, areaList, responsibleList, userList, opportunityList]) => {
         setSummaries(trackings);
         setPhases(phaseList);
         setAreas(areaList);
         setResponsibles(responsibleList);
         setAssignableUsers(userList);
+        setOpportunities(new Map(opportunityList.map((item) => [item.id, item])));
       })
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo cargar el seguimiento"))
       .finally(() => setLoadingList(false));
@@ -761,6 +804,22 @@ function TrackingWorkspace({
                   >
                     <strong>{item.nomenclature || `Oportunidad #${item.opportunity_id}`}</strong>
                     <small>{item.entity}</small>
+                    <span className="tracking-selector-meta-row">
+                      <span className="tracking-selector-current-stage">{item.current_stage_name || "—"}</span>
+                      {opportunities.get(item.opportunity_id) ? (
+                        <button
+                          type="button"
+                          className="pdf-button"
+                          title="Ver detalle y documentos"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDocumentsOpportunity(opportunities.get(item.opportunity_id) ?? null);
+                          }}
+                        >
+                          <span>PDF</span>
+                        </button>
+                      ) : null}
+                    </span>
                     {item.co_responsible_name ? (
                       <span className="tracking-selector-co-responsible">✓ Corresponsable: {item.co_responsible_name}</span>
                     ) : null}
@@ -891,6 +950,9 @@ function TrackingWorkspace({
           )}
         </div>
       </div>
+      {documentsOpportunity ? (
+        <OpportunityDetailModal opportunity={documentsOpportunity} token={token} onClose={() => setDocumentsOpportunity(null)} />
+      ) : null}
     </div>
   );
 }

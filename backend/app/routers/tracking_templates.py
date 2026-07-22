@@ -58,6 +58,7 @@ def create_stage_template(
         name=payload.name.strip(),
         sort_order=payload.sort_order,
         is_outcome_step=payload.is_outcome_step,
+        is_informational=payload.is_informational,
         default_duration_days=payload.default_duration_days,
         created_by_id=current_user.id,
         updated_by_id=current_user.id,
@@ -88,6 +89,8 @@ def update_stage_template(
         template.is_active = payload.is_active
     if payload.is_outcome_step is not None:
         template.is_outcome_step = payload.is_outcome_step
+    if payload.is_informational is not None:
+        template.is_informational = payload.is_informational
     if payload.default_duration_days is not None:
         template.default_duration_days = payload.default_duration_days
     if payload.area_ids is not None:

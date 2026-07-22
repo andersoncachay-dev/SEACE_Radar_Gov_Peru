@@ -11,7 +11,6 @@ from ..models import (
     Opportunity,
     OpportunityTracking,
     OpportunityTrackingStage,
-    OpportunityTrackingStageAssignee,
     TrackingResponsible,
     User,
 )
@@ -22,58 +21,6 @@ logger = logging.getLogger(__name__)
 
 TIME_ALERT_LABELS = {"atender": "ATENDER", "urgente": "URGENTE"}
 TIME_ALERT_COLORS = {"atender": "#9a6b00", "urgente": "#b42318"}
-
-
-def notify_stage_assignment(
-    db: Session,
-    stage: OpportunityTrackingStage,
-    assignments: list[OpportunityTrackingStageAssignee],
-    opportunity: Opportunity,
-) -> None:
-    """Send an assignment email per new assignee, isolating failures per recipient."""
-    if not assignments:
-        return
-
-    country_label = "Chile" if country_for_source(opportunity.source) == "chile" else "Perú"
-    due_label = stage.due_date.strftime("%d/%m/%Y") if stage.due_date else "Sin fecha límite"
-    subject = "GovRadar · Nueva asignación de seguimiento"
-
-    for assignment in assignments:
-        responsible = db.get(TrackingResponsible, assignment.responsible_id)
-        if not responsible or not responsible.email:
-            assignment.notification_status = "failed"
-            assignment.notification_error = "El responsable no tiene un correo configurado"
-            continue
-
-        message = (
-            f"Hola {responsible.full_name},\n\n"
-            f"Se te ha asignado la etapa \"{stage.name}\" en el seguimiento de una oportunidad de {country_label}.\n\n"
-            f"Entidad: {opportunity.entity}\n"
-            f"Proceso: {opportunity.nomenclature}\n"
-            f"Fecha límite: {due_label}\n\n"
-            "Ingresa a GovRadar para revisar el detalle."
-        )
-        html_body = (
-            f"<p>Hola {escape(responsible.full_name)},</p>"
-            f"<p>Se te ha asignado la etapa <strong>{escape(stage.name)}</strong> en el seguimiento de "
-            f"una oportunidad de {country_label}.</p>"
-            f"<p><strong>Entidad:</strong> {escape(opportunity.entity)}<br>"
-            f"<strong>Proceso:</strong> {escape(opportunity.nomenclature)}<br>"
-            f"<strong>Fecha límite:</strong> {due_label}</p>"
-        )
-        html = _branded_email_html(
-            "Nueva asignación de seguimiento", html_body, cta_url=settings.frontend_url, cta_label="Ir a GovRadar"
-        )
-        try:
-            _send_email(responsible.email, message, subject, html=html)
-        except Exception as exc:
-            logger.exception("No se pudo enviar el correo de asignación al responsable %s", responsible.id)
-            assignment.notification_status = "failed"
-            assignment.notification_error = str(exc)[:2000]
-        else:
-            assignment.notification_status = "sent"
-            assignment.notification_sent_at = datetime.utcnow()
-            assignment.notification_error = ""
 
 
 def send_stage_support_request(

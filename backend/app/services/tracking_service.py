@@ -20,7 +20,7 @@ from ..models import (
     User,
 )
 from ..radar_config import country_for_source
-from .tracking_notification_service import notify_stage_assignment, send_time_status_alert
+from .tracking_notification_service import send_time_status_alert
 
 PHASE_COTIZACION = "cotizacion"
 PHASE_PERFECCIONAMIENTO = "perfeccionamiento_contrato"
@@ -81,6 +81,7 @@ def _instantiate_stage(
         name=template.name,
         sort_order=template.sort_order,
         is_outcome_step=template.is_outcome_step,
+        is_informational=template.is_informational,
         due_date=due_date,
     )
     db.add(stage)
@@ -92,27 +93,26 @@ def _instantiate_stage(
     for area_id in template_area_ids:
         db.add(OpportunityTrackingStageArea(stage_id=stage.id, area_id=area_id))
 
+    # Nota: la asignación por defecto NO dispara correo automático -solo el botón
+    # manual "Enviar alerta" (StageSupportButton) notifica- para no llenar de spam la
+    # bandeja de los responsables cada vez que arranca un seguimiento o se abre una fase.
     country = country_for_source(opportunity.source)
     assignees_by_area = resolve_default_assignees(db, template_area_ids, country)
     seen_responsible_ids: set[int] = set()
-    new_assignments: list[OpportunityTrackingStageAssignee] = []
     for area_id, responsibles in assignees_by_area.items():
         for responsible in responsibles:
             if responsible.id in seen_responsible_ids:
                 continue
             seen_responsible_ids.add(responsible.id)
-            assignment = OpportunityTrackingStageAssignee(
-                stage_id=stage.id,
-                responsible_id=responsible.id,
-                area_id=area_id,
-                is_default=True,
+            db.add(
+                OpportunityTrackingStageAssignee(
+                    stage_id=stage.id,
+                    responsible_id=responsible.id,
+                    area_id=area_id,
+                    is_default=True,
+                )
             )
-            db.add(assignment)
-            new_assignments.append(assignment)
     db.flush()
-
-    if new_assignments:
-        notify_stage_assignment(db, stage, new_assignments, opportunity)
 
     return stage
 
@@ -129,8 +129,10 @@ def compute_cotizacion_due_dates(
     participación -> fecha de inicio del seguimiento. Cualquier etapa intermedia sin
     fecha oficial propia (ej. "Cotización", la preparación interna de la oferta) se
     reparte dentro de la ventana entre la última ancla conocida y el cierre de
-    propuesta, terminando siempre 1 día antes de ese cierre."""
-    non_outcome = [t for t in templates if not t.is_outcome_step]
+    propuesta, terminando siempre 1 día antes de ese cierre. Las etapas informativas
+    (ej. "Otorgamiento de la Buena Pro") quedan fuera de este reparto -su fecha viene
+    directamente del cronograma SEACE vía tracking_date_refresh_service, no de aquí."""
+    non_outcome = [t for t in templates if not t.is_outcome_step and not t.is_informational]
     if not non_outcome:
         return {}
     ordered = sorted(non_outcome, key=lambda t: t.sort_order)
@@ -179,6 +181,7 @@ def reanchor_cotizacion_due_dates(db: Session, tracking: OpportunityTracking, op
                 OpportunityTrackingStage.phase_id == phase.id,
                 OpportunityTrackingStage.completed.is_(False),
                 OpportunityTrackingStage.is_outcome_step.is_(False),
+                OpportunityTrackingStage.is_informational.is_(False),
             )
         )
     )
@@ -358,9 +361,11 @@ def update_stage_assignees(
     db: Session,
     stage: OpportunityTrackingStage,
     responsible_ids: list[int],
-    opportunity: Opportunity,
+    _opportunity: Opportunity,
     current_user: User,
 ) -> OpportunityTrackingStage:
+    # Nota: reasignar responsables NO dispara correo automático -solo el botón manual
+    # "Enviar alerta" notifica- para no llenar de spam la bandeja de los responsables.
     existing = list(
         db.scalars(select(OpportunityTrackingStageAssignee).where(OpportunityTrackingStageAssignee.stage_id == stage.id))
     )
@@ -371,20 +376,17 @@ def update_stage_assignees(
         if row.responsible_id not in target_ids:
             db.delete(row)
 
-    new_assignments: list[OpportunityTrackingStageAssignee] = []
     for responsible_id in target_ids - existing_ids:
-        assignment = OpportunityTrackingStageAssignee(
-            stage_id=stage.id,
-            responsible_id=responsible_id,
-            assigned_by_id=current_user.id,
-            is_default=False,
+        db.add(
+            OpportunityTrackingStageAssignee(
+                stage_id=stage.id,
+                responsible_id=responsible_id,
+                assigned_by_id=current_user.id,
+                is_default=False,
+            )
         )
-        db.add(assignment)
-        new_assignments.append(assignment)
 
     db.flush()
-    if new_assignments:
-        notify_stage_assignment(db, stage, new_assignments, opportunity)
 
     db.commit()
     db.refresh(stage)

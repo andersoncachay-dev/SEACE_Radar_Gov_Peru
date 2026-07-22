@@ -276,6 +276,7 @@ export type TrackingStageTemplate = {
   sort_order: number;
   is_active: boolean;
   is_outcome_step: boolean;
+  is_informational: boolean;
   default_duration_days: number | null;
   areas: TrackingArea[];
 };
@@ -285,6 +286,7 @@ export type TrackingStageTemplatePayload = {
   sort_order?: number;
   is_active?: boolean;
   is_outcome_step?: boolean;
+  is_informational?: boolean;
   default_duration_days?: number | null;
   area_ids?: number[];
 };
@@ -296,6 +298,7 @@ export type OpportunityTrackingStage = {
   name: string;
   sort_order: number;
   is_outcome_step: boolean;
+  is_informational: boolean;
   due_date: string | null;
   completed: boolean;
   completed_at: string | null;
@@ -335,6 +338,7 @@ export type OpportunityTrackingSummary = {
   source: string;
   status: string;
   current_phase_id: number | null;
+  current_stage_name: string;
   quotation_outcome: string;
   publication_date: string | null;
   proposal_deadline: string | null;
@@ -535,6 +539,8 @@ export const api = {
   runs: (token: string) => request<Run[]>("/runs", token, { cache: "no-store" }),
   schedulerStatus: (token: string, country: "peru" | "chile") =>
     request<SchedulerStatus>(`/runs/scheduler/status?country=${country}`, token),
+  triggerSchedulerRun: (token: string, country: "peru" | "chile") =>
+    request<SchedulerStatus>(`/runs/scheduler/trigger?country=${country}`, token, { method: "POST" }),
   schedulerIntervalConfig: (token: string, country: "peru" | "chile") =>
     request<SchedulerIntervalConfig>(`/app-settings/scheduler/${country}`, token),
   updateSchedulerIntervalConfig: (token: string, country: "peru" | "chile", config: Pick<SchedulerIntervalConfig, "days" | "hours" | "minutes">) =>

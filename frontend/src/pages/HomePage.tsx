@@ -619,6 +619,8 @@ export function Home({
   const [archiveError, setArchiveError] = useState("");
   const [copyNotice, setCopyNotice] = useState("");
   const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
+  const [triggeringUpdate, setTriggeringUpdate] = useState(false);
+  const [triggerError, setTriggerError] = useState("");
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const copyNoticeTimerRef = useRef<number | null>(null);
   const refreshRef = useRef(refresh);
@@ -755,6 +757,20 @@ export function Home({
     copyNoticeTimerRef.current = window.setTimeout(() => setCopyNotice(""), 3200);
   }
 
+  async function triggerManualUpdate() {
+    setTriggerError("");
+    setTriggeringUpdate(true);
+    try {
+      const status = await api.triggerSchedulerRun(token, country === "Chile" ? "chile" : "peru");
+      setSchedulerStatus(status);
+      await refresh();
+    } catch (error) {
+      setTriggerError(error instanceof Error ? error.message : "No se pudo iniciar el update manual");
+    } finally {
+      setTriggeringUpdate(false);
+    }
+  }
+
   async function removeHomeProcess() {
     if (!pendingHomeRemoval) return;
     setArchiveError("");
@@ -794,6 +810,7 @@ export function Home({
     setPendingHomeRemoval(null);
     setArchiveError("");
     setCopyNotice("");
+    setTriggerError("");
   }, [country]);
 
   useEffect(() => () => {
@@ -1047,6 +1064,9 @@ export function Home({
                       {item.contract_duration ? <span className="chile-ml-contract">Duración de contrato: {item.contract_duration}</span> : null}
                     </span>
                   ) : null}
+                  {item.publication_date ? (
+                    <span className="map-opportunity-publication-date">Fecha de convocatoria: {formatDate(item.publication_date)}</span>
+                  ) : null}
                   <span className="map-opportunity-amount">
                     <small className={item.amount > 0 ? "" : "amount-unpublished"}>
                       {item.amount > 0 ? "Monto detectado" : "Monto no publicado"}
@@ -1066,10 +1086,20 @@ export function Home({
           <div className="panel-title execution-panel-title">
             <h3>Updates Automáticos</h3>
             <div className="execution-title-actions">
+              <button
+                type="button"
+                className="ghost manual-update-button"
+                onClick={triggerManualUpdate}
+                disabled={triggeringUpdate || Boolean(schedulerStatus?.is_running)}
+                title="Forzar un update ahora, sin esperar al conteo automático"
+              >
+                {triggeringUpdate || schedulerStatus?.is_running ? "Actualizando..." : "Actualizar ahora"}
+              </button>
               <UpdateCountdown status={schedulerStatus} seconds={nextUpdateSeconds} />
               <span className={`status ${lastRun?.status || "queued"}`}>{lastRun?.status || "Sin datos"}</span>
             </div>
           </div>
+          {triggerError ? <div className="notice danger manual-update-error" role="alert">{triggerError}</div> : null}
           {lastRun ? <RunProgress run={lastRun} /> : <Empty text="Aun no hay ejecuciones registradas." />}
           <RunHistoryToday runs={todayRuns} />
         </article>

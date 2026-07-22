@@ -485,6 +485,7 @@ class TrackingStageTemplateCreate(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     sort_order: int = 0
     is_outcome_step: bool = False
+    is_informational: bool = False
     default_duration_days: int | None = Field(default=None, ge=0, le=365)
     area_ids: list[int] = Field(default_factory=list, max_length=20)
 
@@ -494,6 +495,7 @@ class TrackingStageTemplateUpdate(BaseModel):
     sort_order: int | None = None
     is_active: bool | None = None
     is_outcome_step: bool | None = None
+    is_informational: bool | None = None
     default_duration_days: int | None = Field(default=None, ge=0, le=365)
     area_ids: list[int] | None = Field(default=None, max_length=20)
 
@@ -509,6 +511,7 @@ class TrackingStageTemplateOut(ORMModel):
     sort_order: int
     is_active: bool
     is_outcome_step: bool
+    is_informational: bool
     default_duration_days: int | None
     areas: list[TrackingAreaOut] = Field(default_factory=list)
 
@@ -542,6 +545,7 @@ class TrackingStageOut(ORMModel):
     name: str
     sort_order: int
     is_outcome_step: bool
+    is_informational: bool
     due_date: datetime | None
     completed: bool
     completed_at: datetime | None
@@ -575,6 +579,7 @@ class OpportunityTrackingSummaryOut(BaseModel):
     source: str
     status: str
     current_phase_id: int | None
+    current_stage_name: str = ""
     quotation_outcome: str
     publication_date: datetime | None = None
     proposal_deadline: datetime | None = None

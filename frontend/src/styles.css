@@ -1661,6 +1661,20 @@ input::placeholder {
   gap: 10px;
 }
 
+.manual-update-button {
+  min-height: 34px;
+  border-radius: 10px;
+  padding: 0 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.manual-update-error {
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
 .panel-title .update-countdown {
   position: relative;
   isolation: isolate;
@@ -2477,6 +2491,16 @@ input::placeholder {
 }
 
 .chile-ml-contract {
+  font-size: 0.72rem;
+  color: #60748e;
+  font-weight: 650;
+}
+
+.map-opportunity-publication-date {
+  position: relative;
+  z-index: 2;
+  display: block;
+  margin-top: 4px;
   font-size: 0.72rem;
   color: #60748e;
   font-weight: 650;
@@ -8683,6 +8707,34 @@ table.has-motivo-column td:nth-child(13) {
   font-weight: 800;
 }
 
+.tracking-selector-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 2px;
+}
+
+.tracking-selector-current-stage {
+  flex: 1 1 auto;
+  min-width: 70px;
+  color: var(--blue-700);
+  font-size: 0.74rem;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tracking-selector-meta-row .pdf-button {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: 40px;
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 0.68rem;
+}
+
 .tracking-timeline {
   display: grid;
   gap: 14px;
@@ -8877,6 +8929,34 @@ table.has-motivo-column td:nth-child(13) {
 .tracking-stage-card.outcome-card-pendiente {
   border-left-color: #9aa9bd;
   background: #f7f9fc;
+}
+
+.tracking-stage-card-informational {
+  border-left-style: dashed;
+  border-left-color: #9aa9bd;
+  background: #f7f9fc;
+  opacity: 0.9;
+}
+
+.tracking-informational-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid #c8d2e0;
+  background: #eef1f6;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.tracking-stage-informational-date {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .tracking-stage-header {

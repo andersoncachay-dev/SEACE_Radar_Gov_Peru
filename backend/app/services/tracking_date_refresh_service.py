@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import AppSetting, Opportunity, OpportunityTracking
+from ..models import AppSetting, Opportunity, OpportunityTracking, OpportunityTrackingStage
 from ..radar_config import country_for_source
 from .ingestion_service import _as_datetime
 from .tracking_notification_service import send_opportunity_date_change_alert
@@ -24,6 +24,17 @@ DATE_FIELD_LABELS = {
     "consultation_deadline": "Fin de Consultas",
     "quote_deadline": "Fin de Cotización",
     "proposal_deadline": "Fin de Propuesta",
+}
+
+# Etapas informativas de Perú (no requieren gestión propia, solo trazabilidad):
+# el nombre debe calzar exacto con INFORMATIONAL_STAGES en la migracion
+# 20260722_0031_seace_informational_stages, que las siembra. La columna viene del
+# cronograma completo que ya trae src.seace_browser_scraper.
+INFORMATIONAL_STAGE_FIELDS = {
+    "Absolución de Consultas y Observaciones": "absolucion_fin",
+    "Integración de las Bases": "integracion_fin",
+    "Calificación y Evaluación de Propuestas": "evaluacion_fin",
+    "Otorgamiento de la Buena Pro": "buena_pro_fin",
 }
 
 
@@ -113,7 +124,36 @@ def _diff_dates(opportunity: Opportunity, incoming: dict[str, datetime | None]) 
     return changes
 
 
-def _refresh_peru(items: list[tuple[OpportunityTracking, Opportunity]]) -> dict[int, list[dict]]:
+def _diff_informational_stages(db: Session, tracking: OpportunityTracking, row) -> list[dict]:
+    """Revalida las etapas informativas del cronograma SEACE (Absolución de Consultas,
+    Integración de las Bases, Calificación y Evaluación, Otorgamiento de la Buena Pro):
+    no hay gestión comercial que hacer en ellas, solo dejar trazabilidad de sus fechas
+    reales según el portal. Actualiza due_date directo en la etapa -no son columnas de
+    Opportunity- y devuelve el mismo formato de "changes" que _diff_dates para que
+    fluyan por el mismo camino de alertas/UI."""
+    stages = db.scalars(
+        select(OpportunityTrackingStage).where(
+            OpportunityTrackingStage.tracking_id == tracking.id,
+            OpportunityTrackingStage.is_informational.is_(True),
+            OpportunityTrackingStage.name.in_(INFORMATIONAL_STAGE_FIELDS.keys()),
+        )
+    ).all()
+    changes = []
+    for stage in stages:
+        field = INFORMATIONAL_STAGE_FIELDS.get(stage.name)
+        if not field:
+            continue
+        new_value = _as_datetime(row.get(field))
+        if new_value is None:
+            continue
+        old_value = stage.due_date
+        if old_value is None or abs((old_value - new_value).total_seconds()) >= 60:
+            changes.append({"field": f"stage:{stage.id}", "label": stage.name, "old": old_value, "new": new_value})
+            stage.due_date = new_value
+    return changes
+
+
+def _refresh_peru(db: Session, items: list[tuple[OpportunityTracking, Opportunity]]) -> dict[int, list[dict]]:
     from src.seace_browser_scraper import search_seace_public_browser_targets
 
     targets = []
@@ -139,7 +179,7 @@ def _refresh_peru(items: list[tuple[OpportunityTracking, Opportunity]]) -> dict[
         if _schedule_key(row.get("Nomenclatura", ""))
     }
     changes_by_opportunity: dict[int, list[dict]] = {}
-    for _tracking, opportunity in items:
+    for tracking, opportunity in items:
         row = by_key.get(_schedule_key(opportunity.nomenclature))
         if row is None:
             continue
@@ -149,15 +189,17 @@ def _refresh_peru(items: list[tuple[OpportunityTracking, Opportunity]]) -> dict[
             "proposal_deadline": _as_datetime(row.get("propuesta_fin")),
         }
         changes = _diff_dates(opportunity, incoming)
-        if changes:
-            for change in changes:
-                setattr(opportunity, change["field"], change["new"])
+        for change in changes:
+            setattr(opportunity, change["field"], change["new"])
+        stage_changes = _diff_informational_stages(db, tracking, row)
+        all_changes = changes + stage_changes
+        if all_changes:
             # Marca el cronograma como validado directamente en SEACE, igual que hace
             # el enriquecimiento de detalle del scheduler automático - así una corrida
             # OCDS posterior (menos confiable para estas fechas) no la vuelve a pisar.
             opportunity.schedule_source = "seace"
             opportunity.schedule_validated_at = datetime.utcnow()
-            changes_by_opportunity[opportunity.id] = changes
+            changes_by_opportunity[opportunity.id] = all_changes
     return changes_by_opportunity
 
 
@@ -215,18 +257,27 @@ def refresh_active_opportunity_dates(db: Session, country: str) -> dict:
             return result
 
         try:
-            changes_by_opportunity = _refresh_peru(pending) if country == "peru" else _refresh_chile(pending)
+            changes_by_opportunity = _refresh_peru(db, pending) if country == "peru" else _refresh_chile(pending)
         except Exception:
             logger.exception("Fallo al revalidar fechas de oportunidades de %s", country)
             changes_by_opportunity = {}
             result["errors"] += 1
 
+        now = datetime.utcnow()
         for tracking, opportunity in pending:
             changes = changes_by_opportunity.get(opportunity.id)
             if not changes:
                 continue
             reanchor_cotizacion_due_dates(db, tracking, opportunity)
-            sent, failed = send_opportunity_date_change_alert(db, tracking, opportunity, changes)
+            # Una fecha nueva que ya vencio al momento de detectarla no es gestionable
+            # por correo -queda igual reflejada en la plataforma, pero no tiene sentido
+            # avisar de una accion que ya no se puede tomar.
+            actionable_changes = [change for change in changes if change["new"] >= now]
+            sent, failed = (
+                send_opportunity_date_change_alert(db, tracking, opportunity, actionable_changes)
+                if actionable_changes
+                else (0, 0)
+            )
             result["changed"].append(
                 {
                     "opportunity_id": opportunity.id,
