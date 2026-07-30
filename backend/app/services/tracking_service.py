@@ -230,6 +230,70 @@ def get_tracking_for_opportunity(db: Session, opportunity_id: int) -> Opportunit
     return db.scalar(select(OpportunityTracking).where(OpportunityTracking.opportunity_id == opportunity_id))
 
 
+def current_stage_names_for_trackings(db: Session, tracking_ids: list[int]) -> dict[int, str]:
+    """Etapa que mejor representa donde esta cada tracking ahora mismo, para el
+    selector de la lista. Prioriza la ultima etapa gestionable ya iniciada (por fecha,
+    igual que el semaforo de tiempo del frontend) y sin completar por sobre una etapa
+    anterior vencida que nadie marco manualmente -evita mostrar una etapa vieja
+    "atascada" cuando el equipo ya esta trabajando en la siguiente-. Si ninguna etapa
+    empezo todavia cae a la primera sin completar; si todo esta completado, a la
+    ultima. Las etapas informativas del cronograma SEACE nunca cuentan como "actual"
+    -no son gestionables- ni interrumpen la cadena de fechas (mismo criterio que
+    stageWindowStart en el frontend)."""
+    if not tracking_ids:
+        return {}
+    now = datetime.utcnow()
+    trackings = {
+        t.id: t for t in db.scalars(select(OpportunityTracking).where(OpportunityTracking.id.in_(tracking_ids)))
+    }
+    opportunity_ids = {t.opportunity_id for t in trackings.values()}
+    opportunities = (
+        {o.id: o for o in db.scalars(select(Opportunity).where(Opportunity.id.in_(opportunity_ids)))}
+        if opportunity_ids
+        else {}
+    )
+    stage_rows = list(
+        db.scalars(
+            select(OpportunityTrackingStage)
+            .join(TrackingPhase, TrackingPhase.id == OpportunityTrackingStage.phase_id)
+            .where(OpportunityTrackingStage.tracking_id.in_(tracking_ids))
+            .order_by(OpportunityTrackingStage.tracking_id, TrackingPhase.sort_order, OpportunityTrackingStage.sort_order)
+        )
+    )
+    phase_keys = {p.id: p.key for p in db.scalars(select(TrackingPhase))}
+
+    by_tracking: dict[int, list[OpportunityTrackingStage]] = {}
+    for stage in stage_rows:
+        by_tracking.setdefault(stage.tracking_id, []).append(stage)
+
+    result: dict[int, str] = {}
+    for tracking_id, stages in by_tracking.items():
+        tracking = trackings.get(tracking_id)
+        opportunity = opportunities.get(tracking.opportunity_id) if tracking else None
+        last_name = stages[-1].name
+        first_incomplete_name = ""
+        started_incomplete_name = ""
+        previous_due: datetime | None = None
+        previous_phase_id: int | None = None
+        for stage in stages:
+            if stage.phase_id != previous_phase_id:
+                previous_phase_id = stage.phase_id
+                previous_due = opportunity.publication_date if (
+                    opportunity and phase_keys.get(stage.phase_id) == PHASE_COTIZACION
+                ) else None
+            window_start = previous_due
+            if not stage.is_informational and not stage.is_outcome_step:
+                previous_due = stage.due_date
+            if stage.is_informational or stage.is_outcome_step or stage.completed:
+                continue
+            if not first_incomplete_name:
+                first_incomplete_name = stage.name
+            if window_start is not None and now >= window_start:
+                started_incomplete_name = stage.name
+        result[tracking_id] = started_incomplete_name or first_incomplete_name or last_name
+    return result
+
+
 def start_tracking(db: Session, opportunity: Opportunity, current_user: User) -> OpportunityTracking:
     existing = get_tracking_for_opportunity(db, opportunity.id)
     if existing:
@@ -352,6 +416,27 @@ def update_stage_areas(db: Session, stage: OpportunityTrackingStage, area_ids: l
     db.execute(delete(OpportunityTrackingStageArea).where(OpportunityTrackingStageArea.stage_id == stage.id))
     for area_id in area_ids:
         db.add(OpportunityTrackingStageArea(stage_id=stage.id, area_id=area_id))
+    db.flush()
+
+    # Un responsable solo debe seguir asignado si pertenece a alguna de las áreas que
+    # quedan habilitadas en la etapa -al quitar un área, se retiran junto con ella los
+    # responsables que ya no tienen ningún área que los respalde-.
+    valid_responsible_ids = (
+        set(
+            db.scalars(
+                select(TrackingAreaResponsible.responsible_id).where(TrackingAreaResponsible.area_id.in_(area_ids))
+            )
+        )
+        if area_ids
+        else set()
+    )
+    existing_assignees = list(
+        db.scalars(select(OpportunityTrackingStageAssignee).where(OpportunityTrackingStageAssignee.stage_id == stage.id))
+    )
+    for assignee in existing_assignees:
+        if assignee.responsible_id not in valid_responsible_ids:
+            db.delete(assignee)
+
     db.commit()
     db.refresh(stage)
     return stage
@@ -447,8 +532,12 @@ def evaluate_time_status_alerts(db: Session) -> dict[str, int]:
             previous_due = opportunity.publication_date if phase_id == cotizacion_phase_id else None
             for stage in ordered:
                 window_start = previous_due
-                previous_due = stage.due_date
-                if stage.is_outcome_step or stage.completed:
+                if not stage.is_informational and not stage.is_outcome_step:
+                    previous_due = stage.due_date
+                # Las etapas informativas del cronograma SEACE no son gestionables -no
+                # tiene sentido alertar "Atender"/"Urgente" sobre ellas- ni deben cortar
+                # la cadena de fechas para la etapa gestionable siguiente.
+                if stage.is_informational or stage.is_outcome_step or stage.completed:
                     continue
                 tier = _stage_time_status(stage.due_date, window_start, now)
                 if tier in (None, "on_time"):

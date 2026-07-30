@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, Alert, Opportunity, Run, SchedulerStatus, Stats } from "../api";
-import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, RunProgress, commercialSignal, countryFlagUrls, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, parseDate, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
+import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, RunProgress, commercialSignal, countryFlagUrls, formatDate, formatMoney, formatUtcDate, keywordFromRun, matchesCompletePhrase, parseDate, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
 import { alertStatusLabel, ChannelSymbol } from "./AlertsPage";
 import { excelLogoUrl, exportOpportunitiesToExcel, isOpportunityNew } from "./OpportunitiesPage";
 
@@ -1127,7 +1127,7 @@ export function Home({
                   <div className="recent-alert-status">
                     <span className={`event-status-label ${alert.status}`}>{alertStatusLabel(alert.status)}</span>
                     {alert.run_id ? <small>Run #{alert.run_id} · 1 proceso</small> : null}
-                    <small>{formatDate(alert.created_at)}</small>
+                    <small>{formatUtcDate(alert.created_at)}</small>
                   </div>
                 </div>
               );

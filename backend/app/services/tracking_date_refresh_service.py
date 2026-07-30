@@ -240,6 +240,59 @@ def _refresh_chile(items: list[tuple[OpportunityTracking, Opportunity]]) -> dict
     return changes_by_opportunity
 
 
+def _apply_date_refresh(
+    db: Session, country: str, pending: list[tuple[OpportunityTracking, Opportunity]]
+) -> dict:
+    """Revalida SEACE/Mercado Público para el lote de trackings dado, guarda los
+    cambios, reancla Cotización y avisa por correo -compartido entre el ciclo
+    automático por país y el botón manual de una sola oportunidad."""
+    result: dict = {"ran_at": datetime.utcnow().isoformat(), "checked": len(pending), "changed": [], "errors": 0}
+    if not pending:
+        return result
+
+    try:
+        changes_by_opportunity = _refresh_peru(db, pending) if country == "peru" else _refresh_chile(pending)
+    except Exception:
+        logger.exception("Fallo al revalidar fechas de oportunidades de %s", country)
+        changes_by_opportunity = {}
+        result["errors"] += 1
+
+    now = datetime.utcnow()
+    for tracking, opportunity in pending:
+        changes = changes_by_opportunity.get(opportunity.id)
+        if not changes:
+            continue
+        reanchor_cotizacion_due_dates(db, tracking, opportunity)
+        # Una fecha nueva que ya vencio al momento de detectarla no es gestionable
+        # por correo -queda igual reflejada en la plataforma, pero no tiene sentido
+        # avisar de una accion que ya no se puede tomar.
+        actionable_changes = [change for change in changes if change["new"] >= now]
+        sent, failed = (
+            send_opportunity_date_change_alert(db, tracking, opportunity, actionable_changes)
+            if actionable_changes
+            else (0, 0)
+        )
+        result["changed"].append(
+            {
+                "opportunity_id": opportunity.id,
+                "entity": opportunity.entity,
+                "nomenclature": opportunity.nomenclature,
+                "changes": [
+                    {
+                        "field": item["field"],
+                        "label": item["label"],
+                        "old": item["old"].isoformat() if item["old"] else None,
+                        "new": item["new"].isoformat() if item["new"] else None,
+                    }
+                    for item in changes
+                ],
+                "alerts_sent": sent,
+                "alerts_failed": failed,
+            }
+        )
+    return result
+
+
 def refresh_active_opportunity_dates(db: Session, country: str) -> dict:
     """Re-consulta SEACE (Perú) o Mercado Público (Chile) para cada oportunidad activa
     en seguimiento de ese país cuya fecha de propuesta aún no vence -las entidades
@@ -251,56 +304,29 @@ def refresh_active_opportunity_dates(db: Session, country: str) -> dict:
     result: dict = {"ran_at": datetime.utcnow().isoformat(), "checked": 0, "changed": [], "errors": 0}
     try:
         pending = _active_pending_trackings(db, country)
-        result["checked"] = len(pending)
-        if not pending:
-            _save_last_run(db, country, result)
-            return result
-
-        try:
-            changes_by_opportunity = _refresh_peru(db, pending) if country == "peru" else _refresh_chile(pending)
-        except Exception:
-            logger.exception("Fallo al revalidar fechas de oportunidades de %s", country)
-            changes_by_opportunity = {}
-            result["errors"] += 1
-
-        now = datetime.utcnow()
-        for tracking, opportunity in pending:
-            changes = changes_by_opportunity.get(opportunity.id)
-            if not changes:
-                continue
-            reanchor_cotizacion_due_dates(db, tracking, opportunity)
-            # Una fecha nueva que ya vencio al momento de detectarla no es gestionable
-            # por correo -queda igual reflejada en la plataforma, pero no tiene sentido
-            # avisar de una accion que ya no se puede tomar.
-            actionable_changes = [change for change in changes if change["new"] >= now]
-            sent, failed = (
-                send_opportunity_date_change_alert(db, tracking, opportunity, actionable_changes)
-                if actionable_changes
-                else (0, 0)
-            )
-            result["changed"].append(
-                {
-                    "opportunity_id": opportunity.id,
-                    "entity": opportunity.entity,
-                    "nomenclature": opportunity.nomenclature,
-                    "changes": [
-                        {
-                            "field": item["field"],
-                            "label": item["label"],
-                            "old": item["old"].isoformat() if item["old"] else None,
-                            "new": item["new"].isoformat() if item["new"] else None,
-                        }
-                        for item in changes
-                    ],
-                    "alerts_sent": sent,
-                    "alerts_failed": failed,
-                }
-            )
-
+        result = _apply_date_refresh(db, country, pending)
         db.commit()
     except Exception:
         logger.exception("Fallo inesperado en refresh_active_opportunity_dates (%s)", country)
         result["errors"] += 1
 
     _save_last_run(db, country, result)
+    return result
+
+
+def refresh_single_opportunity_dates(db: Session, opportunity_id: int) -> dict:
+    """Revalida SEACE/Mercado Público para UNA sola oportunidad en seguimiento, a
+    pedido explícito del gestor desde el detalle -sin esperar el ciclo automático del
+    país-. Útil para traer de inmediato una fecha que el cronograma SEACE aún no
+    tenía en la última corrida automática (ej. Calificación y Evaluación de
+    Propuestas, Otorgamiento de la Buena Pro)."""
+    opportunity = db.get(Opportunity, opportunity_id)
+    if not opportunity:
+        raise ValueError("Oportunidad no encontrada")
+    tracking = db.scalar(select(OpportunityTracking).where(OpportunityTracking.opportunity_id == opportunity_id))
+    if not tracking:
+        raise ValueError("La oportunidad no está en seguimiento")
+    country = country_for_source(opportunity.source)
+    result = _apply_date_refresh(db, country, [(tracking, opportunity)])
+    db.commit()
     return result

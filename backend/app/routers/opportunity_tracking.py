@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import get_current_user, require_source_access, source_access_condition
-from ..models import Opportunity, OpportunityTracking, OpportunityTrackingStage, TrackingPhase, User
+from ..models import Opportunity, OpportunityTracking, OpportunityTrackingStage, User
 from ..schemas import (
     CoResponsibleUpdateIn,
     OpportunityTrackingOut,
@@ -30,7 +30,7 @@ from ..schemas import (
 )
 from ..services import tracking_service
 from ..services.scheduler_service import tracking_date_refresh_status
-from ..services.tracking_date_refresh_service import get_last_date_refresh_result
+from ..services.tracking_date_refresh_service import get_last_date_refresh_result, refresh_single_opportunity_dates
 from ..services.tracking_notification_service import send_stage_support_request
 
 router = APIRouter(prefix="/opportunity-tracking", tags=["tracking"])
@@ -157,21 +157,7 @@ def list_trackings(
     user_names = {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_(user_ids)))} if user_ids else {}
 
     tracking_ids = [tracking.id for tracking, _ in rows]
-    current_stage_names: dict[int, str] = {}
-    if tracking_ids:
-        last_stage_names: dict[int, str] = {}
-        stage_rows = db.execute(
-            select(OpportunityTrackingStage)
-            .join(TrackingPhase, TrackingPhase.id == OpportunityTrackingStage.phase_id)
-            .where(OpportunityTrackingStage.tracking_id.in_(tracking_ids))
-            .order_by(TrackingPhase.sort_order, OpportunityTrackingStage.sort_order)
-        ).scalars()
-        for stage in stage_rows:
-            last_stage_names[stage.tracking_id] = stage.name
-            if stage.tracking_id not in current_stage_names and stage.status != "completado":
-                current_stage_names[stage.tracking_id] = stage.name
-        for tracking_id, name in last_stage_names.items():
-            current_stage_names.setdefault(tracking_id, name)
+    current_stage_names = tracking_service.current_stage_names_for_trackings(db, tracking_ids)
 
     return [
         OpportunityTrackingSummaryOut(
@@ -207,6 +193,20 @@ def get_tracking(
     opportunity = _load_opportunity(db, opportunity_id, current_user)
     tracking = _load_tracking(db, opportunity)
     return _tracking_out(db, tracking)
+
+
+@router.post("/{opportunity_id}/refresh-dates")
+def refresh_dates(
+    opportunity_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    opportunity = _load_opportunity(db, opportunity_id, current_user)
+    _load_tracking(db, opportunity)
+    try:
+        return refresh_single_opportunity_dates(db, opportunity_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.put("/{opportunity_id}/co-responsible", response_model=OpportunityTrackingOut)

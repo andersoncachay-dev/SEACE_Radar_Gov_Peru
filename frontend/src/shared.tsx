@@ -75,6 +75,18 @@ export function formatDate(value: string | null) {
   return new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+// Para timestamps que el propio backend genera en UTC real (created_at, sent_at,
+// corridas del scheduler) - a diferencia de fechas SEACE/Mercado Público como
+// consultation_deadline, que ya vienen en hora local del país y no deben convertirse.
+// Mismo criterio que backendRunDate/formatRunTime en HomePage.tsx.
+export function formatUtcDate(value: string | null) {
+  if (!value) return "-";
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const date = new Date(hasTimezone ? value : `${value}Z`);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Lima" }).format(date);
+}
+
 export function parseDate(value: string | null) {
   if (!value) return null;
   const timestamp = new Date(value).getTime();

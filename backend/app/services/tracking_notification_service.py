@@ -43,16 +43,15 @@ def send_stage_support_request(
 
     country_label = "Chile" if country_for_source(opportunity.source) == "chile" else "Perú"
     due_label = stage.due_date.strftime("%d/%m/%Y") if stage.due_date else "Por definir"
-    subject = f"GovRadar · Solicitud de apoyo — {opportunity.nomenclature or opportunity.entity}"
+    subject = f"GovRadar · Solicitud de Soporte — {opportunity.nomenclature or opportunity.entity}"
 
+    # opportunity.detail_url apunta al endpoint crudo de la API OCDS (JSON), no a una
+    # pagina legible para el responsable -por eso solo se enlazan las bases/requerimiento.
     document_links_text = ""
     document_links_html = ""
     if opportunity.requirement_pdf_url:
         document_links_text += f"\nBases / requerimiento: {opportunity.requirement_pdf_url}"
         document_links_html += f'<p><a href="{opportunity.requirement_pdf_url}">Ver bases / requerimiento</a></p>'
-    if opportunity.detail_url:
-        document_links_text += f"\nPublicación original: {opportunity.detail_url}"
-        document_links_html += f'<p><a href="{opportunity.detail_url}">Ver publicación original</a></p>'
 
     sent = 0
     failed = 0
@@ -97,7 +96,7 @@ def send_stage_support_request(
             f"{custom_note_html}"
             "<p>Gracias de antemano por tu apoyo.</p>"
         )
-        html = _branded_email_html("Solicitud de apoyo", html_body, cta_url=settings.frontend_url, cta_label="Ir a GovRadar")
+        html = _branded_email_html("Solicitud de Soporte", html_body, cta_url=settings.frontend_url, cta_label="Ir a GovRadar")
         try:
             _send_email(responsible.email, plain_message, subject, html=html)
         except Exception:

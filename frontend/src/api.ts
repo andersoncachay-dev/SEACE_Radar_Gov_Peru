@@ -742,6 +742,13 @@ export const api = {
     }),
   advanceTrackingPhase: (token: string, opportunityId: number) =>
     request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}/advance-phase`, token, { method: "POST" }),
+  refreshTrackingDates: (token: string, opportunityId: number) =>
+    request<{
+      ran_at: string;
+      checked: number;
+      errors: number;
+      changed: { opportunity_id: number; changes: { field: string; label: string; old: string | null; new: string | null }[] }[];
+    }>(`/opportunity-tracking/${opportunityId}/refresh-dates`, token, { method: "POST" }),
   sendStageSupportRequest: (token: string, stageId: number, responsibleIds: number[], message: string = "") =>
     request<{ sent: number; failed: number }>(`/opportunity-tracking/stages/${stageId}/notify`, token, {
       method: "POST",

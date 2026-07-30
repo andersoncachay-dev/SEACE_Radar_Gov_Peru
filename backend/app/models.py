@@ -331,8 +331,8 @@ class OpportunityTrackingStage(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default="pendiente", nullable=False)
     outcome: Mapped[str] = mapped_column(String(10), default="", nullable=False)
     is_informational: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    alert_atender_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    alert_urgente_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    alert_atender_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    alert_urgente_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_time_alert_status: Mapped[str] = mapped_column(String(20), default="", nullable=False)
 
     areas: Mapped[list["TrackingArea"]] = relationship(secondary="opportunity_tracking_stage_areas", viewonly=True, order_by="TrackingArea.sort_order")

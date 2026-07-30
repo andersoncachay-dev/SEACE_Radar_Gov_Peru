@@ -21,7 +21,7 @@ export type SearchMode = "append" | "replace";
 export type OpportunityVariant = "radar" | "ocds";
 
 export type TableColumnFilters = {
-  priority: string; entity: string; process: string; description: string;
+  priority: string; entity: string; process: string; description: string; trackedOnly: boolean;
   publicationFrom: string; publicationTo: string;
   consultationFrom: string; consultationTo: string;
   consultationDaysMin: string; consultationDaysMax: string;
@@ -31,7 +31,7 @@ export type TableColumnFilters = {
 };
 
 export const emptyTableColumnFilters: TableColumnFilters = {
-  priority: "", entity: "", process: "", description: "",
+  priority: "", entity: "", process: "", description: "", trackedOnly: false,
   publicationFrom: "", publicationTo: "",
   consultationFrom: "", consultationTo: "",
   consultationDaysMin: "", consultationDaysMax: "",
@@ -2108,6 +2108,7 @@ export function OpportunityTable({
       if (entityNeedle && !normalizedSearchTerm(item.entity).includes(entityNeedle)) return false;
       if (processNeedle && !normalizedSearchTerm(item.nomenclature).includes(processNeedle)) return false;
       if (descriptionNeedle && !normalizedSearchTerm(item.description).includes(descriptionNeedle)) return false;
+      if (columnFilters.trackedOnly && !trackedOpportunityIds.has(item.id)) return false;
       if (!dateMatch(item.publication_date, columnFilters.publicationFrom, columnFilters.publicationTo)) return false;
       if (!dateMatch(item.consultation_deadline, columnFilters.consultationFrom, columnFilters.consultationTo)) return false;
       if ((columnFilters.consultationDaysMin || columnFilters.consultationDaysMax) && !numericMatch(remainingWholeDays(item.consultation_deadline, countdownNow), columnFilters.consultationDaysMin, columnFilters.consultationDaysMax)) return false;
@@ -2116,7 +2117,7 @@ export function OpportunityTable({
       if (columnFilters.amountReserved) return !Number.isFinite(item.amount) || item.amount <= 0;
       return !(columnFilters.amountMin || columnFilters.amountMax) || numericMatch(item.amount, columnFilters.amountMin, columnFilters.amountMax);
     });
-  }, [rowsWithSignals, commercialFilter, columnFilters, countdownNow]);
+  }, [rowsWithSignals, commercialFilter, columnFilters, countdownNow, trackedOpportunityIds]);
 
   const sortedRows = useMemo(() => {
     if (actionMode === "restore") {
@@ -2261,8 +2262,9 @@ export function OpportunityTable({
                 <label>Nomenclatura<input value={columnFilters.process} onChange={(event) => updateColumnFilter("process", event.target.value)} placeholder="Escribir proceso" /></label>
               </FilterTh>
               <th><span className="plain-header">Documentos</span></th>
-              <FilterTh label={country === "Chile" ? "Descripción c/ Estado y\nTiempo (MP.cl)" : "Descripcion"} active={Boolean(columnFilters.description)} onClear={() => updateColumnFilter("description", "")}>
+              <FilterTh label={country === "Chile" ? "Descripción c/ Estado y\nTiempo (MP.cl)" : "Descripcion"} active={Boolean(columnFilters.description || columnFilters.trackedOnly)} onClear={() => setColumnFilters((current) => ({ ...current, description: "", trackedOnly: false }))}>
                 <label>Descripción<input value={columnFilters.description} onChange={(event) => updateColumnFilter("description", event.target.value)} placeholder="Escribir descripción" /></label>
+                <label className="reserved-amount-filter"><input type="checkbox" checked={columnFilters.trackedOnly} onChange={(event) => updateColumnFilter("trackedOnly", event.target.checked)} /><span>Solo "En módulo Seguimiento"</span></label>
               </FilterTh>
               <FilterTh label="Fecha de\nconvocatoria" active={Boolean(columnFilters.publicationFrom || columnFilters.publicationTo)} onClear={() => setColumnFilters((current) => ({ ...current, publicationFrom: "", publicationTo: "" }))}>
                 <DateRangeFilter from={columnFilters.publicationFrom} to={columnFilters.publicationTo} onFromChange={(value) => updateColumnFilter("publicationFrom", value)} onToChange={(value) => updateColumnFilter("publicationTo", value)} />
@@ -2517,7 +2519,16 @@ export function ManageOpportunityMenu({
                 {hasReview ? "Actualizar Revisión" : "Dejar en Revisión"}
               </button>
               <button className="manage-menu-item" type="button" disabled={isTracked || busy} onClick={handleSendToTracking}>
-                {isTracked ? "Ya en Seguimiento" : "Enviar a Seguimiento"}
+                {busy ? (
+                  <span className="manage-menu-item-busy">
+                    <span className="button-spinner compact" aria-hidden="true" />
+                    Enviando...
+                  </span>
+                ) : isTracked ? (
+                  "Ya en Seguimiento"
+                ) : (
+                  "Enviar a Seguimiento"
+                )}
               </button>
             </>
           ) : (
@@ -2699,7 +2710,7 @@ export function OpportunityRow({
   const isLargePurchase = item.source.toLowerCase() === "mercado_publico_grandes_compras";
   const isNewOpportunity = isOpportunityNew(item);
   return (
-    <tr className={isActive ? "row-active" : ""} onClick={onActivate}>
+    <tr className={`${isActive ? "row-active" : ""} ${isTracked ? "row-tracked" : ""}`} onClick={onActivate}>
       <td><span className={`priority p${item.priority}`}>{item.priority}</span></td>
       {actionMode === "restore" ? (
         <td>
@@ -2742,6 +2753,7 @@ export function OpportunityRow({
         </button>
       </td>
       <td>
+        {isTracked ? <span className="tracking-active-badge">En módulo Seguimiento</span> : null}
         <HighlightedText text={item.description} terms={highlightTerms} />
         {country === "Chile" && (item.source_status || item.contract_duration) ? (
           <div className="chile-ml-meta">
@@ -3003,7 +3015,7 @@ export function remainingWholeDays(value: string | null, now: number) {
   return Math.max(0, Math.floor((timestamp - now) / (24 * 60 * 60 * 1000)));
 }
 
-export function formatDeadlineCountdown(value: string | null, now: number) {
+export function deadlineCountdownText(value: string | null, now: number): string {
   const timestamp = parseDate(value);
   if (timestamp === null) return "-";
   const difference = timestamp - now;
@@ -3011,14 +3023,29 @@ export function formatDeadlineCountdown(value: string | null, now: number) {
   const totalHours = Math.floor(Math.abs(difference) / (60 * 60 * 1000));
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
-  const urgency = expired ? "expired" : days <= 3 ? "urgent" : days <= 7 ? "warning" : "safe";
   const dayLabel = days === 1 ? "día" : "días";
-  const expiredLabel = totalHours < 24
-    ? `Fuera de Plazo hace ${totalHours} ${totalHours === 1 ? "hora" : "horas"}`
-    : `Fuera de Plazo hace ${days} ${dayLabel}`;
+  if (expired) {
+    return totalHours < 24
+      ? `Fuera de Plazo hace ${totalHours} ${totalHours === 1 ? "hora" : "horas"}`
+      : `Fuera de Plazo hace ${days} ${dayLabel}`;
+  }
+  return `${days} ${dayLabel} ${hours} h para fin`;
+}
+
+export function deadlineCountdownUrgency(value: string | null, now: number): "expired" | "urgent" | "warning" | "safe" | null {
+  const timestamp = parseDate(value);
+  if (timestamp === null) return null;
+  const difference = timestamp - now;
+  if (difference < 0) return "expired";
+  const days = Math.floor(difference / (24 * 60 * 60 * 1000));
+  return days <= 3 ? "urgent" : days <= 7 ? "warning" : "safe";
+}
+
+export function formatDeadlineCountdown(value: string | null, now: number) {
+  const urgency = deadlineCountdownUrgency(value, now);
   return (
-    <strong className={`deadline-countdown ${urgency}`} title={formatDate(value)}>
-      {expired ? expiredLabel : `${days} ${dayLabel} ${hours} h para fin`}
+    <strong className={`deadline-countdown ${urgency ?? ""}`} title={formatDate(value)}>
+      {deadlineCountdownText(value, now)}
     </strong>
   );
 }

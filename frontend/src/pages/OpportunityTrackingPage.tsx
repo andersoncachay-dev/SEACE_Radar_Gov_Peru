@@ -15,7 +15,7 @@ import {
   TrackingStageTemplate,
 } from "../api";
 import { ConfirmModal, Empty, formatDate, useDismissableMenu } from "../shared";
-import { excelLogoUrl, OpportunityDetailModal } from "./OpportunitiesPage";
+import { deadlineCountdownText, excelLogoUrl, formatDeadlineCountdown, OpportunityDetailModal } from "./OpportunitiesPage";
 
 function countryScopeLabel(scope: CountryScope) {
   return scope === "ambos" ? "Perú y Chile" : scope === "peru" ? "Perú" : "Chile";
@@ -343,24 +343,30 @@ function StageCard({
           </button>
           {assigneeMenuOpen ? (
             <div className="tracking-chip-menu" role="menu">
-              {responsibles.map((responsible) => {
-                const checked = stage.assignees.some((item) => item.id === responsible.id);
-                return (
-                  <label key={responsible.id}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(event) => {
-                        const nextIds = event.target.checked
-                          ? [...stage.assignees.map((item) => item.id), responsible.id]
-                          : stage.assignees.filter((item) => item.id !== responsible.id).map((item) => item.id);
-                        onChangeAssignees(stage, nextIds);
-                      }}
-                    />
-                    {responsible.full_name}
-                  </label>
-                );
-              })}
+              {stage.areas.length ? (
+                responsibles
+                  .filter((responsible) => responsible.areas.some((area) => stage.areas.some((stageArea) => stageArea.id === area.id)))
+                  .map((responsible) => {
+                    const checked = stage.assignees.some((item) => item.id === responsible.id);
+                    return (
+                      <label key={responsible.id}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            const nextIds = event.target.checked
+                              ? [...stage.assignees.map((item) => item.id), responsible.id]
+                              : stage.assignees.filter((item) => item.id !== responsible.id).map((item) => item.id);
+                            onChangeAssignees(stage, nextIds);
+                          }}
+                        />
+                        {responsible.full_name}
+                      </label>
+                    );
+                  })
+              ) : (
+                <small className="tracking-chip-menu-empty">Asigna un área primero para ver sus responsables.</small>
+              )}
             </div>
           ) : null}
         </div>
@@ -596,6 +602,8 @@ function TrackingWorkspace({
   const [coResponsibleBusy, setCoResponsibleBusy] = useState(false);
   const [confirmingWithdraw, setConfirmingWithdraw] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [refreshingDates, setRefreshingDates] = useState(false);
+  const [refreshDatesFeedback, setRefreshDatesFeedback] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -645,6 +653,7 @@ function TrackingWorkspace({
 
   function selectOpportunity(id: number) {
     setSelectedId(id);
+    setRefreshDatesFeedback("");
     void loadDetail(id);
   }
 
@@ -734,6 +743,27 @@ function TrackingWorkspace({
   function handleAdvancePhase() {
     if (selectedId === null) return;
     void withBusy(() => api.advanceTrackingPhase(token, selectedId));
+  }
+
+  async function handleRefreshDates() {
+    if (selectedId === null) return;
+    setRefreshingDates(true);
+    setRefreshDatesFeedback("");
+    setError("");
+    try {
+      const result = await api.refreshTrackingDates(token, selectedId);
+      const changeCount = result.changed[0]?.changes.length ?? 0;
+      setRefreshDatesFeedback(
+        changeCount
+          ? `${changeCount} fecha${changeCount === 1 ? "" : "s"} actualizada${changeCount === 1 ? "" : "s"}.`
+          : "Sin cambios, ya estaba al día.",
+      );
+      await refreshDetail();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo actualizar las fechas");
+    } finally {
+      setRefreshingDates(false);
+    }
   }
 
   async function handleSaveCoResponsible() {
@@ -840,7 +870,26 @@ function TrackingWorkspace({
             <>
               <div className="tracking-detail-header">
                 <div className="tracking-detail-header-main">
-                  <h3>{selectedSummary?.nomenclature}</h3>
+                  <div className="tracking-detail-title-row">
+                    <h3>{selectedSummary?.nomenclature}</h3>
+                    <button
+                      type="button"
+                      className="ghost tracking-refresh-dates-button"
+                      disabled={refreshingDates}
+                      onClick={() => void handleRefreshDates()}
+                      title="Revalida ahora mismo las fechas de este proceso contra SEACE / Mercado Público, sin esperar al ciclo automático"
+                    >
+                      {refreshingDates ? (
+                        <>
+                          <span className="button-spinner compact" aria-hidden="true" />
+                          Actualizando...
+                        </>
+                      ) : (
+                        "Actualizar Fechas"
+                      )}
+                    </button>
+                    {refreshDatesFeedback ? <small className="tracking-refresh-dates-feedback">{refreshDatesFeedback}</small> : null}
+                  </div>
                   <p>{selectedSummary?.entity}</p>
                   {selectedSummary?.description ? <p className="tracking-detail-description">{selectedSummary.description}</p> : null}
                 </div>
@@ -990,6 +1039,12 @@ function ConsolidatedView({ token, country }: { token: string; country: "peru" |
   const [search, setSearch] = useState("");
   const [phaseFilter, setPhaseFilter] = useState<number | "all">("all");
   const [exporting, setExporting] = useState(false);
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setCountdownNow(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -1076,9 +1131,9 @@ function ConsolidatedView({ token, country }: { token: string; country: "peru" |
           summary.publication_date ? formatDate(summary.publication_date) : "",
         ];
         for (const column of stageColumns) {
-          const { stage, days, status, effectiveStatus } = cellDataFor(column, summary);
+          const { stage, status, effectiveStatus } = cellDataFor(column, summary);
           row.push(stage?.due_date ? formatDate(stage.due_date) : "");
-          row.push(days ?? "");
+          row.push(stage?.due_date && effectiveStatus !== "completado" ? deadlineCountdownText(stage.due_date, countdownNow) : "");
           row.push(timeStatusLabelFor(status, effectiveStatus));
         }
         row.push(summary.proposal_deadline ? formatDate(summary.proposal_deadline) : summary.quote_deadline ? formatDate(summary.quote_deadline) : "");
@@ -1182,11 +1237,11 @@ function ConsolidatedView({ token, country }: { token: string; country: "peru" |
                   </td>
                   <td>{summary.publication_date ? formatDate(summary.publication_date) : "—"}</td>
                   {stageColumns.map((column) => {
-                    const { stage, days, status, effectiveStatus } = cellDataFor(column, summary);
+                    const { stage, status, effectiveStatus } = cellDataFor(column, summary);
                     return (
                       <React.Fragment key={`${column.phaseId}-${column.name}-${summary.opportunity_id}`}>
                         <td>{stage?.due_date ? formatDate(stage.due_date) : "—"}</td>
-                        <td>{days ?? "—"}</td>
+                        <td>{stage?.due_date && effectiveStatus !== "completado" ? formatDeadlineCountdown(stage.due_date, countdownNow) : "—"}</td>
                         <td>
                           {effectiveStatus === "completado" ? (
                             <span className="tracking-time-status status-on_time">Completado</span>

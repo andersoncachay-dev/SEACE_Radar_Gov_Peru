@@ -5227,6 +5227,10 @@ th {
   cursor: pointer;
 }
 
+.table-wrap tbody tr.row-tracked td {
+  background: #eceff3;
+}
+
 .table-wrap tbody tr.row-active td {
   background: #e3f1ff;
 }
@@ -5497,6 +5501,22 @@ th {
   font-size: 0.68rem;
   font-weight: 900;
   line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.tracking-active-badge {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 20px;
+  margin-bottom: 4px;
+  padding: 2px 9px;
+  border: 1px solid #a9c6f2;
+  border-radius: 999px;
+  background: #e4edfc;
+  color: var(--blue-700);
+  font-size: 0.66rem;
+  font-weight: 900;
   letter-spacing: 0.02em;
 }
 
@@ -8323,6 +8343,12 @@ table.has-motivo-column td:nth-child(13) {
   background: var(--surface-2);
 }
 
+.manage-menu-item-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .manage-menu-review {
   display: grid;
   gap: 8px;
@@ -8617,6 +8643,35 @@ table.has-motivo-column td:nth-child(13) {
 
 .tracking-detail-header h3 {
   margin: 0 0 2px;
+}
+
+.tracking-detail-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.tracking-detail-title-row h3 {
+  margin: 0;
+}
+
+.tracking-refresh-dates-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tracking-refresh-dates-feedback {
+  color: var(--success);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .tracking-detail-header p {
@@ -9234,6 +9289,12 @@ table.has-motivo-column td:nth-child(13) {
   font-size: 0.82rem;
 }
 
+.tracking-chip-menu-empty {
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding: 4px 2px;
+}
+
 .tracking-support-button {
   border: 1px solid #a9c6f2;
   border-radius: 999px;
@@ -9478,6 +9539,10 @@ table.has-motivo-column td:nth-child(13) {
 .tracking-consolidated-table td:nth-child(1),
 .tracking-consolidated-table td:nth-child(2) {
   min-width: 200px;
+}
+
+.tracking-consolidated-table td:nth-child(3) {
+  text-align: center;
 }
 
 .tracking-consolidated-table .tracking-time-status {
@@ -9727,5 +9792,111 @@ table.has-motivo-column td:nth-child(13) {
   .tracking-layout,
   .tracking-admin-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Ninguno de estos elementos envolvía en pantallas angostas -cada uno forzaba su
+   propio ancho mínimo por contenido (nowrap/flex sin wrap), arrastrando toda la
+   sección de Seguimiento a un scroll horizontal en vez de reacomodarse-. */
+@media (max-width: 720px) {
+  .tracking-detail-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tracking-detail-header-people {
+    align-items: flex-start;
+  }
+
+  .tracking-detail .country-config-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .tracking-detail .country-config-tabs button {
+    flex: 1 1 auto;
+    min-width: 100px;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .tracking-timeline-range {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .tracking-timeline-range-line {
+    order: 3;
+    flex-basis: 100%;
+    margin: 2px 0;
+  }
+
+  .tracking-outcome-picker {
+    flex-wrap: wrap;
+  }
+
+  .tracking-outcome-picker button {
+    flex: 1 1 45%;
+    min-width: 0;
+  }
+
+  .tracking-stage-header {
+    align-items: flex-start;
+  }
+
+  .tracking-status-select {
+    flex: 1 1 auto;
+  }
+
+  .tracking-stage-template-list li {
+    flex-wrap: wrap;
+  }
+
+  .tracking-stage-template-areas {
+    flex-basis: 100%;
+    order: 2;
+  }
+
+  .tracking-stage-template-actions {
+    flex-basis: 100%;
+    order: 3;
+  }
+
+  .tracking-consolidated-table th,
+  .tracking-consolidated-table td {
+    padding: 6px 8px;
+    font-size: 0.72rem;
+  }
+
+  .tracking-consolidated-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* flex: 1 en .tracking-consolidated-toolbar input[type="search"] crecía en el eje
+     principal para llenar el ancho de la fila - al pasar el toolbar a columna, ese
+     mismo flex:1 pasó a crecer en el eje vertical, inflando el buscador. */
+  .tracking-consolidated-toolbar input[type="search"] {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .tracking-consolidated-toolbar select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .tracking-page > .country-config-tabs button {
+    min-width: 0;
+    padding: 8px 8px;
+    font-size: 0.86rem;
+  }
+
+  .tracking-row-actions button {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 0.78rem;
   }
 }
