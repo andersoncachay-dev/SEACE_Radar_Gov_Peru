@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..dependencies import require_admin
 from ..models import AppSetting, User
+from ..radar_config import SUPPORTED_COUNTRIES
 from ..schemas import (
     AppSettingsOut,
     AppSettingsUpdate,
@@ -64,7 +65,7 @@ def scheduler_interval_settings(
     country: str,
     current_user: User = Depends(require_admin),
 ):
-    if country not in {"peru", "chile"}:
+    if country not in SUPPORTED_COUNTRIES:
         raise HTTPException(status_code=404, detail="País no soportado")
     return scheduler_interval_config(country)
 
@@ -75,7 +76,7 @@ def update_scheduler_interval_settings(
     payload: SchedulerIntervalUpdate,
     current_user: User = Depends(require_admin),
 ):
-    if country not in {"peru", "chile"}:
+    if country not in SUPPORTED_COUNTRIES:
         raise HTTPException(status_code=404, detail="País no soportado")
     interval_seconds = payload.days * 86_400 + payload.hours * 3_600 + payload.minutes * 60
     return save_scheduler_interval(country, interval_seconds, current_user.id)
@@ -87,7 +88,7 @@ def update_tracking_date_refresh_settings(
     payload: SchedulerIntervalUpdate,
     current_user: User = Depends(require_admin),
 ):
-    if country not in {"peru", "chile"}:
+    if country not in SUPPORTED_COUNTRIES:
         raise HTTPException(status_code=404, detail="País no soportado")
     interval_seconds = payload.days * 86_400 + payload.hours * 3_600 + payload.minutes * 60
     return update_tracking_date_refresh_interval(country, interval_seconds, current_user.id)
@@ -95,7 +96,7 @@ def update_tracking_date_refresh_settings(
 
 @router.get("/scoring/{country}", response_model=ScoringConfigOut)
 def scoring_settings(country: str, current_user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    if country not in {"peru", "chile"}:
+    if country not in SUPPORTED_COUNTRIES:
         raise HTTPException(status_code=404, detail="País no soportado")
     return get_scoring_config(db, country)
 
@@ -107,7 +108,7 @@ def update_scoring_settings(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    if country not in {"peru", "chile"}:
+    if country not in SUPPORTED_COUNTRIES:
         raise HTTPException(status_code=404, detail="País no soportado")
     if not set(FACTOR_DEFAULTS).issubset(set(payload.factors)) or any(not key.startswith("custom_") and key not in FACTOR_DEFAULTS for key in payload.factors):
         raise HTTPException(status_code=422, detail="La lista de factores de score no es válida")

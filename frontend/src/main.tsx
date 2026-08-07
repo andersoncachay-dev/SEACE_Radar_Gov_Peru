@@ -12,15 +12,17 @@ const Users = lazy(() => import("./pages/UsersPage"));
 const System = lazy(() => import("./pages/SystemPage"));
 const OpportunityTrackingChile = lazy(() => import("./pages/OpportunityTrackingPage"));
 const OpportunityTrackingPeru = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingPeru })));
+const OpportunityTrackingArgentina = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingArgentina })));
 
-type Page = "Inicio Peru" | "Inicio Chile" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Alertas" | "Seguimiento de Oportunidades Peru" | "Seguimiento de Oportunidades Chile" | "Usuarios" | "Sistema";
+type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Procesos COMPR.AR Argentina" | "Publicaciones COMPR.AR Argentina" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Histórico Procesos Eliminados AR" | "Alertas" | "Seguimiento de Oportunidades Peru" | "Seguimiento de Oportunidades Chile" | "Seguimiento de Oportunidades Argentina" | "Usuarios" | "Sistema";
 
 type NavIconName = "home" | "target" | "globe" | "database" | "money" | "bell" | "users" | "settings";
 
 const profilePages: Record<AccessProfile, Page[]> = {
   peru: ["Inicio Peru", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Alertas", "Seguimiento de Oportunidades Peru"],
   chile: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Alertas", "Seguimiento de Oportunidades Chile"],
-  both: ["Inicio Peru", "Inicio Chile", "Oportunidades Chile LMP-GC", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Histórico Procesos Eliminados CL", "Alertas", "Seguimiento de Oportunidades Peru", "Seguimiento de Oportunidades Chile"],
+  argentina: ["Inicio Argentina", "Procesos COMPR.AR Argentina", "Histórico Procesos Eliminados AR", "Alertas", "Seguimiento de Oportunidades Argentina"],
+  both: ["Inicio Peru", "Inicio Chile", "Inicio Argentina", "Oportunidades Chile LMP-GC", "Procesos COMPR.AR Argentina", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Histórico Procesos Eliminados CL", "Histórico Procesos Eliminados AR", "Alertas", "Seguimiento de Oportunidades Peru", "Seguimiento de Oportunidades Chile", "Seguimiento de Oportunidades Argentina"],
 };
 
 const rodarLogoUrl = "/assets/Rodarfondoblanco.png";
@@ -28,14 +30,19 @@ const rodarLogoUrl = "/assets/Rodarfondoblanco.png";
 const navIcons: Record<Page, NavIconName> = {
   "Inicio Peru": "home",
   "Inicio Chile": "home",
+  "Inicio Argentina": "home",
   Oportunidades: "money",
   "Oportunidades Chile LMP-GC": "money",
   "Oportunidades OCDS Peru": "money",
+  "Procesos COMPR.AR Argentina": "money",
+  "Publicaciones COMPR.AR Argentina": "database",
   "Histórico Procesos Eliminados PE": "database",
   "Histórico Procesos Eliminados CL": "database",
+  "Histórico Procesos Eliminados AR": "database",
   Alertas: "bell",
   "Seguimiento de Oportunidades Peru": "target",
   "Seguimiento de Oportunidades Chile": "target",
+  "Seguimiento de Oportunidades Argentina": "target",
   Usuarios: "users",
   Sistema: "settings",
 };
@@ -43,6 +50,7 @@ const navIcons: Record<Page, NavIconName> = {
 const launcherNavGroups: Array<{ label: string; pages: Page[] }> = [
   { label: "Perú", pages: ["Inicio Peru", "Oportunidades OCDS Peru", "Oportunidades", "Histórico Procesos Eliminados PE", "Seguimiento de Oportunidades Peru"] },
   { label: "Chile", pages: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Seguimiento de Oportunidades Chile"] },
+  { label: "Argentina", pages: ["Inicio Argentina", "Procesos COMPR.AR Argentina", "Histórico Procesos Eliminados AR", "Seguimiento de Oportunidades Argentina"] },
   { label: "Operación", pages: ["Alertas"] },
   { label: "Administración", pages: ["Usuarios", "Sistema"] },
 ];
@@ -50,14 +58,19 @@ const launcherNavGroups: Array<{ label: string; pages: Page[] }> = [
 const launcherLabels: Record<Page, string> = {
   "Inicio Peru": "Inicio Peru",
   "Inicio Chile": "Inicio Chile",
+  "Inicio Argentina": "Inicio Argentina",
   Oportunidades: "Oportunidades",
   "Oportunidades Chile LMP-GC": "Buscador Oportunidades Chile",
   "Oportunidades OCDS Peru": "Buscador Oportunidades Peru",
+  "Procesos COMPR.AR Argentina": "Buscador Argentina",
+  "Publicaciones COMPR.AR Argentina": "Publicaciones Argentina",
   "Histórico Procesos Eliminados PE": "Histórico Procesos Eliminados PE",
   "Histórico Procesos Eliminados CL": "Histórico Procesos Eliminados CL",
+  "Histórico Procesos Eliminados AR": "Histórico Procesos Eliminados AR",
   Alertas: "Alertas",
   "Seguimiento de Oportunidades Peru": "Seguimiento de Oportunidades Perú",
   "Seguimiento de Oportunidades Chile": "Seguimiento de Oportunidades Chile",
+  "Seguimiento de Oportunidades Argentina": "Seguimiento de Oportunidades Argentina",
   Usuarios: "Usuarios",
   Sistema: "Sistema",
 };
@@ -65,14 +78,19 @@ const launcherLabels: Record<Page, string> = {
 const launcherDescriptions: Record<Page, string> = {
   "Inicio Peru": "Resumen operativo de procesos SEACE",
   "Inicio Chile": "Resumen comercial de Mercado Público",
+  "Inicio Argentina": "Resumen comercial de COMPR.AR",
   Oportunidades: "Radar de oportunidades de Perú",
   "Oportunidades Chile LMP-GC": "Licitaciones y Grandes Compras",
   "Oportunidades OCDS Peru": "Contrataciones abiertas OECE/OCDS",
+  "Procesos COMPR.AR Argentina": "Procesos y publicaciones de COMPR.AR",
+  "Publicaciones COMPR.AR Argentina": "Contrataciones difundidas en el portal",
   "Histórico Procesos Eliminados PE": "Respaldo de procesos retirados de Perú",
   "Histórico Procesos Eliminados CL": "Respaldo de procesos retirados de Chile",
+  "Histórico Procesos Eliminados AR": "Respaldo de procesos retirados de Argentina",
   Alertas: "Reglas, canales y notificaciones",
   "Seguimiento de Oportunidades Peru": "Fases, etapas y responsables — Perú",
   "Seguimiento de Oportunidades Chile": "Fases, etapas y responsables — Chile",
+  "Seguimiento de Oportunidades Argentina": "Fases, etapas y responsables — Argentina",
   Usuarios: "Accesos, perfiles y permisos",
   Sistema: "Ejecuciones y configuración",
 };
@@ -260,11 +278,12 @@ function Login({ onLogin, resetToken = "" }: { onLogin: (token: string, email: s
         <img className="brand-logo login-brand-logo" src={rodarLogoUrl} alt="RODAR Consulting" />
         <h1>Radar comercial para procesos de gobierno.</h1>
         <p>
-          Detecta oportunidades de negocio con gobierno en Perú y Chile de forma simple y customizable.
+          Detecta oportunidades de negocio con gobierno en Perú, Chile y Argentina de forma simple y personalizable.
         </p>
         <div className="brand-grid">
           <span>Peru operativo</span>
           <span>Chile operativo</span>
+          <span>Argentina operativa</span>
           <span>Email y WhatsApp</span>
           <span>Documentos trazables</span>
         </div>
@@ -279,9 +298,10 @@ function Login({ onLogin, resetToken = "" }: { onLogin: (token: string, email: s
           <span className="login-radar-contact login-radar-contact-two" />
           <span className="login-radar-core" />
         </div>
-        <div className="login-country-flags" aria-label="Operación en Perú y Chile">
+        <div className="login-country-flags" aria-label="Operación en Perú, Chile y Argentina">
           <img src={countryFlagUrls.Peru} alt="Bandera de Perú" />
           <img src={countryFlagUrls.Chile} alt="Bandera de Chile" />
+          <img src={countryFlagUrls.Argentina} alt="Bandera de Argentina" />
         </div>
       </section>
       <form className="login-card" onSubmit={submit}>
@@ -384,13 +404,15 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (currentUser && !visibleNav.includes(page)) {
-      setPage(currentUser.access_profile === "chile" ? "Inicio Chile" : "Inicio Peru");
+      setPage(currentUser.access_profile === "chile" ? "Inicio Chile" : currentUser.access_profile === "argentina" ? "Inicio Argentina" : "Inicio Peru");
     }
   }, [currentUser, page, visibleNav]);
 
   useEffect(() => {
     if (page === "Inicio Chile" || page === "Oportunidades Chile LMP-GC" || page === "Histórico Procesos Eliminados CL" || page === "Seguimiento de Oportunidades Chile") {
       setCountry("Chile");
+    } else if (page === "Inicio Argentina" || page === "Procesos COMPR.AR Argentina" || page === "Publicaciones COMPR.AR Argentina" || page === "Histórico Procesos Eliminados AR" || page === "Seguimiento de Oportunidades Argentina") {
+      setCountry("Argentina");
     } else if (page === "Inicio Peru" || page === "Oportunidades" || page === "Oportunidades OCDS Peru" || page === "Histórico Procesos Eliminados PE" || page === "Seguimiento de Oportunidades Peru") {
       setCountry("Peru");
     }
@@ -439,7 +461,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
 
   function openKeywordSearch(targetCountry: Country, keyword: string) {
     setKeywordSearchHandoff({ country: targetCountry, keyword });
-    setPage(targetCountry === "Chile" ? "Oportunidades Chile LMP-GC" : "Oportunidades OCDS Peru");
+    setPage(targetCountry === "Chile" ? "Oportunidades Chile LMP-GC" : targetCountry === "Argentina" ? "Procesos COMPR.AR Argentina" : "Oportunidades OCDS Peru");
   }
 
   return (
@@ -554,14 +576,19 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
         {!currentUser ? <div className="panel module-loading" role="status">Validando sesión y perfil…</div> : null}
         {currentUser && page === "Inicio Peru" ? <Home country="Peru" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} /> : null}
         {currentUser && page === "Inicio Chile" ? <Home country="Chile" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} /> : null}
+        {currentUser && page === "Inicio Argentina" ? <Home country="Argentina" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} /> : null}
         {currentUser && page === "Oportunidades" ? <Opportunities country="Peru" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} /> : null}
         {currentUser && page === "Oportunidades Chile LMP-GC" ? <Opportunities country="Chile" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} prefillKeyword={keywordSearchHandoff?.country === "Chile" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
+        {currentUser && page === "Procesos COMPR.AR Argentina" ? <Opportunities country="Argentina" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} argentinaRecordType="procesos" prefillKeyword={keywordSearchHandoff?.country === "Argentina" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
+        {currentUser && page === "Publicaciones COMPR.AR Argentina" ? <Opportunities country="Argentina" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} argentinaRecordType="publicaciones" /> : null}
         {currentUser && page === "Oportunidades OCDS Peru" ? <Opportunities country="Peru" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} variant="ocds" prefillKeyword={keywordSearchHandoff?.country === "Peru" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
         {page === "Histórico Procesos Eliminados PE" ? <ArchivedProcesses country="Peru" token={token} onRestored={backend.refresh} /> : null}
         {page === "Histórico Procesos Eliminados CL" ? <ArchivedProcesses country="Chile" token={token} onRestored={backend.refresh} /> : null}
+        {page === "Histórico Procesos Eliminados AR" ? <ArchivedProcesses country="Argentina" token={token} onRestored={backend.refresh} /> : null}
         {page === "Alertas" ? <Alerts token={token} rules={backend.rules} alerts={backend.alerts} refresh={backend.refresh} /> : null}
         {currentUser && page === "Seguimiento de Oportunidades Peru" ? <OpportunityTrackingPeru token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
         {currentUser && page === "Seguimiento de Oportunidades Chile" ? <OpportunityTrackingChile token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
+        {currentUser && page === "Seguimiento de Oportunidades Argentina" ? <OpportunityTrackingArgentina token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
         {page === "Usuarios" && currentUser?.role === "admin" ? <Users token={token} currentUserId={currentUser.id} /> : null}
         {page === "Sistema" ? (
           <System

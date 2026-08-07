@@ -10,8 +10,8 @@ from .services.tracking_date_refresh_service import refresh_active_opportunity_d
 
 def main() -> None:
     country = os.getenv("TRACKING_DATE_REFRESH_COUNTRY", "").strip().lower()
-    if country not in {"peru", "chile"}:
-        raise SystemExit("TRACKING_DATE_REFRESH_COUNTRY debe ser 'peru' o 'chile'")
+    if country not in {"peru", "chile", "argentina"}:
+        raise SystemExit("TRACKING_DATE_REFRESH_COUNTRY debe ser 'peru', 'chile' o 'argentina'")
     force_run = os.getenv("TRACKING_DATE_REFRESH_FORCE", "false").strip().lower() in {"1", "true", "yes"}
     if not force_run:
         should_run, next_update_at = claim_tracking_date_refresh_run(country)

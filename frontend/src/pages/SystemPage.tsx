@@ -1,22 +1,22 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api, LegalDocumentRecord, RadarKeyword, Run, SchedulerIntervalConfig, TrackingDateRefreshStatus } from "../api";
+import { api, CountryCode, LegalDocumentRecord, RadarKeyword, Run, SchedulerIntervalConfig, TrackingDateRefreshStatus } from "../api";
 import { ConfidentialityContent, Country, Empty, LegalDialog, LegalDocumentsMap, LegalView, LockIcon, formatDate, updateIntervalLabel, useRadarKeywords } from "../shared";
 
 export function SchedulerScheduleAdmin({ token }: { token: string }) {
-  const [configs, setConfigs] = useState<Record<"peru" | "chile", SchedulerIntervalConfig | null>>({ peru: null, chile: null });
-  const [savingCountry, setSavingCountry] = useState<"peru" | "chile" | null>(null);
+  const [configs, setConfigs] = useState<Record<CountryCode, SchedulerIntervalConfig | null>>({ peru: null, chile: null, argentina: null });
+  const [savingCountry, setSavingCountry] = useState<CountryCode | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
     let active = true;
-    Promise.all((["peru", "chile"] as const).map((country) => api.schedulerIntervalConfig(token, country)))
-      .then(([peru, chile]) => { if (active) setConfigs({ peru, chile }); })
+    Promise.all((["peru", "chile", "argentina"] as const).map((country) => api.schedulerIntervalConfig(token, country)))
+      .then(([peru, chile, argentina]) => { if (active) setConfigs({ peru, chile, argentina }); })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : "No se pudo cargar la programación automática"); });
     return () => { active = false; };
   }, [token]);
 
-  function updateValue(country: "peru" | "chile", field: "days" | "hours" | "minutes", value: number) {
+  function updateValue(country: CountryCode, field: "days" | "hours" | "minutes", value: number) {
     setConfigs((current) => {
       const existing = current[country];
       if (!existing) return current;
@@ -28,7 +28,7 @@ export function SchedulerScheduleAdmin({ token }: { token: string }) {
     setError("");
   }
 
-  async function save(country: "peru" | "chile") {
+  async function save(country: CountryCode) {
     const config = configs[country];
     if (!config) return;
     if (config.days === 0 && config.hours === 0 && config.minutes === 0) {
@@ -41,7 +41,7 @@ export function SchedulerScheduleAdmin({ token }: { token: string }) {
     try {
       const updated = await api.updateSchedulerIntervalConfig(token, country, config);
       setConfigs((current) => ({ ...current, [country]: updated }));
-      setNotice(`Programación de ${country === "peru" ? "Perú" : "Chile"} actualizada. La próxima ejecución ya usa el nuevo intervalo.`);
+      setNotice(`Programación de ${country === "peru" ? "Perú" : country === "chile" ? "Chile" : "Argentina"} actualizada. La próxima ejecución ya usa el nuevo intervalo.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo actualizar la programación");
     } finally {
@@ -59,9 +59,9 @@ export function SchedulerScheduleAdmin({ token }: { token: string }) {
         </div>
       </div>
       <div className="scheduler-country-grid">
-        {(["peru", "chile"] as const).map((country) => {
+        {(["peru", "chile", "argentina"] as const).map((country) => {
           const config = configs[country];
-          const label = country === "peru" ? "Perú" : "Chile";
+          const label = country === "peru" ? "Perú" : country === "chile" ? "Chile" : "Argentina";
           return (
             <article className="scheduler-country-config" key={country} aria-busy={!config}>
               <div className="scheduler-country-heading"><strong>{label}</strong><span>{config ? `Cada ${updateIntervalLabel(config.interval_seconds)}` : "Cargando…"}</span></div>
@@ -144,11 +144,11 @@ export function RadarKeywordsAdmin({
       <div className="keyword-manager-heading">
         <div>
           <p className="overline">Radar automático</p>
-          <h2 id="keyword-manager-title">Palabras clave de {keywordCountry === "Peru" ? "Perú" : "Chile"}</h2>
+          <h2 id="keyword-manager-title">Palabras clave de {keywordCountry === "Peru" ? "Perú" : keywordCountry}</h2>
           <p>Todas las palabras son editables. Retirarlas no borra los procesos históricos ya detectados.</p>
         </div>
         <div className="country-config-tabs" role="tablist" aria-label="País a configurar">
-          {(["Peru", "Chile"] as const).map((option) => (
+          {(["Peru", "Chile", "Argentina"] as const).map((option) => (
             <button
               key={option}
               type="button"
@@ -157,7 +157,7 @@ export function RadarKeywordsAdmin({
               className={keywordCountry === option ? "active" : ""}
               onClick={() => setKeywordCountry(option)}
             >
-              {option === "Peru" ? "Perú" : "Chile"}
+              {option === "Peru" ? "Perú" : option}
             </button>
           ))}
         </div>
@@ -322,7 +322,7 @@ export function System({
   onVersionUpdated: (versionLabel: string) => void;
 }) {
   const [versionDraft, setVersionDraft] = useState(versionLabel);
-  const [scoringCountry, setScoringCountry] = useState<"peru" | "chile">("peru");
+  const [scoringCountry, setScoringCountry] = useState<CountryCode>("peru");
   const [scoringConfig, setScoringConfig] = useState<import("../api").ScoringConfig | null>(null);
   const [scoringSaving, setScoringSaving] = useState(false);
   const [scoringError, setScoringError] = useState("");
@@ -375,7 +375,7 @@ export function System({
     try {
       const updated = await api.updateScoringConfig(token, scoringCountry, scoringConfig);
       setScoringConfig(updated);
-      setScoringNotice(`Configuración de ${scoringCountry === "peru" ? "Perú" : "Chile"} actualizada. Se aplicará en las próximas corridas.`);
+      setScoringNotice(`Configuración de ${scoringCountry === "peru" ? "Perú" : scoringCountry === "chile" ? "Chile" : "Argentina"} actualizada. Se aplicará en las próximas corridas.`);
     } catch (err) {
       setScoringError(err instanceof Error ? err.message : "No se pudo guardar la configuración");
     } finally { setScoringSaving(false); }
@@ -461,7 +461,7 @@ export function System({
             <p>Define los pesos y umbrales por país. Los cambios se aplican a las próximas búsquedas y actualizaciones automáticas.</p>
           </div>
           <div className="country-config-tabs" role="tablist" aria-label="País a configurar">
-            {(["peru", "chile"] as const).map((country) => <button key={country} type="button" role="tab" aria-selected={scoringCountry === country} className={scoringCountry === country ? "active" : ""} onClick={() => setScoringCountry(country)}>{country === "peru" ? "Perú" : "Chile"}</button>)}
+            {(["peru", "chile", "argentina"] as const).map((country) => <button key={country} type="button" role="tab" aria-selected={scoringCountry === country} className={scoringCountry === country ? "active" : ""} onClick={() => setScoringCountry(country)}>{country === "peru" ? "Perú" : country === "chile" ? "Chile" : "Argentina"}</button>)}
           </div>
         </div>
         {scoringConfig ? <form onSubmit={saveScoring}>
@@ -484,7 +484,7 @@ export function System({
             </div>)}
           </div>
           <button className="ghost add-score-factor" type="button" onClick={addScoringFactor}>+ Agregar factor</button>
-          <div className="scoring-actions"><p>{scoringMaximum !== 100 ? "Ajusta los puntos hasta alcanzar exactamente 100 antes de guardar." : scoringCountry === "chile" ? "En Chile, Entidad objetivo y Compra rápida están desactivados por defecto." : "Configuración independiente para procesos de Perú."}</p><button className="primary" type="submit" disabled={scoringSaving || scoringConfig.priority_b_min >= scoringConfig.priority_a_min || scoringMaximum !== 100}>{scoringSaving ? "Guardando…" : `Guardar configuración de ${scoringCountry === "peru" ? "Perú" : "Chile"}`}</button></div>
+          <div className="scoring-actions"><p>{scoringMaximum !== 100 ? "Ajusta los puntos hasta alcanzar exactamente 100 antes de guardar." : scoringCountry === "chile" ? "En Chile, Entidad objetivo y Compra rápida están desactivados por defecto." : scoringCountry === "argentina" ? "Argentina usa provincias, estados COMPR.AR y keywords de negocio." : "Configuración independiente para procesos de Perú."}</p><button className="primary" type="submit" disabled={scoringSaving || scoringConfig.priority_b_min >= scoringConfig.priority_a_min || scoringMaximum !== 100}>{scoringSaving ? "Guardando…" : `Guardar configuración de ${scoringCountry === "peru" ? "Perú" : scoringCountry === "chile" ? "Chile" : "Argentina"}`}</button></div>
           {scoringError ? <div className="notice danger" role="alert">{scoringError}</div> : null}
           {scoringNotice ? <div className="notice success" role="status">{scoringNotice}</div> : null}
         </form> : scoringError ? <div className="notice danger" role="alert">{scoringError}</div> : <p>Cargando configuración…</p>}

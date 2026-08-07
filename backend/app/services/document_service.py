@@ -133,6 +133,171 @@ def _register_local_download(db: Session, opportunity: Opportunity, path: Path, 
     )
 
 
+def _argentina_document_candidates(html: bytes | str) -> list[dict[str, str]]:
+    """Return downloadable process or publication documents from COMPR.AR.
+
+    COMPR.AR does not render normal download URLs for these files.  The
+    general conditions and technical annex use ASP.NET ``__doPostBack``
+    controls, so treating their href as a direct URL can never work.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    candidates: list[dict[str, str]] = []
+    for anchor in soup.select("a[href]"):
+        href = str(anchor.get("href") or "")
+        row = anchor.find_parent("tr")
+        cells = [_clean(cell.get_text(" ", strip=True)) for cell in row.find_all("td", recursive=False)] if row else []
+        if "/Publicacion/Convocatoria/DescargarArchivo" in href:
+            title = cells[0] if cells else _clean(anchor.get("title") or "Anexo de la publicacion")
+            candidates.append({"href": href, "title": title})
+            continue
+        match = re.search(r"__doPostBack\('([^']*)','([^']*)'\)", href)
+        if not match:
+            continue
+        target, argument = match.groups()
+        target_lower = target.lower()
+
+        if "uccondicionesgenerales" in target_lower and target_lower.endswith("lnkgedobyc"):
+            reference = cells[0] if cells else ""
+            title = _clean(f"Pliego de Bases y Condiciones Generales - {reference}").strip(" -")
+        elif "ucanexos" in target_lower and target_lower.endswith("btnveranexo"):
+            title = cells[0] if cells else "Anexo del proceso"
+        else:
+            continue
+        candidates.append({"target": target, "argument": argument, "title": title})
+    return candidates
+
+
+def _response_filename(response: requests.Response, title: str, index: int) -> str:
+    disposition = response.headers.get("Content-Disposition", "") or ""
+    match = re.search(r"filename\*?=(?:UTF-8''|\")?([^\";]+)", disposition, re.I)
+    raw_name = unquote(match.group(1).strip()) if match else f"{title}.pdf"
+    name = _safe_filename(raw_name, fallback=f"documento-{index}.pdf")
+    if not Path(name).suffix:
+        name = f"{name}.pdf"
+    return name
+
+
+def _discover_argentina_documents(
+    db: Session,
+    opportunity: Opportunity,
+    target_dir: Path,
+) -> list[Document]:
+    """Resolve the exact COMPR.AR ficha and execute its PDF postbacks."""
+    from src.comprar_argentina_scraper import (
+        PROCESS_SEARCH_URL,
+        PUBLICATION_SEARCH_URL,
+        _first_detail_url,
+        _post_search,
+        _postback,
+    )
+
+    nomenclature = _nomenclature(opportunity)
+    if not nomenclature:
+        return [
+            _register_document(
+                db,
+                opportunity,
+                title="Sin codigo de proceso COMPR.AR",
+                status="error",
+                error_message="No se puede consultar la ficha sin el numero de proceso.",
+            )
+        ]
+
+    session = requests.Session()
+    is_publication = opportunity.source.startswith("comprar_argentina_publicaciones") or opportunity.record_type == "publicacion"
+    search_url = PUBLICATION_SEARCH_URL if is_publication else PROCESS_SEARCH_URL
+    search_kind = "publicacion" if is_publication else "proceso"
+    search_response = _post_search(
+        session,
+        search_url,
+        "",
+        search_kind,
+        number=nomenclature,
+    )
+    detail_url = _first_detail_url(session, search_url, search_response)
+    if not detail_url or detail_url == search_url:
+        return [
+            _register_document(
+                db,
+                opportunity,
+                title="Ficha COMPR.AR no encontrada",
+                status="error",
+                error_message=f"No se encontro {'la publicacion' if is_publication else 'el proceso'} {nomenclature} en COMPR.AR.",
+            )
+        ]
+    detail_response = session.get(detail_url, timeout=75)
+    detail_response.raise_for_status()
+    candidates = _argentina_document_candidates(detail_response.content)
+
+    if detail_url and detail_url != opportunity.detail_url:
+        opportunity.detail_url = detail_url
+        db.commit()
+        db.refresh(opportunity)
+
+    docs: list[Document] = []
+    for index, candidate in enumerate(candidates, start=1):
+        if candidate.get("href"):
+            download_url = urljoin(detail_url, candidate["href"])
+            response = session.get(download_url, headers={"Referer": detail_url}, timeout=75, allow_redirects=True)
+            response.raise_for_status()
+            content_type = (response.headers.get("Content-Type", "") or "").lower()
+            if not (response.content.startswith(b"%PDF") or "application/pdf" in content_type or "application/octet-stream" in content_type):
+                continue
+            filename = _response_filename(response, candidate["title"], index)
+            path = target_dir / filename
+            path.write_bytes(response.content)
+            docs.append(
+                _register_local_download(
+                    db,
+                    opportunity,
+                    path,
+                    candidate["title"],
+                    source_url=f"{detail_url}#download:{download_url}",
+                )
+            )
+            continue
+        # Each postback consumes the page ViewState. Reload the ficha so every
+        # document starts from a fresh and valid ASP.NET form state.
+        fresh_detail = session.get(detail_url, timeout=75)
+        fresh_detail.raise_for_status()
+        response = _postback(
+            session,
+            detail_url,
+            fresh_detail,
+            candidate["target"],
+            candidate["argument"],
+        )
+        content_type = (response.headers.get("Content-Type", "") or "").lower()
+        if not (response.content.startswith(b"%PDF") or "application/pdf" in content_type):
+            continue
+        filename = _response_filename(response, candidate["title"], index)
+        path = target_dir / filename
+        path.write_bytes(response.content)
+        docs.append(
+            _register_local_download(
+                db,
+                opportunity,
+                path,
+                candidate["title"],
+                source_url=f"{detail_url}#postback:{candidate['target']}",
+            )
+        )
+
+    if docs:
+        opportunity.documents_count = len(docs)
+        db.commit()
+        return docs
+    return [
+        _register_document(
+            db,
+            opportunity,
+            title="Documentos COMPR.AR no descargados",
+            status="error",
+            error_message="La ficha no devolvio los PDFs del pliego general ni del anexo tecnico.",
+        )
+    ]
+
+
 def _nomenclature(opportunity: Opportunity) -> str:
     return _clean(opportunity.nomenclature or opportunity.external_id)
 
@@ -1154,6 +1319,19 @@ def discover_documents_for_opportunity(db: Session, opportunity_id: int) -> list
 
     target_dir = (DOCUMENT_ROOT / str(opportunity.id)).resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
+    if opportunity.source.startswith("comprar_argentina"):
+        try:
+            return _discover_argentina_documents(db, opportunity, target_dir)
+        except Exception as exc:
+            return [
+                _register_document(
+                    db,
+                    opportunity,
+                    title="Error consultando documentos COMPR.AR",
+                    status="error",
+                    error_message=f"{type(exc).__name__}: {exc}",
+                )
+            ]
     options = Options()
     for opt in [
         "--headless=new",

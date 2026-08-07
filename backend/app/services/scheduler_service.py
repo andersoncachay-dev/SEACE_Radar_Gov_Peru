@@ -8,7 +8,7 @@ from sqlalchemy import select
 from ..config import settings
 from ..database import SessionLocal
 from ..models import AppSetting, RadarKeyword, ScrapeRun, SearchProfile
-from ..radar_config import AUTO_PROFILE_PREFIX, RADAR_COUNTRY_CONFIG
+from ..radar_config import AUTO_PROFILE_PREFIX, RADAR_COUNTRY_CONFIG, SUPPORTED_COUNTRIES
 from .notification_service import send_pending_alerts
 from .run_service import execute_scrape_run
 from .tracking_date_refresh_service import get_date_refresh_interval_seconds, refresh_active_opportunity_dates, save_date_refresh_interval_seconds
@@ -16,10 +16,11 @@ from .tracking_service import evaluate_time_status_alerts
 
 scheduler = None
 LIMA_TIMEZONE = ZoneInfo("America/Lima")
-SUPPORTED_COUNTRIES = ("peru", "chile")
 DEFAULT_INTERVAL_SECONDS = 15 * 60
 DEFAULT_INCREMENTAL_LOOKBACK_DAYS = 2
 CHILE_INCREMENTAL_FUTURE_DAYS = 38
+ARGENTINA_INCREMENTAL_LOOKBACK_DAYS = 7
+ARGENTINA_INCREMENTAL_FUTURE_DAYS = 33
 
 
 def external_scheduler_next_run(country: str, now: datetime | None = None) -> datetime | None:
@@ -29,7 +30,8 @@ def external_scheduler_next_run(country: str, now: datetime | None = None) -> da
     if normalized_country not in SUPPORTED_COUNTRIES:
         raise ValueError(f"PaÃ­s de scheduler no soportado: {country}")
     interval_seconds = max(60, settings.external_scheduler_interval_minutes * 60)
-    offset_seconds = 0 if normalized_country == "peru" else min(5 * 60, interval_seconds // 3)
+    country_index = SUPPORTED_COUNTRIES.index(normalized_country)
+    offset_seconds = min(country_index * 5 * 60, interval_seconds * country_index // 3)
     current = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
     current_epoch = int(current.timestamp())
     next_epoch = ((current_epoch - offset_seconds) // interval_seconds + 1) * interval_seconds + offset_seconds
@@ -38,10 +40,11 @@ def external_scheduler_next_run(country: str, now: datetime | None = None) -> da
 
 def scheduler_initial_delay(country: str, interval_seconds: int) -> int:
     """Keep country jobs out of phase while preserving each configured interval."""
-    if country == "peru":
+    country_index = SUPPORTED_COUNTRIES.index(country)
+    if country_index == 0:
         return interval_seconds
-    chile_offset = min(5 * 60, max(30, interval_seconds // 3))
-    return interval_seconds + chile_offset
+    offset = min(country_index * 5 * 60, max(country_index * 30, interval_seconds * country_index // 3))
+    return interval_seconds + offset
 
 
 def _interval_key(country: str) -> str:
@@ -204,12 +207,25 @@ def current_ingestion_period(now: datetime | None = None) -> dict[str, object]:
 def current_ingestion_window(db, country: str, now: datetime | None = None) -> dict[str, object]:
     current = now.astimezone(LIMA_TIMEZONE) if now else datetime.now(LIMA_TIMEZONE)
     normalized_country = str(country or "").strip().lower()
-    start_date = current.date() - timedelta(days=DEFAULT_INCREMENTAL_LOOKBACK_DAYS)
+    lookback_days = (
+        ARGENTINA_INCREMENTAL_LOOKBACK_DAYS
+        if normalized_country == "argentina"
+        else DEFAULT_INCREMENTAL_LOOKBACK_DAYS
+    )
+    start_date = current.date() - timedelta(days=lookback_days)
     # The first ChileCompra result contains the proposal closing date. Searching
     # that field into the future discovers tenders published today whose closing
     # date is several weeks away. Peru keeps its publication-date window.
     is_chile = normalized_country == "chile"
-    end_date = current.date() + timedelta(days=CHILE_INCREMENTAL_FUTURE_DAYS) if is_chile else current.date()
+    is_argentina = normalized_country == "argentina"
+    future_days = (
+        CHILE_INCREMENTAL_FUTURE_DAYS
+        if is_chile
+        else ARGENTINA_INCREMENTAL_FUTURE_DAYS
+        if is_argentina
+        else 0
+    )
+    end_date = current.date() + timedelta(days=future_days)
     month_cursor = start_date.replace(day=1)
     covered: list[tuple[int, int]] = []
     while month_cursor <= end_date:
@@ -222,7 +238,7 @@ def current_ingestion_window(db, country: str, now: datetime | None = None) -> d
         "months": sorted({str(month) for _, month in covered}, key=int),
         "publication_date_from": start_date.isoformat(),
         "publication_date_to": end_date.isoformat(),
-        "date_filter_type": "closing" if is_chile else "publication",
+        "date_filter_type": "closing" if is_chile else "opening" if is_argentina else "publication",
         "active_only": True,
         "automatic_incremental": True,
         "skip_detail_enrichment": is_chile,
@@ -248,19 +264,23 @@ def sync_radar_profiles(db) -> list[SearchProfile]:
     current_year = str(datetime.utcnow().year)
     for country, config in RADAR_COUNTRY_CONFIG.items():
         keywords = [item.keyword for item in custom_by_country[country]]
-        for keyword in keywords:
-            name = f"{AUTO_PROFILE_PREFIX} · {config['label']} · {keyword}"
-            expected_names.add(name)
-            profile = existing_auto.get(name)
-            if profile is None:
-                profile = SearchProfile(name=name, keyword=keyword, owner_id=None)
-                db.add(profile)
-                existing_auto[name] = profile
-            profile.source = config["source"]
-            profile.year = current_year
-            profile.version = config["version"]
-            profile.max_results = config["max_results"]
-            profile.is_active = True
+        source_configs = config.get("sources") or ({"source": config["source"], "label": ""},)
+        for source_config in source_configs:
+            source_label = str(source_config.get("label") or "").strip()
+            for keyword in keywords:
+                label_suffix = f" · {source_label}" if source_label else ""
+                name = f"{AUTO_PROFILE_PREFIX} · {config['label']}{label_suffix} · {keyword}"
+                expected_names.add(name)
+                profile = existing_auto.get(name)
+                if profile is None:
+                    profile = SearchProfile(name=name, keyword=keyword, owner_id=None)
+                    db.add(profile)
+                    existing_auto[name] = profile
+                profile.source = source_config["source"]
+                profile.year = current_year
+                profile.version = config["version"]
+                profile.max_results = config["max_results"]
+                profile.is_active = True
     for name, profile in existing_auto.items():
         if name not in expected_names:
             profile.is_active = False
@@ -278,7 +298,8 @@ def enqueue_active_profiles(country: str | None = None) -> dict[str, int]:
             config = RADAR_COUNTRY_CONFIG.get(country)
             if config is None:
                 raise ValueError(f"País de ingesta no soportado: {country}")
-            query = query.where(SearchProfile.source == config["source"])
+            sources = [item["source"] for item in config.get("sources", ())] or [config["source"]]
+            query = query.where(SearchProfile.source.in_(sources))
         profiles = list(db.scalars(query).all())
         summary["profiles"] = len(profiles)
         # Chile's run_service branch computes its own "mes actual + mes
@@ -476,10 +497,11 @@ def scheduler_status(country: str) -> dict[str, object]:
         interval_seconds = get_scheduler_interval(db, normalized_country)
         if settings.external_scheduler_enabled and next_run is None:
             next_run = get_external_next_update(db, normalized_country)
-        source = RADAR_COUNTRY_CONFIG[normalized_country]["source"]
+        config = RADAR_COUNTRY_CONFIG[normalized_country]
+        sources = [item["source"] for item in config.get("sources", ())] or [config["source"]]
         active_run_id = db.scalar(
             select(ScrapeRun.id)
-            .where(ScrapeRun.source == source, ScrapeRun.status.in_(("queued", "running")))
+            .where(ScrapeRun.source.in_(sources), ScrapeRun.status.in_(("queued", "running")))
             .limit(1)
         )
     finally:

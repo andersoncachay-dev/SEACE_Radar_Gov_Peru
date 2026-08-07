@@ -100,7 +100,7 @@ Configurar ingress externo en puerto 8000 y probes contra `/health`.
 
 ### 7. Worker de ingesta
 
-Usar [ingestion-peru-job.yaml](ingestion-peru-job.yaml) y [ingestion-chile-job.yaml](ingestion-chile-job.yaml) con la misma imagen del API y el secreto `database-url`. Ambos sincronizan las palabras base y personalizadas del Radar con perfiles automaticos y consultan exclusivamente procesos del mes calendario en curso (zona horaria America/Lima). Peru (OECE/OCDS) se ejecuta en los minutos 00/15/30/45 y Chile (Mercado Publico) en 05/20/35/50, distribuyendo la carga y aislando fallas por pais.
+Usar [ingestion-peru-job.yaml](ingestion-peru-job.yaml), [ingestion-chile-job.yaml](ingestion-chile-job.yaml) e [ingestion-argentina-job.yaml](ingestion-argentina-job.yaml) con la misma imagen del API y el secreto `database-url`. Los tres sincronizan las palabras personalizadas del Radar con perfiles automáticos. Perú (OECE/OCDS) se ejecuta en los minutos 00/15/30/45, Chile (Mercado Público) en 05/20/35/50 y Argentina (COMPR.AR) en 10/25/40/55, distribuyendo la carga y aislando fallas por país.
 
 ### 8. Worker de alertas
 
@@ -119,7 +119,7 @@ Reemplazar los marcadores igual que en los jobs anteriores y establecer los mism
 
 1. Crear una regla interna y verificar estado `sent`.
 2. Crear una regla email a una cuenta controlada y confirmar el correo.
-3. Crear reglas WhatsApp para un numero Peru `+51` y Chile `+56`.
+3. Crear reglas WhatsApp para números de Perú `+51`, Chile `+56` y Argentina `+54`.
 4. Verificar `provider_message_id` y `sent_at` en la API.
 5. Mantener `WHATSAPP_ENABLED=false` hasta disponer del numero/canal aprobado; las entregas quedan en `waiting_channel` sin consumir reintentos.
 6. Simular una credencial incorrecta: debe quedar `retrying`, conservar el mensaje y programar `next_attempt_at`.

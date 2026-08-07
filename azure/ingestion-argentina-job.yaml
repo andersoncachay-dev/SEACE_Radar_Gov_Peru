@@ -1,0 +1,37 @@
+name: govradar-ingestion-argentina
+properties:
+  configuration:
+    triggerType: Schedule
+    scheduleTriggerConfig:
+      cronExpression: "10,25,40,55 * * * *"
+      parallelism: 1
+      replicaCompletionCount: 1
+    replicaTimeout: 840
+    replicaRetryLimit: 1
+  template:
+    containers:
+      - name: ingestion-argentina
+        image: REGISTRY_NAME.azurecr.io/govradar-api:IMAGE_TAG
+        command: [/app/azure/run-ingestion-worker.sh]
+        resources:
+          cpu: 1.0
+          memory: 2Gi
+        env:
+          - name: ENVIRONMENT
+            value: azure
+          - name: DATABASE_URL
+            secretRef: database-url
+          - name: INGESTION_COUNTRY
+            value: argentina
+          - name: ENABLE_SCHEDULER
+            value: "false"
+          - name: AUTO_SEND_ALERTS
+            value: "false"
+          - name: ENABLE_MENOR8_MODULE
+            value: "false"
+identity:
+  type: UserAssigned
+  userAssignedIdentities:
+    ? /subscriptions/c30a5d21-73f1-44a2-a16f-923fd18a3706/resourcegroups/govradar-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/govradar-identity
+    : {}
+location: Central US

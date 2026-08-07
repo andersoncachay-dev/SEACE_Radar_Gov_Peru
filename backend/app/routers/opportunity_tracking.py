@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -42,7 +42,7 @@ def date_refresh_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if country not in {"peru", "chile"}:
+    if country not in {"peru", "chile", "argentina"}:
         raise HTTPException(status_code=404, detail="País no soportado")
     status_payload = tracking_date_refresh_status(country)
     last_run = get_last_date_refresh_result(db, country)
@@ -142,8 +142,15 @@ def list_trackings(
         query = query.where(condition)
     if country == "chile":
         query = query.where(Opportunity.source.ilike("mercado_publico%"))
+    elif country == "argentina":
+        query = query.where(Opportunity.source.ilike("comprar_argentina%"))
     elif country == "peru":
-        query = query.where(~Opportunity.source.ilike("mercado_publico%"))
+        query = query.where(
+            and_(
+                ~Opportunity.source.ilike("mercado_publico%"),
+                ~Opportunity.source.ilike("comprar_argentina%"),
+            )
+        )
     if mine_only:
         query = query.where(OpportunityTracking.started_by_id == current_user.id)
     query = query.where(OpportunityTracking.status != "retirado")

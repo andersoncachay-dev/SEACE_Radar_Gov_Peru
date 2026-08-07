@@ -26,7 +26,7 @@ def _disable_progress_cache(response: Response) -> None:
 
 @router.get("/scheduler/status")
 def get_scheduler_status(
-    country: Literal["peru", "chile"],
+    country: Literal["peru", "chile", "argentina"],
     current_user: User = Depends(get_current_user),
 ):
     return scheduler_status(country)
@@ -34,7 +34,7 @@ def get_scheduler_status(
 
 @router.post("/scheduler/trigger")
 def trigger_scheduler_run(
-    country: Literal["peru", "chile"],
+    country: Literal["peru", "chile", "argentina"],
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
 ):

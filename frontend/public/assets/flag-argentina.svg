@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 32" role="img" aria-label="Bandera de Argentina">
+  <rect width="48" height="32" rx="2" fill="#74acdf"/>
+  <rect y="10.667" width="48" height="10.666" fill="#fff"/>
+  <g transform="translate(24 16)" fill="#f6b40e" stroke="#85340a" stroke-width=".3">
+    <circle r="2.25"/>
+    <g id="ray"><path d="M0-5.1 1-2.55 0-1.8-1-2.55Z"/></g>
+    <use href="#ray" transform="rotate(45)"/><use href="#ray" transform="rotate(90)"/>
+    <use href="#ray" transform="rotate(135)"/><use href="#ray" transform="rotate(180)"/>
+    <use href="#ray" transform="rotate(225)"/><use href="#ray" transform="rotate(270)"/>
+    <use href="#ray" transform="rotate(315)"/>
+  </g>
+</svg>

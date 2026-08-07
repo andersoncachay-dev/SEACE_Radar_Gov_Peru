@@ -15,6 +15,14 @@ CHILE_REGIONS = [
     "aysén del general carlos ibáñez del campo", "magallanes y de la antártica chilena",
 ]
 
+ARGENTINA_PROVINCES = [
+    "buenos aires", "ciudad de buenos aires", "catamarca", "chaco", "chubut",
+    "córdoba", "corrientes", "entre ríos", "formosa", "jujuy", "la pampa",
+    "la rioja", "mendoza", "misiones", "neuquén", "río negro", "salta",
+    "san juan", "san luis", "santa cruz", "santa fe", "santiago del estero",
+    "tierra del fuego", "tucumán",
+]
+
 FACTOR_DEFAULTS = {
     "keyword": {"label": "Keyword de negocio", "points": 20, "enabled": True, "value": ", ".join(CORE_KEYWORDS), "value_type": "list", "field": "description"},
     "target_entity": {"label": "Entidad objetivo", "points": 15, "enabled": True, "value": ", ".join([*TARGET_ENTITIES, "provias", "mtc"]), "value_type": "list", "field": "entity"},
@@ -30,7 +38,8 @@ FACTOR_DEFAULTS = {
 
 
 def default_scoring_config(country: str) -> dict:
-    normalized = "chile" if str(country).lower() == "chile" else "peru"
+    requested = str(country).strip().lower()
+    normalized = requested if requested in {"peru", "chile", "argentina"} else "peru"
     factors = deepcopy(FACTOR_DEFAULTS)
     if normalized == "chile":
         factors["target_entity"]["enabled"] = False
@@ -41,10 +50,20 @@ def default_scoring_config(country: str) -> dict:
         factors["attractive_amount"]["points"] = 15
         factors["queries_and_proposal"]["points"] = 35
         factors["closed"]["value"] = "cerrado, culminado"
+    elif normalized == "argentina":
+        factors["target_entity"]["enabled"] = False
+        factors["quick_purchase"]["enabled"] = False
+        factors["attractive_amount"]["enabled"] = False
+        factors["keyword"]["points"] = 35
+        factors["priority_region"]["points"] = 20
+        factors["priority_region"]["value"] = ", ".join(ARGENTINA_PROVINCES)
+        factors["queries_and_proposal"]["points"] = 35
+        factors["queries_and_proposal"]["value"] = "vigente para propuesta"
+        factors["closed"]["value"] = "culminado, dejado sin efecto, fracasado, desierto"
     return {
         "country": normalized,
-        "priority_a_min": 60 if normalized == "chile" else 70,
-        "priority_b_min": 40 if normalized == "chile" else 45,
+        "priority_a_min": 60 if normalized in {"chile", "argentina"} else 70,
+        "priority_b_min": 40 if normalized in {"chile", "argentina"} else 45,
         "attractive_amount_min": 100000,
         "score_target": 100,
         "factors": factors,
@@ -80,7 +99,8 @@ def get_scoring_config(db: Session, country: str) -> dict:
 
 
 def save_scoring_config(db: Session, country: str, payload: dict, user_id: int | None) -> dict:
-    normalized = "chile" if str(country).lower() == "chile" else "peru"
+    requested = str(country).strip().lower()
+    normalized = requested if requested in {"peru", "chile", "argentina"} else "peru"
     values = {
         "priority_a_min": payload["priority_a_min"],
         "priority_b_min": payload["priority_b_min"],

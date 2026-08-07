@@ -17,7 +17,7 @@ from .tracking_service import reanchor_cotizacion_due_dates
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_COUNTRIES = ("peru", "chile")
+SUPPORTED_COUNTRIES = ("peru", "chile", "argentina")
 
 DATE_FIELDS = ("consultation_deadline", "quote_deadline", "proposal_deadline")
 DATE_FIELD_LABELS = {
@@ -251,7 +251,14 @@ def _apply_date_refresh(
         return result
 
     try:
-        changes_by_opportunity = _refresh_peru(db, pending) if country == "peru" else _refresh_chile(pending)
+        if country == "peru":
+            changes_by_opportunity = _refresh_peru(db, pending)
+        elif country == "chile":
+            changes_by_opportunity = _refresh_chile(pending)
+        else:
+            # COMPR.AR's public listing currently exposes the opening date but
+            # not a stable schedule endpoint suitable for batch revalidation.
+            changes_by_opportunity = {}
     except Exception:
         logger.exception("Fallo al revalidar fechas de oportunidades de %s", country)
         changes_by_opportunity = {}

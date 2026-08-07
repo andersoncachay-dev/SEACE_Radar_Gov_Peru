@@ -22,20 +22,26 @@ def list_assignable_users(
     db: Session = Depends(get_db),
 ):
     query = select(User).where(User.is_active.is_(True))
-    if country in {"peru", "chile"}:
+    if country in {"peru", "chile", "argentina"}:
         query = query.where(User.access_profile.in_([country, "both"]))
     users = list(db.scalars(query.order_by(User.full_name)).all())
     return [AssignableUserOut(id=user.id, full_name=user.full_name, access_profile=user.access_profile) for user in users]
 
 
-def _normalize_phone(value: str, country_code: str, country_name: str) -> str:
+def _normalize_phone(
+    value: str,
+    country_code: str,
+    country_name: str,
+    valid_lengths: tuple[int, ...] = (9,),
+) -> str:
     digits = re.sub(r"\D", "", value or "")
     if digits.startswith(country_code) and len(digits) > 9:
         digits = digits[len(country_code):]
     if not digits:
         return ""
-    if len(digits) != 9:
-        raise HTTPException(status_code=422, detail=f"El celular de {country_name} debe contener 9 dígitos")
+    if len(digits) not in valid_lengths:
+        allowed = " o ".join(str(length) for length in valid_lengths)
+        raise HTTPException(status_code=422, detail=f"El celular de {country_name} debe contener {allowed} dígitos")
     return f"+{country_code}{digits}"
 
 
@@ -59,6 +65,7 @@ def create_user(payload: UserCreate, _: User = Depends(require_admin), db: Sessi
         address=payload.address.strip(),
         phone_peru=_normalize_phone(payload.phone_peru, "51", "Peru"),
         phone_chile=_normalize_phone(payload.phone_chile, "56", "Chile"),
+        phone_argentina=_normalize_phone(payload.phone_argentina, "54", "Argentina", (10, 11)),
         access_profile=payload.access_profile,
         password_hash=hash_password(payload.password),
         role=payload.role,
@@ -88,11 +95,18 @@ def update_user(user_id: int, payload: UserUpdate, _: User = Depends(require_adm
         user.phone_peru = _normalize_phone(payload.phone_peru, "51", "Peru")
     if payload.phone_chile is not None:
         user.phone_chile = _normalize_phone(payload.phone_chile, "56", "Chile")
-    contact_changed = payload.access_profile is not None or payload.phone_peru is not None or payload.phone_chile is not None
+    if payload.phone_argentina is not None:
+        user.phone_argentina = _normalize_phone(payload.phone_argentina, "54", "Argentina", (10, 11))
+    contact_changed = any(
+        value is not None
+        for value in (payload.access_profile, payload.phone_peru, payload.phone_chile, payload.phone_argentina)
+    )
     if contact_changed and user.access_profile in {"peru", "both"} and not user.phone_peru.strip():
         raise HTTPException(status_code=422, detail="El celular de Peru es obligatorio para este perfil")
     if contact_changed and user.access_profile in {"chile", "both"} and not user.phone_chile.strip():
         raise HTTPException(status_code=422, detail="El celular de Chile es obligatorio para este perfil")
+    if contact_changed and user.access_profile in {"argentina", "both"} and not user.phone_argentina.strip():
+        raise HTTPException(status_code=422, detail="El celular de Argentina es obligatorio para este perfil")
     user.full_name = f"{user.first_name} {user.last_name}".strip() or user.full_name
     if payload.password:
         user.password_hash = hash_password(payload.password)

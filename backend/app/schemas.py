@@ -37,20 +37,23 @@ class UserCreate(BaseModel):
     address: str = Field(min_length=4, max_length=255)
     phone_peru: str = Field(default="", max_length=32)
     phone_chile: str = Field(default="", max_length=32)
+    phone_argentina: str = Field(default="", max_length=32)
     access_profile: str = "peru"
     password: str = Field(min_length=8)
     role: str = "viewer"
 
     @model_validator(mode="after")
     def validate_profile_contact(self):
-        if self.access_profile not in {"peru", "chile", "both"}:
-            raise ValueError("El perfil debe ser Peru, Chile o ambos")
+        if self.access_profile not in {"peru", "chile", "argentina", "both"}:
+            raise ValueError("El perfil debe ser Perú, Chile, Argentina o todos")
         if self.role not in {"viewer", "admin"}:
             raise ValueError("El rol debe ser usuario o administrador")
         if self.access_profile in {"peru", "both"} and not self.phone_peru.strip():
             raise ValueError("El celular de Peru es obligatorio para este perfil")
         if self.access_profile in {"chile", "both"} and not self.phone_chile.strip():
             raise ValueError("El celular de Chile es obligatorio para este perfil")
+        if self.access_profile in {"argentina", "both"} and not self.phone_argentina.strip():
+            raise ValueError("El celular de Argentina es obligatorio para este perfil")
         return self
 
 
@@ -62,6 +65,7 @@ class UserUpdate(BaseModel):
     address: str | None = Field(default=None, min_length=4, max_length=255)
     phone_peru: str | None = Field(default=None, max_length=32)
     phone_chile: str | None = Field(default=None, max_length=32)
+    phone_argentina: str | None = Field(default=None, max_length=32)
     access_profile: str | None = None
     role: str | None = None
     is_active: bool | None = None
@@ -69,8 +73,8 @@ class UserUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_permissions(self):
-        if self.access_profile is not None and self.access_profile not in {"peru", "chile", "both"}:
-            raise ValueError("El perfil debe ser Peru, Chile o ambos")
+        if self.access_profile is not None and self.access_profile not in {"peru", "chile", "argentina", "both"}:
+            raise ValueError("El perfil debe ser Perú, Chile, Argentina o todos")
         if self.role is not None and self.role not in {"viewer", "admin"}:
             raise ValueError("El rol debe ser usuario o administrador")
         return self
@@ -86,6 +90,7 @@ class UserOut(ORMModel):
     address: str
     phone_peru: str
     phone_chile: str
+    phone_argentina: str
     access_profile: str
     role: str
     is_active: bool
@@ -254,6 +259,10 @@ class OpportunityOut(ORMModel):
     nomenclature: str
     object_type: str
     description: str
+    record_type: str
+    expediente: str
+    contracting_unit: str
+    financial_service: str
     region: str
     buyer_ruc: str
     ocid: str
@@ -273,9 +282,12 @@ class OpportunityOut(ORMModel):
     requirement_pdf_url: str
     requirement_pdf_local: str
     publication_date: datetime | None
+    opening_date: datetime | None
     consultation_deadline: datetime | None
     quote_deadline: datetime | None
     proposal_deadline: datetime | None
+    schedule_source: str
+    schedule_validated_at: datetime | None
     is_archived: bool
     archived_at: datetime | None
     archived_by_id: int | None
@@ -322,7 +334,7 @@ class OpportunityKeywordArchiveOut(BaseModel):
 
 class OpportunityExcelExportIn(BaseModel):
     title: str = Field(default="Oportunidades GovRadar", max_length=100)
-    country: str = Field(default="peru", pattern="^(peru|chile)$")
+    country: str = Field(default="peru", pattern="^(peru|chile|argentina)$")
     headers: list[str] = Field(max_length=40)
     rows: list[list[str | int | float | None]] = Field(max_length=10000)
 
@@ -359,12 +371,12 @@ class AlertRuleCreate(BaseModel):
             raise ValueError("El canal debe ser email, WhatsApp o notificacion interna")
         if self.min_priority not in {"A", "B", "C"}:
             raise ValueError("La prioridad minima debe ser A, B o C")
-        if self.country not in {"peru", "chile", "both"}:
-            raise ValueError("El pais debe ser peru, chile o both")
+        if self.country not in {"peru", "chile", "argentina", "both"}:
+            raise ValueError("El país debe ser Perú, Chile, Argentina o todos")
         if self.channel == "email":
             TypeAdapter(EmailStr).validate_python(self.destination)
-        if self.channel == "whatsapp" and not re.fullmatch(r"\+(?:51|56)\d{9}", self.destination):
-            raise ValueError("WhatsApp requiere un celular valido de Peru (+51) o Chile (+56)")
+        if self.channel == "whatsapp" and not re.fullmatch(r"\+(?:51|56|54)\d{9,11}", self.destination):
+            raise ValueError("WhatsApp requiere un celular válido de Perú (+51), Chile (+56) o Argentina (+54)")
         if self.channel == "in_app":
             self.destination = "GovRadar"
         return self
@@ -443,8 +455,8 @@ class TrackingResponsibleCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_country_scope(self):
-        if self.country_scope not in {"peru", "chile", "ambos"}:
-            raise ValueError("El pais debe ser peru, chile o ambos")
+        if self.country_scope not in {"peru", "chile", "argentina", "ambos"}:
+            raise ValueError("El país debe ser Perú, Chile, Argentina o todos")
         if not self.area_ids:
             raise ValueError("Debe asignar al menos un area")
         return self
@@ -459,8 +471,8 @@ class TrackingResponsibleUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_country_scope(self):
-        if self.country_scope is not None and self.country_scope not in {"peru", "chile", "ambos"}:
-            raise ValueError("El pais debe ser peru, chile o ambos")
+        if self.country_scope is not None and self.country_scope not in {"peru", "chile", "argentina", "ambos"}:
+            raise ValueError("El país debe ser Perú, Chile, Argentina o todos")
         return self
 
 

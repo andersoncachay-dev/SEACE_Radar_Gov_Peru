@@ -14,7 +14,7 @@ export function documentTypeLabel(doc: DocumentRecord): string {
   return "PDF";
 }
 
-export type Module = "SEACE Publico" | "Contratos Menores a 8 UIT" | "Oportunidades Chile LMP-GC" | "Ambos modulos";
+export type Module = "SEACE Publico" | "Contratos Menores a 8 UIT" | "Oportunidades Chile LMP-GC" | "Procesos COMPR.AR" | "Publicaciones COMPR.AR" | "Ambos modulos";
 
 export type SearchMode = "append" | "replace";
 
@@ -51,7 +51,14 @@ export type ActivePeriodKeywordGroup = {
   opportunityIds?: number[];
 };
 
-export type PendingSearch = { mode: SearchMode; keywords: string[]; runIds: number[]; appliedState: SavedOpportunityViewState; kind?: "required" | "additional" };
+export type PendingSearch = {
+  mode: SearchMode;
+  keywords: string[];
+  runIds: number[];
+  appliedState: SavedOpportunityViewState;
+  kind?: "required" | "additional";
+  additionalGroups?: ActivePeriodKeywordGroup[];
+};
 
 export type SavedOpportunityViewState = {
   keywords: string[];
@@ -77,7 +84,7 @@ export type SavedOpportunityViewState = {
 };
 
 export const commercialFilters = [
-  { label: "Vigente para Consultas y Propuesta", className: "green" },
+  { label: "Vigente para Consultas y Propuestas", className: "green" },
   { label: "Vigente para Propuesta", className: "amber" },
   { label: "Proceso Culminado", className: "red" },
 ] as const;
@@ -106,19 +113,23 @@ export const yearOptions = Array.from({ length: 6 }, (_, index) => String(curren
 export const excelLogoUrl = "/assets/logoexcel.png";
 
 export function modulesForCountry(country: Country): Module[] {
-  return country === "Chile"
-    ? ["Oportunidades Chile LMP-GC"]
-    : ["SEACE Publico", "Contratos Menores a 8 UIT", "Ambos modulos"];
+  if (country === "Chile") return ["Oportunidades Chile LMP-GC"];
+  if (country === "Argentina") return ["Procesos COMPR.AR", "Publicaciones COMPR.AR"];
+  return ["SEACE Publico", "Contratos Menores a 8 UIT", "Ambos modulos"];
 }
 
-export function defaultModuleForCountry(country: Country): Module {
-  return country === "Chile" ? "Oportunidades Chile LMP-GC" : "SEACE Publico";
+export function defaultModuleForCountry(country: Country, argentinaRecordType: "procesos" | "publicaciones" = "procesos"): Module {
+  if (country === "Chile") return "Oportunidades Chile LMP-GC";
+  if (country === "Argentina") return argentinaRecordType === "publicaciones" ? "Publicaciones COMPR.AR" : "Procesos COMPR.AR";
+  return "SEACE Publico";
 }
 
 export function moduleLabel(module: Module) {
   if (module === "Oportunidades Chile LMP-GC") {
     return "Licitaciones Mercado Público y Grandes Compras";
   }
+  if (module === "Procesos COMPR.AR") return "Procesos gestionados electrónicamente en COMPR.AR";
+  if (module === "Publicaciones COMPR.AR") return "Publicaciones difundidas en COMPR.AR";
   return module;
 }
 
@@ -129,18 +140,32 @@ export function opportunityBandLabel(country: Country, variant: OpportunityVaria
   if (country === "Chile") {
     return "Oportunidades Chile Licitaciones Mercado Publico y Grandes Compras";
   }
+  if (country === "Argentina") {
+    return module === "Publicaciones COMPR.AR"
+      ? "Publicaciones que los organismos difunden en COMPR.AR aunque su gestión suceda fuera del sistema electrónico."
+      : "Contrataciones gestionadas electrónicamente en COMPR.AR desde su publicación hasta su adjudicación.";
+  }
   return moduleLabel(module);
 }
 
 export function sourceForModule(module: Module) {
   if (module === "Oportunidades Chile LMP-GC") return "mercado_publico_lmp_gc";
+  if (module === "Procesos COMPR.AR") return "comprar_argentina_procesos";
+  if (module === "Publicaciones COMPR.AR") return "comprar_argentina_publicaciones";
   if (module === "Contratos Menores a 8 UIT") return "menor8_browser";
   return "seace_public_browser";
+}
+
+export function versionForCountry(country: Country, variant: OpportunityVariant) {
+  if (variant === "ocds") return "OCDS OECE";
+  if (country === "Argentina") return "COMPR.AR";
+  return country === "Peru" ? "Seace 3" : "Mercado Publico";
 }
 
 export function sourceBelongsToView(source: string, country: Country, variant: OpportunityVariant) {
   const normalized = source.toLowerCase();
   if (variant === "ocds") return country === "Peru" && normalized.startsWith("oece_ocds");
+  if (country === "Argentina") return normalized.startsWith("comprar_argentina");
   if (country === "Peru") return (normalized.startsWith("seace") || normalized.includes("menor8")) && !normalized.startsWith("oece_ocds");
   return sourceBelongsToCountry(source, country);
 }
@@ -237,6 +262,7 @@ export async function exportOpportunitiesToExcel(
   exportKind: "table" | "dashboard" | "historico" = "table",
 ) {
   const isChile = country === "Chile";
+  const isArgentina = country === "Argentina";
   const headers = [
     "Prioridad",
     "Semaforo comercial",
@@ -244,6 +270,7 @@ export async function exportOpportunitiesToExcel(
     "Proceso",
     "Descripcion",
     ...(isChile ? ["Estado en Mercado Público CL", "Duración de contrato"] : []),
+    ...(isArgentina ? ["Tipo de registro", "Expediente", "Estado COMPR.AR", "Unidad contratante", "Servicio Administrativo Financiero", "Fecha de apertura"] : []),
     "Fecha de convocatoria",
     "Fin Consultas",
     "Dias Consultas",
@@ -260,6 +287,7 @@ export async function exportOpportunitiesToExcel(
       item.nomenclature,
       item.description,
       ...(isChile ? [item.source_status || "-", item.contract_duration || "-"] : []),
+      ...(isArgentina ? [item.record_type || "-", item.expediente || "-", item.source_status || "-", item.contracting_unit || "-", item.financial_service || "-", formatDate(item.opening_date)] : []),
       formatDate(item.publication_date),
       formatDate(item.consultation_deadline),
       daysText(daysUntil(item.consultation_deadline)),
@@ -268,11 +296,11 @@ export async function exportOpportunitiesToExcel(
       moneyText(item.amount),
     ];
   });
-  const blob = await api.exportOpportunitiesXlsx(token, { title, country: country.toLowerCase() as "peru" | "chile", headers, rows: body });
+  const blob = await api.exportOpportunitiesXlsx(token, { title, country: country.toLowerCase() as "peru" | "chile" | "argentina", headers, rows: body });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  const countryLabel = isChile ? "Chile" : "Perú";
+  const countryLabel = isChile ? "Chile" : isArgentina ? "Argentina" : "Perú";
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, "0");
   const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
@@ -303,6 +331,7 @@ export function Opportunities({
   variant = "radar",
   prefillKeyword = null,
   onPrefillConsumed,
+  argentinaRecordType = "procesos",
 }: {
   country: Country;
   userId: number;
@@ -313,6 +342,7 @@ export function Opportunities({
   variant?: OpportunityVariant;
   prefillKeyword?: string | null;
   onPrefillConsumed?: () => void;
+  argentinaRecordType?: "procesos" | "publicaciones";
 }) {
   const serverScope = `${variant}.${country}`;
   const storageScope = `${userId}.${serverScope}`;
@@ -323,7 +353,7 @@ export function Opportunities({
   const restoredRunPeriodRef = useRef(false);
   const lastServerStateRef = useRef("");
   const [viewStateHydrated, setViewStateHydrated] = useState(false);
-  const [module, setModule] = useState<Module>(defaultModuleForCountry(country));
+  const [module, setModule] = useState<Module>(defaultModuleForCountry(country, argentinaRecordType));
   const [keyword, setKeyword] = useState(initialSearchState.keyword);
   const [keyword2, setKeyword2] = useState(initialSearchState.keyword2);
   const [keyword3, setKeyword3] = useState(initialSearchState.keyword3);
@@ -340,7 +370,7 @@ export function Opportunities({
   const [appliedPeriodMonths, setAppliedPeriodMonths] = useState<string[]>(initialSearchState.appliedMonths);
   const [appliedPeriodKeywordGroups, setAppliedPeriodKeywordGroups] = useState<ActivePeriodKeywordGroup[]>(initialSearchState.periodKeywordGroups);
   const [additionalPeriodKeywordGroups, setAdditionalPeriodKeywordGroups] = useState<ActivePeriodKeywordGroup[]>(initialSearchState.additionalPeriodKeywordGroups);
-  const usesPeriodFilters = variant === "ocds" || country === "Chile";
+  const usesPeriodFilters = variant === "ocds" || country === "Chile" || country === "Argentina";
   const [maxResultsMode, setMaxResultsMode] = useState<MaxResultsMode>(initialSearchState.maxResultsMode);
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [starting, setStarting] = useState(false);
@@ -368,12 +398,14 @@ export function Opportunities({
   const visibleRuns = useMemo(() => runs.filter((run) => sourceBelongsToView(run.source, country, variant)), [runs, country, variant]);
   const invalidPublicationDateRange = Boolean(publicationDateFrom && publicationDateTo && publicationDateFrom > publicationDateTo);
   const entitySearchKeywords = uniqueKeywords([entityKeyword, entityKeyword2, entityKeyword3]);
-  const additionalSearchReady = Boolean(
-    publicationDateFrom
-    && publicationDateTo
-    && !invalidPublicationDateRange
-    && (nomenclatureFilter.trim() || (entityFilter.trim() && entitySearchKeywords.length)),
-  );
+  const additionalSearchReady = country === "Argentina"
+    ? Boolean(nomenclatureFilter.trim())
+    : Boolean(
+        publicationDateFrom
+        && publicationDateTo
+        && !invalidPublicationDateRange
+        && (nomenclatureFilter.trim() || (entityFilter.trim() && entitySearchKeywords.length)),
+      );
   const activePeriodKeywordGroups = useMemo(
     () => {
       const runGroups = periodKeywordGroupsFromRuns(visibleRuns, activeRunIds);
@@ -472,9 +504,9 @@ export function Opportunities({
 
   useEffect(() => {
     if (activeKeywords.length) return;
-    const recoverableKeywords = uniqueKeywords(variant === "ocds" ? [keyword] : [keyword, keyword2, keyword3]);
+    const recoverableKeywords = uniqueKeywords(variant === "ocds" || country === "Argentina" ? [keyword] : [keyword, keyword2, keyword3]);
     if (recoverableKeywords.length) setActiveKeywords(recoverableKeywords);
-  }, [activeKeywords, keyword, keyword2, keyword3, variant]);
+  }, [activeKeywords, keyword, keyword2, keyword3, variant, country]);
 
   useEffect(() => {
     if (persistedScopeRef.current !== storageScope || !viewStateHydrated) return;
@@ -579,13 +611,30 @@ export function Opportunities({
     const completedKeywords = search.keywords.filter((_, index) => statuses[index]?.status === "completed");
     if (search.kind === "additional") {
       const runRows = completedIds.length ? await api.opportunities(token, { runIds: completedIds }) : [];
-      const displayedTerms = uniqueKeywords(runRows.map((item) => item.nomenclature).filter(Boolean));
-      const additionalGroups = search.appliedState.additionalPeriodKeywordGroups.map((group) => ({
-        ...group,
-        keywords: displayedTerms.length ? displayedTerms : group.keywords,
-        processCount: runRows.length,
-        opportunityIds: runRows.map((item) => item.id),
-      }));
+      const pendingGroups = search.additionalGroups || [];
+      const assignedIds = new Set(runRows
+        .filter((item) => pendingGroups.some((group) => opportunityMatchesPeriodGroup(item, group)))
+        .map((item) => item.id));
+      const completedGroups = pendingGroups.map((group, index) => {
+        const matchedRows = runRows.filter((item) => opportunityMatchesPeriodGroup(item, group));
+        // An exact process lookup in COMPR.AR ignores the general period. Keep
+        // those valid results by assigning any out-of-period row to the first
+        // pending group instead of silently dropping it from the lower table.
+        const groupRows = index === 0
+          ? mergeOpportunities(matchedRows, runRows.filter((item) => !assignedIds.has(item.id)))
+          : matchedRows;
+        const displayedTerms = uniqueKeywords(groupRows.map((item) => item.nomenclature).filter(Boolean));
+        return {
+          ...group,
+          keywords: displayedTerms.length ? displayedTerms : group.keywords,
+          processCount: groupRows.length,
+          opportunityIds: groupRows.map((item) => item.id),
+        };
+      });
+      const additionalGroups = mergeAdditionalPeriodKeywordGroups(
+        search.appliedState.additionalPeriodKeywordGroups,
+        completedGroups,
+      );
       const nextRunIds = addRunIds(activeRunIds, completedIds);
       setActiveRunIds(nextRunIds);
       setAdditionalPeriodKeywordGroups(additionalGroups);
@@ -782,6 +831,7 @@ export function Opportunities({
     const activeOnly = maxResultsMode === "active";
     return baseRows.filter((item) => {
       if (!sourceBelongsToView(item.source, country, variant)) return false;
+      if (country === "Argentina" && item.source !== sourceForModule(module)) return false;
       if (focusedRunResultIds && !focusedRunResultIds.has(item.id)) return false;
       // En Perú, "Ver en la tabla" representa un proceso que ya fue
       // identificado (y, en la revalidación, enriquecido en SEACE). No debe
@@ -791,14 +841,25 @@ export function Opportunities({
       if (country === "Peru" && focusedRunResultIds) return true;
       const haystack = `${item.entity} ${item.nomenclature} ${item.description}`.toLowerCase();
       const keywordMatch = !normalizedActiveKeywords.length || normalizedActiveKeywords.some((item) => matchesCompletePhrase(haystack, item));
-      const activeMatch = !activeOnly || commercialSignal(item).className !== "red";
+      // The selector controls what the scraper acquires. Once a period-based
+      // update found a process, a later deadline transition must not remove it
+      // from the accumulated table.
+      const activeMatch = usesPeriodFilters || !activeOnly || commercialSignal(item).className !== "red";
       const periodCombinationMatch = !usesPeriodFilters || (!activePeriodKeywordGroups.length && !additionalPeriodKeywordGroups.length)
         ? keywordMatch && activeMatch
         : activePeriodKeywordGroups.some((group) => opportunityMatchesPeriodGroup(item, group))
           || additionalPeriodKeywordGroups.some((group) => opportunityMatchesAdditionalGroup(item, group, visibleRuns));
-      return periodCombinationMatch;
+      const automaticUpdateMatch = country === "Peru"
+        && variant === "ocds"
+        && opportunityMatchesAutomaticSelection(
+          item,
+          appliedPeriodYears,
+          appliedPeriodMonths,
+          activeKeywords,
+        );
+      return periodCombinationMatch || automaticUpdateMatch;
     });
-  }, [baseRows, activeKeywords, maxResultsMode, country, variant, usesPeriodFilters, visibleRuns, activePeriodKeywordGroups, additionalPeriodKeywordGroups, focusedRunResultIds]);
+  }, [baseRows, activeKeywords, maxResultsMode, country, variant, module, usesPeriodFilters, visibleRuns, activePeriodKeywordGroups, additionalPeriodKeywordGroups, focusedRunResultIds, appliedPeriodYears, appliedPeriodMonths]);
 
   useEffect(() => {
     if (!activeRun || activeRun.status !== "completed" || !pendingSearch?.runIds.includes(activeRun.id)) return;
@@ -827,7 +888,7 @@ export function Opportunities({
 
   async function executeConfirmed(mode: SearchMode) {
     setPeriodValidationError("");
-    const rawKeywords = variant === "ocds" ? [keyword] : [keyword, keyword2, keyword3];
+    const rawKeywords = variant === "ocds" || country === "Argentina" ? [keyword] : [keyword, keyword2, keyword3];
     const cleanKeywords = uniqueKeywords(rawKeywords).length
       ? uniqueKeywords(rawKeywords)
       : ["satelital"];
@@ -865,7 +926,7 @@ export function Opportunities({
           month: usesPeriodFilters ? ocdsMonths.join(",") : "",
           years: usesPeriodFilters ? ocdsYears : undefined,
           months: usesPeriodFilters ? ocdsMonths : undefined,
-          version: variant === "ocds" ? "OCDS OECE" : country === "Peru" ? "Seace 3" : "Mercado Publico",
+          version: versionForCountry(country, variant),
           max_results: 0,
           max_details: 0,
           // Mercado Publico only exposes convocatoria and consultation dates
@@ -921,17 +982,22 @@ export function Opportunities({
     const cleanNomenclature = nomenclatureFilter.trim();
     const cleanEntity = entityFilter.trim();
     const searchTerms = cleanNomenclature ? [cleanNomenclature] : entitySearchKeywords;
-    const start = new Date(`${publicationDateFrom}T00:00:00`);
-    const end = new Date(`${publicationDateTo}T00:00:00`);
     const years: string[] = [];
     const months: string[] = [];
-    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-    while (cursor <= end) {
-      const year = String(cursor.getFullYear());
-      const month = String(cursor.getMonth() + 1);
-      if (!years.includes(year)) years.push(year);
-      if (!months.includes(month)) months.push(month);
-      cursor.setMonth(cursor.getMonth() + 1);
+    if (publicationDateFrom && publicationDateTo) {
+      const start = new Date(`${publicationDateFrom}T00:00:00`);
+      const end = new Date(`${publicationDateTo}T00:00:00`);
+      const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+      while (cursor <= end) {
+        const year = String(cursor.getFullYear());
+        const month = String(cursor.getMonth() + 1);
+        if (!years.includes(year)) years.push(year);
+        if (!months.includes(month)) months.push(month);
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+    } else if (country === "Argentina") {
+      years.push(...ocdsYears);
+      months.push(...ocdsMonths);
     }
     const groups = years.map((year) => ({ year, months: [...months], keywords: [...searchTerms], commercialMode: "all" as MaxResultsMode }));
     setStarting(true);
@@ -945,9 +1011,9 @@ export function Opportunities({
         month: months.join(","),
         years,
         months,
-        publication_date_from: publicationDateFrom,
-        publication_date_to: publicationDateTo,
-        version: variant === "ocds" ? "OCDS OECE" : country === "Peru" ? "Seace 3" : "Mercado Publico",
+        publication_date_from: publicationDateFrom || undefined,
+        publication_date_to: publicationDateTo || undefined,
+        version: versionForCountry(country, variant),
         max_results: 0,
         max_details: cleanNomenclature ? 1 : 0,
         // Every manual Chile search needs the Mercado Publico tender sheet to
@@ -969,13 +1035,21 @@ export function Opportunities({
         entityKeyword3,
         publicationDateFrom,
         publicationDateTo,
-        additionalPeriodKeywordGroups: groups,
+        // Keep the visible manual results untouched while the appended search
+        // is running. Its new IDs are merged only after the run completes.
+        additionalPeriodKeywordGroups,
       };
-      setAdditionalPeriodKeywordGroups(groups);
       setActiveRun(run);
       setPendingRunStatuses(startedRuns);
       setBatchKeywords(searchTerms);
-      setPendingSearch({ mode: "append", keywords: searchTerms, runIds: startedRunIds, appliedState, kind: "additional" });
+      setPendingSearch({
+        mode: "append",
+        keywords: searchTerms,
+        runIds: startedRunIds,
+        appliedState,
+        kind: "additional",
+        additionalGroups: groups,
+      });
     } finally {
       setStarting(false);
     }
@@ -994,7 +1068,7 @@ export function Opportunities({
   async function revalidateProposalDate(item: Opportunity) {
     const cleanNomenclature = item.nomenclature.trim();
     if (!cleanNomenclature) return false;
-    const detailKeyword = country === "Chile" ? cleanNomenclature : item.description.trim() || cleanNomenclature;
+    const detailKeyword = country === "Chile" || country === "Argentina" ? cleanNomenclature : item.description.trim() || cleanNomenclature;
     setStarting(true);
     try {
       const revalidateYears = uniqueDefined([
@@ -1010,14 +1084,18 @@ export function Opportunities({
         datePart(item.proposal_deadline, "month"),
       ]);
       const run = await api.startRun(token, {
-        source: variant === "ocds" ? "oece_ocds_api" : sourceForModule(module),
+        source: variant === "ocds"
+          ? "oece_ocds_api"
+          : country === "Argentina"
+            ? item.source
+            : sourceForModule(module),
         keyword: detailKeyword,
         nomenclature: cleanNomenclature,
         year: usesPeriodFilters ? revalidateYears.join(",") : country === "Peru" ? "2026" : "",
         month: usesPeriodFilters ? revalidateMonths.join(",") : "",
         years: usesPeriodFilters ? revalidateYears : undefined,
         months: usesPeriodFilters ? revalidateMonths : undefined,
-        version: variant === "ocds" ? "OCDS OECE" : country === "Peru" ? "Seace 3" : "Mercado Publico",
+        version: versionForCountry(country, variant),
         max_results: 1,
         max_details: country === "Chile" ? 1 : 12,
         enrich_details: true,
@@ -1034,8 +1112,8 @@ export function Opportunities({
       const updatedRow = runRows.find((row) => row.nomenclature.toLowerCase() === cleanNomenclature.toLowerCase())
         || runRows.find((row) => row.nomenclature.toLowerCase().includes(cleanNomenclature.toLowerCase()) || cleanNomenclature.toLowerCase().includes(row.nomenclature.toLowerCase()));
       setScopedRows((current) => mergeOpportunities(current ?? filtered, runRows));
-      return country === "Chile"
-        ? Boolean(updatedRow?.consultation_deadline)
+      return country === "Chile" || country === "Argentina"
+        ? Boolean(updatedRow?.consultation_deadline || updatedRow?.proposal_deadline)
         : Boolean(updatedRow && presentationDeadline(updatedRow));
     } finally {
       setStarting(false);
@@ -1136,10 +1214,12 @@ export function Opportunities({
       <div className="panel-title">
         <div>
           {country === "Chile" || variant === "ocds" ? null : (
-            <h2>Radar de oportunidades Peru</h2>
+            <h2>Radar de oportunidades {country === "Argentina" ? "Argentina" : "Peru"}</h2>
           )}
           {country === "Chile" || variant === "ocds" ? null : (
-            <p>Ejecuta SEACE en backend headless y revisa avance sin abrir Chrome al usuario.</p>
+            <p>{country === "Argentina"
+              ? "Consulta COMPR.AR y revisa procesos y publicaciones desde el CRM."
+              : "Ejecuta SEACE en backend headless y revisa avance sin abrir Chrome al usuario."}</p>
           )}
         </div>
       </div>
@@ -1312,12 +1392,12 @@ export function Opportunities({
               </div>
             </div>
           ) : null}
-          <div className="keyword-grid">
+          <div className={`keyword-grid ${country === "Argentina" ? "single-keyword" : ""}`}>
             <label>Keyword 1<input list={keywordSuggestionListId} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="satelital" /></label>
             {variant !== "ocds" ? (
               <>
-                <label>Keyword 2<input list={keywordSuggestionListId} value={keyword2} onChange={(event) => setKeyword2(event.target.value)} placeholder="Ej. internet" /></label>
-                <label>Keyword 3<input list={keywordSuggestionListId} value={keyword3} onChange={(event) => setKeyword3(event.target.value)} placeholder="Ej. conectividad" /></label>
+                {country !== "Argentina" ? <label>Keyword 2<input list={keywordSuggestionListId} value={keyword2} onChange={(event) => setKeyword2(event.target.value)} placeholder="Ej. internet" /></label> : null}
+                {country !== "Argentina" ? <label>Keyword 3<input list={keywordSuggestionListId} value={keyword3} onChange={(event) => setKeyword3(event.target.value)} placeholder="Ej. conectividad" /></label> : null}
               </>
             ) : null}
             <datalist id={keywordSuggestionListId}>
@@ -1385,7 +1465,9 @@ export function Opportunities({
                   <i className="filter-section-chevron" aria-hidden="true" />
                 </button>
               </h3>
-              <p>Devuelve los resultados cuando conoces datos específicos del proceso. Si no se logra visualizar el proceso en la tabla inferior, puedes generar una búsqueda adicional.</p>
+              <p>{country === "Argentina"
+                ? "Ingresa el código exacto para consultar la ficha y recuperar su cronograma directamente desde COMPR.AR."
+                : "Devuelve los resultados cuando conoces datos específicos del proceso. Si no se logra visualizar el proceso en la tabla inferior, puedes generar una búsqueda adicional."}</p>
             </div>
             <div className="filter-heading-actions">
               <span className="filter-type-badge">Opcionales</span>
@@ -1393,9 +1475,9 @@ export function Opportunities({
             </div>
           </div>
           <div className="radar-filter-content" id={`${storageScope}-optional-content`} hidden={!optionalFiltersOpen}>
-          <div className="optional-filter-grid">
-            <label>Búsqueda por Nomenclatura del Proceso <small className="exact-match-hint">Coincidencia exacta</small><input value={nomenclatureFilter} onChange={(event) => setNomenclatureFilter(event.target.value)} placeholder={country === "Chile" ? "Ej. 2422-122-L126" : "Ej. CP-ABR-2-2026-UGEL-A-1"} /></label>
-            <div className="entity-search-field">
+          <div className={`optional-filter-grid ${country === "Argentina" ? "argentina-manual" : ""}`}>
+            <label>{country === "Argentina" ? "Código del proceso COMPR.AR" : "Búsqueda por Nomenclatura del Proceso"} <small className="exact-match-hint">Coincidencia exacta</small><input value={nomenclatureFilter} onChange={(event) => setNomenclatureFilter(event.target.value)} placeholder={country === "Argentina" ? "Ej. 38/12-0778-LPR26" : country === "Chile" ? "Ej. 2422-122-L126" : "Ej. CP-ABR-2-2026-UGEL-A-1"} /></label>
+            {country !== "Argentina" ? <div className="entity-search-field">
               <label>Búsqueda por Nombre de Entidad <small className="exact-match-hint">Coincidencia exacta</small><input value={entityFilter} onChange={(event) => setEntityFilter(event.target.value)} placeholder={country === "Chile" ? "Ej. Municipalidad de Santiago" : "Ej. Gobierno Regional de Lima"} /></label>
               {entityFilter.trim() && !nomenclatureFilter.trim() ? (
                 <div className="entity-keyword-fields" role="group" aria-label="Keywords obligatorias para la búsqueda por entidad">
@@ -1408,20 +1490,22 @@ export function Opportunities({
                   {!entitySearchKeywords.length ? <small className="entity-keyword-error" role="status">Debes ingresar al menos una keyword para buscar por entidad.</small> : null}
                 </div>
               ) : null}
-            </div>
-            <div className="date-range-field" role="group" aria-labelledby={`${storageScope}-publication-date-label`}>
+            </div> : null}
+            {country !== "Argentina" ? <div className="date-range-field" role="group" aria-labelledby={`${storageScope}-publication-date-label`}>
               <span id={`${storageScope}-publication-date-label`}>Búsqueda Fecha de Convocatoria</span>
               <div className="date-range-inputs">
                 <label>Inicio<input type="date" value={publicationDateFrom} max={publicationDateTo || undefined} onChange={(event) => setPublicationDateFrom(event.target.value)} /></label>
                 <label>Fin<input type="date" value={publicationDateTo} min={publicationDateFrom || undefined} onChange={(event) => setPublicationDateTo(event.target.value)} /></label>
               </div>
               {invalidPublicationDateRange ? <small className="date-range-error" role="alert">La fecha de inicio debe ser anterior o igual a la fecha de fin.</small> : null}
-            </div>
+            </div> : null}
           </div>
-          <p className="additional-search-requirements">Completa la fecha de convocatoria y, además, la nomenclatura, el nombre de la entidad o ambos. Si ingresas nomenclatura, tendrá prioridad. Una búsqueda solo por entidad requiere entre una y tres keywords de negocio.</p>
+          <p className="additional-search-requirements">{country === "Argentina"
+            ? "La consulta manual busca una sola ficha y actualiza sus fechas de publicación, consultas y acto de apertura."
+            : "Completa la fecha de convocatoria y, además, la nomenclatura, el nombre de la entidad o ambos. Si ingresas nomenclatura, tendrá prioridad. Una búsqueda solo por entidad requiere entre una y tres keywords de negocio."}</p>
           <div className="radar-action-row optional-action-row">
             <button className="primary additional-search-button" type="button" onClick={executeAdditionalSearch} disabled={!additionalSearchReady || isRadarProcessing}>
-              {isRadarProcessing ? "Procesando..." : "Ejecutar búsqueda adicional"}
+              {isRadarProcessing ? "Procesando..." : country === "Argentina" ? "Buscar ficha y cronograma" : "Ejecutar búsqueda adicional"}
             </button>
           </div>
           </div>
@@ -1478,6 +1562,43 @@ export function mergeOpportunities(left: Opportunity[], right: Opportunity[]) {
   const byId = new Map<number, Opportunity>();
   [...left, ...right].forEach((item) => byId.set(item.id, item));
   return [...byId.values()];
+}
+
+export function mergeAdditionalPeriodKeywordGroups(...collections: ActivePeriodKeywordGroup[][]) {
+  const groups: ActivePeriodKeywordGroup[] = [];
+  collections.flat().forEach((group) => {
+    const normalized: ActivePeriodKeywordGroup = {
+      ...group,
+      months: uniqueDefined(group.months).sort((left, right) => Number(left) - Number(right)),
+      keywords: uniqueKeywords(group.keywords),
+      opportunityIds: group.opportunityIds ? uniqueNumbers(group.opportunityIds) : undefined,
+    };
+    if (!normalized.year || !normalized.months.length || !normalized.keywords.length) return;
+    const normalizedIds = new Set(normalized.opportunityIds || []);
+    const matchIndex = groups.findIndex((current) => {
+      if (current.year !== normalized.year) return false;
+      if (periodGroupKey(current) === periodGroupKey(normalized)) return true;
+      return Boolean(current.opportunityIds?.some((id) => normalizedIds.has(id)));
+    });
+    if (matchIndex < 0) {
+      groups.push(normalized);
+      return;
+    }
+    const current = groups[matchIndex];
+    const opportunityIds = uniqueNumbers([...(current.opportunityIds || []), ...(normalized.opportunityIds || [])]);
+    groups[matchIndex] = {
+      ...current,
+      months: uniqueDefined([...current.months, ...normalized.months]).sort((left, right) => Number(left) - Number(right)),
+      keywords: uniqueKeywords([...current.keywords, ...normalized.keywords]),
+      processCount: opportunityIds.length || Math.max(current.processCount || 0, normalized.processCount || 0),
+      opportunityIds: opportunityIds.length ? opportunityIds : undefined,
+    };
+  });
+  return groups;
+}
+
+export function uniqueNumbers(values: number[]) {
+  return [...new Set(values.filter((value) => Number.isFinite(value)))];
 }
 
 export function activeSearchStorageKey(scope: string) {
@@ -1909,8 +2030,23 @@ export function opportunityMatchesPeriodGroup(item: Opportunity, group: ActivePe
   if (String(date.getFullYear()) !== group.year || !group.months.includes(String(date.getMonth() + 1))) return false;
   const haystack = `${item.entity} ${item.nomenclature} ${item.description}`;
   const keywordMatch = !group.keywords.length || group.keywords.some((keyword) => matchesCompletePhrase(haystack, keyword));
-  const commercialMatch = group.commercialMode === "all" || commercialSignal(item).className !== "red";
-  return keywordMatch && commercialMatch;
+  return keywordMatch;
+}
+
+export function opportunityMatchesAutomaticSelection(
+  item: Opportunity,
+  years: string[],
+  months: string[],
+  keywords: string[],
+) {
+  if (!keywords.length) return false;
+  const timestamp = parseDate(item.publication_date) ?? parseDate(presentationDeadline(item));
+  if (timestamp === null) return false;
+  const date = new Date(timestamp);
+  if (years.length && !years.includes(String(date.getFullYear()))) return false;
+  if (months.length && !months.includes(String(date.getMonth() + 1))) return false;
+  const haystack = `${item.entity} ${item.nomenclature} ${item.description}`;
+  return keywords.some((keyword) => matchesCompletePhrase(haystack, keyword));
 }
 
 export function normalizedKeywordSet(keywords: string[]) {
@@ -1941,7 +2077,7 @@ export function ArchivedProcesses({
   const [rows, setRows] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const countryCode = country === "Chile" ? "chile" : "peru";
+  const countryCode = country === "Chile" ? "chile" : country === "Argentina" ? "argentina" : "peru";
 
   async function loadArchived() {
     setLoading(true);
@@ -1974,7 +2110,7 @@ export function ArchivedProcesses({
     <section className="panel archived-processes-panel">
       <div className="panel-title archived-processes-heading">
         <div>
-          <h2>Histórico Procesos Eliminados {country === "Chile" ? "CL" : "PE"}</h2>
+          <h2>Histórico Procesos Eliminados {country === "Chile" ? "CL" : country === "Argentina" ? "AR" : "PE"}</h2>
           <p>Respaldo permanente de decisiones comerciales. Estas nomenclaturas no ingresarán en actualizaciones automáticas mientras permanezcan aquí.</p>
         </div>
         <button className="ghost" type="button" onClick={loadArchived} disabled={loading}>
@@ -2707,6 +2843,11 @@ export function OpportunityRow({
   onOpenReviewHistory?: (item: Opportunity) => void;
 }) {
   const proposalDeadline = presentationDeadline(item);
+  const displayPublicationDate = item.publication_date || item.opening_date;
+  const publicationScheduleChecked = country === "Argentina"
+    && item.record_type === "publicacion"
+    && Boolean(item.schedule_validated_at);
+  const manualScheduleSource = country === "Chile" ? "Mercado Público" : country === "Argentina" ? "COMPR.AR" : "Seace";
   const isLargePurchase = item.source.toLowerCase() === "mercado_publico_grandes_compras";
   const isNewOpportunity = isOpportunityNew(item);
   return (
@@ -2761,6 +2902,14 @@ export function OpportunityRow({
             {item.contract_duration ? <span className="chile-ml-contract">Duración de contrato: {item.contract_duration}</span> : null}
           </div>
         ) : null}
+        {country === "Argentina" ? (
+          <div className="argentina-comprar-meta">
+            <span className={`comprar-record-type ${item.record_type || "proceso"}`}>{item.record_type === "publicacion" ? "Publicación" : "Proceso"}</span>
+            {item.source_status ? <span className="comprar-status">{item.source_status}</span> : null}
+            {item.expediente ? <span>Expediente: {item.expediente}</span> : null}
+            {item.contracting_unit ? <span>{item.contracting_unit}</span> : null}
+          </div>
+        ) : null}
         {onSendToTracking && onLeaveInReview ? (
           <div className="description-actions">
             <ManageOpportunityMenu
@@ -2775,15 +2924,17 @@ export function OpportunityRow({
         ) : null}
       </td>
       <td>
-        {item.publication_date ? (
+        {displayPublicationDate ? (
           manualProposalUpdatedAt ? (
             <span className="manual-proposal-date">
-              <b>{formatDate(item.publication_date)}</b>
-              <small>*Actualizado manual desde {country === "Chile" ? "Mercado Público" : "Seace"} ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
+              <b>{formatDate(displayPublicationDate)}</b>
+              <small>*Actualizado manual desde {manualScheduleSource} ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
             </span>
           ) : (
-            formatDate(item.publication_date)
+            formatDate(displayPublicationDate)
           )
+        ) : publicationScheduleChecked ? (
+          <span className="proposal-unavailable">Sin datos cargados</span>
         ) : country === "Chile" && signal.className === "red" && allowRevalidation ? (
           proposalUnavailable ? (
             <span className="proposal-unavailable">Fecha no disponible en Mercado Público</span>
@@ -2806,10 +2957,27 @@ export function OpportunityRow({
           manualProposalUpdatedAt ? (
             <span className="manual-proposal-date">
               <b>{formatDate(item.consultation_deadline)}</b>
-              <small>*Actualizado manual desde {country === "Chile" ? "Mercado Público" : "Seace"} ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
+              <small>*Actualizado manual desde {manualScheduleSource} ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
             </span>
           ) : (
             formatDate(item.consultation_deadline)
+          )
+        ) : publicationScheduleChecked ? (
+          <span className="proposal-unavailable">Sin datos cargados</span>
+        ) : country === "Argentina" && item.record_type !== "publicacion" && allowRevalidation ? (
+          proposalUnavailable ? (
+            <span className="proposal-unavailable">Cronograma no disponible en COMPR.AR</span>
+          ) : (
+            <button className="revalidate-button chile-revalidate-button" type="button" disabled={isRevalidating} onClick={() => onRevalidateProposal(item)}>
+              {isRevalidating ? (
+                <>
+                  <span className="button-spinner compact" aria-hidden="true" />
+                  <span>Consultando COMPR.AR</span>
+                </>
+              ) : (
+                "Buscar cronograma en COMPR.AR"
+              )}
+            </button>
           )
         ) : country === "Chile" && signal.className === "red" && allowRevalidation ? (
           proposalUnavailable ? (
@@ -2827,6 +2995,18 @@ export function OpportunityRow({
             </button>
           )
         ) : "-"}
+        {country === "Argentina" && item.record_type === "publicacion" && allowRevalidation ? (
+          <button className="revalidate-button chile-revalidate-button" type="button" disabled={isRevalidating} onClick={() => onRevalidateProposal(item)}>
+            {isRevalidating ? (
+              <>
+                <span className="button-spinner compact" aria-hidden="true" />
+                <span>Consultando COMPR.AR</span>
+              </>
+            ) : (
+              "Buscar / actualizar fechas en COMPR.AR"
+            )}
+          </button>
+        ) : null}
       </td>
       <td>{formatDeadlineCountdown(item.consultation_deadline, countdownNow)}</td>
       <td>
@@ -2834,12 +3014,14 @@ export function OpportunityRow({
           manualProposalUpdatedAt ? (
             <span className="manual-proposal-date">
               <b>{formatDate(proposalDeadline)}</b>
-              <small>*Actualizado manual desde {country === "Chile" ? "Mercado Público" : "Seace"} ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
+              <small>*Actualizado manual desde {manualScheduleSource} ({formatManualTimestamp(manualProposalUpdatedAt)})</small>
             </span>
           ) : (
             formatDate(proposalDeadline)
           )
-        ) : country === "Chile" || !allowRevalidation ? (
+        ) : publicationScheduleChecked ? (
+          <span className="proposal-unavailable">Sin datos cargados</span>
+        ) : country === "Chile" || country === "Argentina" || !allowRevalidation ? (
           "-"
         ) : proposalUnavailable ? (
           <span className="proposal-unavailable">Fecha no Disponible en Seace</span>
@@ -2897,7 +3079,10 @@ export function OpportunityDetailModal({
     try {
       setDocuments(await api.discoverDocuments(token, opportunity.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo buscar documentos en SEACE");
+      const fallback = sourceBelongsToCountry(opportunity.source, "Argentina")
+        ? "No se pudo buscar documentos en COMPR.AR"
+        : "No se pudo buscar documentos en SEACE";
+      setError(err instanceof Error ? err.message : fallback);
     } finally {
       setLoading(false);
     }
@@ -2908,9 +3093,19 @@ export function OpportunityDetailModal({
   }, [opportunity.id]);
 
   const proposalDeadline = presentationDeadline(opportunity);
+  const publicationScheduleChecked = sourceBelongsToCountry(opportunity.source, "Argentina")
+    && opportunity.record_type === "publicacion"
+    && Boolean(opportunity.schedule_validated_at);
+  const officialDate = (value: string | null) => value
+    ? <strong>{formatDate(value)}</strong>
+    : publicationScheduleChecked
+      ? <strong className="proposal-unavailable">Sin datos cargados</strong>
+      : <strong>-</strong>;
   const emptyDocumentsText = sourceBelongsToCountry(opportunity.source, "Chile")
     ? "Aun no hay documentos registrados. Usa Buscar documentos para consultar MercadoPublico.cl desde backend."
-    : "Aun no hay documentos registrados. Usa Buscar documentos para consultar SEACE desde backend.";
+    : sourceBelongsToCountry(opportunity.source, "Argentina")
+      ? "Aun no hay documentos registrados. Usa Buscar documentos para consultar COMPR.AR desde backend."
+      : "Aun no hay documentos registrados. Usa Buscar documentos para consultar SEACE desde backend.";
   const ocdsMetadata = [
     ["RUC comprador", opportunity.buyer_ruc],
     ["Region", opportunity.region],
@@ -2919,6 +3114,13 @@ export function OpportunityDetailModal({
     ["Release", opportunity.release_id],
     ["Docs OCDS", opportunity.documents_count ? String(opportunity.documents_count) : ""],
   ].filter(([, value]) => String(value || "").trim());
+  const argentinaDocumentDetailUrl = documents
+    .find((doc) => doc.source_url?.includes("#postback:") || doc.source_url?.includes("#download:"))
+    ?.source_url?.split(/#(?:postback|download):/)[0];
+  const argentinaDetailUrl = argentinaDocumentDetailUrl || opportunity.detail_url || "";
+  const showArgentinaDetailLink = sourceBelongsToCountry(opportunity.source, "Argentina")
+    && Boolean(argentinaDetailUrl)
+    && !argentinaDetailUrl.includes("BuscarAvanzado");
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Detalle del proceso">
@@ -2932,11 +3134,11 @@ export function OpportunityDetailModal({
             <div className="detail-card-title">Informacion general</div>
             <div className="detail-grid">
               <span>Proceso</span><strong>{opportunity.nomenclature || "-"}</strong>
-              <span>Fecha</span><strong>{formatDate(opportunity.publication_date)}</strong>
+              <span>Fecha</span>{officialDate(opportunity.publication_date)}
               <span>Entidad</span><strong>{opportunity.entity || "-"}</strong>
               <span>Monto</span><strong>{formatMoney(opportunity.amount, sourceBelongsToCountry(opportunity.source, "Chile") ? "Chile" : "Peru")}</strong>
-              <span>Consultas</span><strong>{formatDate(opportunity.consultation_deadline)}</strong>
-              <span>Propuesta</span><strong>{formatDate(proposalDeadline)}</strong>
+              <span>Consultas</span>{officialDate(opportunity.consultation_deadline)}
+              <span>Propuesta</span>{officialDate(proposalDeadline)}
               {ocdsMetadata.map(([label, value]) => (
                 <React.Fragment key={label}>
                   <span>{label}</span><strong>{value}</strong>
@@ -2951,6 +3153,20 @@ export function OpportunityDetailModal({
               ) : null}
             </div>
           </article>
+          {showArgentinaDetailLink ? (
+            <article className="detail-card official-process-section">
+              <div className="detail-card-title">Fuente oficial del proceso</div>
+              <div className="official-process-link-row">
+                <div>
+                  <strong>Ficha completa en COMPR.AR</strong>
+                  <p>Consulta el cronograma, las condiciones, los anexos y los actos administrativos publicados.</p>
+                </div>
+                <a className="doc-link" href={argentinaDetailUrl} target="_blank" rel="noreferrer">
+                  Ver detalle del proceso completo en COMPR.AR
+                </a>
+              </div>
+            </article>
+          ) : null}
           <article className="detail-card">
             <div className="detail-card-title">
               <span>Documentos del proceso</span>

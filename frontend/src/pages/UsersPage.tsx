@@ -11,6 +11,7 @@ export const emptyUserForm: UserCreatePayload = {
   address: "",
   phone_peru: "",
   phone_chile: "",
+  phone_argentina: "",
   access_profile: "peru",
   role: "viewer",
 };
@@ -18,20 +19,21 @@ export const emptyUserForm: UserCreatePayload = {
 export const accessProfileOptions: Array<{ value: AccessProfile; title: string; description: string; flags: Country[] }> = [
   { value: "peru", title: "Perfil Perú", description: "Inicio Perú, Oportunidades Perú y alertas", flags: ["Peru"] },
   { value: "chile", title: "Perfil Chile", description: "Inicio Chile, Oportunidades Chile y alertas", flags: ["Chile"] },
-  { value: "both", title: "Perú y Chile", description: "Acceso operativo a los módulos de ambos países", flags: ["Peru", "Chile"] },
+  { value: "argentina", title: "Perfil Argentina", description: "Inicio Argentina, COMPR.AR y alertas", flags: ["Argentina"] },
+  { value: "both", title: "Todos los países", description: "Acceso operativo a los módulos de Perú, Chile y Argentina", flags: ["Peru", "Chile", "Argentina"] },
 ];
 
 export function profileName(profile: AccessProfile) {
-  return profile === "both" ? "Perú y Chile" : profile === "chile" ? "Chile" : "Perú";
+  return profile === "both" ? "Todos los países" : profile === "chile" ? "Chile" : profile === "argentina" ? "Argentina" : "Perú";
 }
 
-export function userLocalPhone(value: string, countryCode: "51" | "56") {
+export function userLocalPhone(value: string, countryCode: "51" | "56" | "54") {
   const digits = value.replace(/\D/g, "");
   const localDigits = digits.startsWith(countryCode) && digits.length > 9 ? digits.slice(countryCode.length) : digits;
-  return localDigits.slice(0, 9);
+  return localDigits.slice(0, countryCode === "54" ? 11 : 9);
 }
 
-export function userInternationalPhone(value: string, countryCode: "51" | "56") {
+export function userInternationalPhone(value: string, countryCode: "51" | "56" | "54") {
   const localDigits = userLocalPhone(value, countryCode);
   return localDigits ? `+${countryCode}${localDigits}` : "";
 }
@@ -88,6 +90,7 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
       address: user.address,
       phone_peru: userLocalPhone(user.phone_peru, "51"),
       phone_chile: userLocalPhone(user.phone_chile, "56"),
+      phone_argentina: userLocalPhone(user.phone_argentina, "54"),
       access_profile: user.access_profile,
       role: user.role,
     });
@@ -112,6 +115,7 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
         ...form,
         phone_peru: userInternationalPhone(form.phone_peru, "51"),
         phone_chile: userInternationalPhone(form.phone_chile, "56"),
+        phone_argentina: userInternationalPhone(form.phone_argentina, "54"),
       };
       if (editingId !== null) {
         const { password, ...editableFields } = normalizedForm;
@@ -157,6 +161,7 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
 
   const needsPeruPhone = form.access_profile === "peru" || form.access_profile === "both";
   const needsChilePhone = form.access_profile === "chile" || form.access_profile === "both";
+  const needsArgentinaPhone = form.access_profile === "argentina" || form.access_profile === "both";
 
   return (
     <div className="users-module">
@@ -217,6 +222,11 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
                 <span className="phone-input-group user-phone-input"><b>+56</b><input required type="tel" inputMode="numeric" autoComplete="tel-national" minLength={9} maxLength={9} pattern="[0-9]{9}" title="Ingresa los 9 dígitos del celular de Chile" value={form.phone_chile} onChange={(event) => updateField("phone_chile", event.target.value.replace(/\D/g, "").slice(0, 9))} placeholder="9 9999 9999" /></span>
               </label>
             ) : null}
+            {needsArgentinaPhone ? (
+              <label>Celular Argentina <span className="required-label">10 u 11 dígitos</span>
+                <span className="phone-input-group user-phone-input"><b>+54</b><input required type="tel" inputMode="numeric" autoComplete="tel-national" minLength={10} maxLength={11} pattern="[0-9]{10,11}" title="Ingresa 10 u 11 dígitos del celular de Argentina" value={form.phone_argentina} onChange={(event) => updateField("phone_argentina", event.target.value.replace(/\D/g, "").slice(0, 11))} placeholder="11 9999 9999" /></span>
+              </label>
+            ) : null}
             <label className={form.access_profile === "both" ? "full-field" : ""}>{editingId !== null ? "Nueva contraseña" : "Contraseña temporal"} <span className="field-hint">{editingId !== null ? "Opcional" : "Mínimo 8 caracteres"}</span><input required={editingId === null} minLength={8} type="password" autoComplete="new-password" value={form.password} onChange={(event) => updateField("password", event.target.value)} placeholder={editingId !== null ? "Dejar vacío para conservarla" : "Crea una contraseña segura"} /></label>
           </div>
 
@@ -246,8 +256,9 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
                   </div>
                   <div className="user-access">
                     <span className={`profile-badge ${user.access_profile}`}>
-                      {user.access_profile !== "chile" ? <CountryFlagIcon country="Peru" /> : null}
-                      {user.access_profile !== "peru" ? <CountryFlagIcon country="Chile" /> : null}
+                      {user.access_profile === "peru" || user.access_profile === "both" ? <CountryFlagIcon country="Peru" /> : null}
+                      {user.access_profile === "chile" || user.access_profile === "both" ? <CountryFlagIcon country="Chile" /> : null}
+                      {user.access_profile === "argentina" || user.access_profile === "both" ? <CountryFlagIcon country="Argentina" /> : null}
                       {profileName(user.access_profile)}
                     </span>
                     <small>{user.role === "admin" ? "Administrador" : "Usuario"}</small>

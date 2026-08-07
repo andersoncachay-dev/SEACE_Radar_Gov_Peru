@@ -41,7 +41,8 @@ def send_stage_support_request(
     if not target_ids:
         return (0, 0)
 
-    country_label = "Chile" if country_for_source(opportunity.source) == "chile" else "Perú"
+    country = country_for_source(opportunity.source)
+    country_label = "Chile" if country == "chile" else "Argentina" if country == "argentina" else "Perú"
     due_label = stage.due_date.strftime("%d/%m/%Y") if stage.due_date else "Por definir"
     subject = f"GovRadar · Solicitud de Soporte — {opportunity.nomenclature or opportunity.entity}"
 
@@ -140,7 +141,8 @@ def send_time_status_alert(
     if not recipients:
         return (0, 0)
 
-    country_label = "Chile" if country_for_source(opportunity.source) == "chile" else "Perú"
+    country = country_for_source(opportunity.source)
+    country_label = "Chile" if country == "chile" else "Argentina" if country == "argentina" else "Perú"
     tier_label = TIME_ALERT_LABELS.get(tier, tier.upper())
     tier_color = TIME_ALERT_COLORS.get(tier, "#9a6b00")
     remaining_label = _format_remaining(remaining)
@@ -212,8 +214,9 @@ def send_opportunity_date_change_alert(
     if not recipients:
         return (0, 0)
 
-    country_label = "Chile" if country_for_source(opportunity.source) == "chile" else "Perú"
-    portal_label = "Mercado Público" if country_label == "Chile" else "SEACE"
+    country = country_for_source(opportunity.source)
+    country_label = "Chile" if country == "chile" else "Argentina" if country == "argentina" else "Perú"
+    portal_label = "Mercado Público" if country == "chile" else "COMPR.AR" if country == "argentina" else "SEACE"
     subject = f"GovRadar · Cambio de fecha detectado — {opportunity.nomenclature or opportunity.entity}"
 
     def _fmt(value: datetime | None) -> str:

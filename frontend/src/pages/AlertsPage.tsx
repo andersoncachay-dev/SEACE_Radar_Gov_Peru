@@ -2,22 +2,24 @@ import React, { useRef, useState } from "react";
 import { api, Alert, AlertRule } from "../api";
 import { CountryFlagIcon, Empty } from "../shared";
 
-export function ruleCountryFlags(country: string): Array<"Peru" | "Chile"> {
+export function ruleCountryFlags(country: string): Array<"Peru" | "Chile" | "Argentina"> {
   if (country === "peru") return ["Peru"];
   if (country === "chile") return ["Chile"];
-  return ["Peru", "Chile"];
+  if (country === "argentina") return ["Argentina"];
+  return ["Peru", "Chile", "Argentina"];
 }
 
 export type AlertChannel = "email" | "whatsapp" | "in_app";
 
-export type PhoneCountry = "Peru" | "Chile";
+export type PhoneCountry = "Peru" | "Chile" | "Argentina";
 
-export type RuleCountry = "peru" | "chile" | "both";
+export type RuleCountry = "peru" | "chile" | "argentina" | "both";
 
 export const ruleCountryOptions: Array<{ value: RuleCountry; label: string }> = [
   { value: "both", label: "Ambos" },
   { value: "peru", label: "Perú" },
   { value: "chile", label: "Chile" },
+  { value: "argentina", label: "Argentina" },
 ];
 
 export function ruleCountryLabel(value: string) {
@@ -107,8 +109,9 @@ export function Alerts({ token, rules, alerts, refresh }: { token: string; rules
   // solo por palabras clave, así que toda regla acepta cualquier prioridad.
   const ALL_PRIORITIES = "C";
 
-  const phonePrefix = phoneCountry === "Peru" ? "+51" : "+56";
-  const phoneDigits = localPhone.replace(/\D/g, "").slice(0, 9);
+  const phonePrefix = phoneCountry === "Peru" ? "+51" : phoneCountry === "Chile" ? "+56" : "+54";
+  const requiredPhoneDigits = phoneCountry === "Argentina" ? 10 : 9;
+  const phoneDigits = localPhone.replace(/\D/g, "").slice(0, phoneCountry === "Argentina" ? 11 : 9);
   const generatedRuleName = channel === "email"
     ? "Correo · alerta de negocio"
     : channel === "whatsapp"
@@ -148,8 +151,8 @@ export function Alerts({ token, rules, alerts, refresh }: { token: string; rules
     setRuleCountry((rule.country as RuleCountry) || "both");
     setEmailDestination(nextChannel === "email" ? rule.destination : "");
     if (nextChannel === "whatsapp") {
-      setPhoneCountry(rule.destination.startsWith("+56") ? "Chile" : "Peru");
-      setLocalPhone(rule.destination.replace(/^\+(?:51|56)/, "").replace(/\D/g, "").slice(0, 9));
+      setPhoneCountry(rule.destination.startsWith("+56") ? "Chile" : rule.destination.startsWith("+54") ? "Argentina" : "Peru");
+      setLocalPhone(rule.destination.replace(/^\+(?:51|56|54)/, "").replace(/\D/g, "").slice(0, 11));
     } else {
       setLocalPhone("");
     }
@@ -167,7 +170,7 @@ export function Alerts({ token, rules, alerts, refresh }: { token: string; rules
         ? `${phonePrefix}${phoneDigits}`
         : "GovRadar";
 
-    if (channel === "whatsapp" && phoneDigits.length !== 9) {
+    if (channel === "whatsapp" && (phoneCountry === "Argentina" ? ![10, 11].includes(phoneDigits.length) : phoneDigits.length !== requiredPhoneDigits)) {
       setError(`Ingresa los 9 dígitos del celular de ${phoneCountry === "Peru" ? "Perú" : "Chile"}.`);
       return;
     }
@@ -277,17 +280,17 @@ export function Alerts({ token, rules, alerts, refresh }: { token: string; rules
                 <fieldset className="whatsapp-country-fieldset">
                   <legend>País del celular</legend>
                   <div className="whatsapp-country-selector">
-                    {(["Peru", "Chile"] as PhoneCountry[]).map((countryOption) => (
+                    {(["Peru", "Chile", "Argentina"] as PhoneCountry[]).map((countryOption) => (
                       <button className={phoneCountry === countryOption ? "selected" : ""} type="button" aria-pressed={phoneCountry === countryOption} key={countryOption} onClick={() => changePhoneCountry(countryOption)}>
                         <CountryFlagIcon country={countryOption} />
-                        <span>{countryOption === "Peru" ? "Perú" : "Chile"}</span>
-                        <small>{countryOption === "Peru" ? "+51" : "+56"}</small>
+                        <span>{countryOption === "Peru" ? "Perú" : countryOption}</span>
+                        <small>{countryOption === "Peru" ? "+51" : countryOption === "Chile" ? "+56" : "+54"}</small>
                       </button>
                     ))}
                   </div>
                 </fieldset>
-                <label>Celular WhatsApp <span className="required-label">9 dígitos</span>
-                  <span className="phone-input-group"><b>{phonePrefix}</b><input required type="tel" inputMode="numeric" autoComplete="tel" value={localPhone} onChange={(event) => setLocalPhone(event.target.value.replace(/\D/g, "").slice(0, 9))} placeholder={phoneCountry === "Peru" ? "999 999 999" : "9 9999 9999"} /></span>
+                <label>Celular WhatsApp <span className="required-label">{phoneCountry === "Argentina" ? "10 u 11 dígitos" : "9 dígitos"}</span>
+                  <span className="phone-input-group"><b>{phonePrefix}</b><input required type="tel" inputMode="numeric" autoComplete="tel" value={localPhone} onChange={(event) => setLocalPhone(event.target.value.replace(/\D/g, "").slice(0, phoneCountry === "Argentina" ? 11 : 9))} placeholder={phoneCountry === "Peru" ? "999 999 999" : phoneCountry === "Chile" ? "9 9999 9999" : "11 9999 9999"} /></span>
                 </label>
                 <p className="destination-preview">Se guardará como <strong>{phoneDigits.length ? `${phonePrefix}${phoneDigits}` : `${phonePrefix}•••••••••`}</strong></p>
               </>
@@ -371,7 +374,7 @@ export function Alerts({ token, rules, alerts, refresh }: { token: string; rules
           {visibleAlerts.map((alert) => (
             <article className="alert-event-row" key={alert.id}>
               <span className={`event-status-dot ${alert.status}`} aria-hidden="true" />
-              <div><strong>{alertTypeLabel(alert.alert_type)}</strong><small><span className={`event-country-tag ${alert.country}`}>{alert.country === "chile" ? "Chile" : "Perú"}</span> · Regla #{alert.rule_id} · Oportunidad #{alert.opportunity_id}{alert.attempt_count ? ` · Intento ${alert.attempt_count}` : ""}</small></div>
+              <div><strong>{alertTypeLabel(alert.alert_type)}</strong><small><span className={`event-country-tag ${alert.country}`}>{alert.country === "chile" ? "Chile" : alert.country === "argentina" ? "Argentina" : "Perú"}</span> · Regla #{alert.rule_id} · Oportunidad #{alert.opportunity_id}{alert.attempt_count ? ` · Intento ${alert.attempt_count}` : ""}</small></div>
               <span className={`event-status-label ${alert.status}`}>{alertStatusLabel(alert.status)}</span>
             </article>
           ))}

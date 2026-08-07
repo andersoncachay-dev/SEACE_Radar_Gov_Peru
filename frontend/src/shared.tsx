@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, LegalDocumentKey, LegalDocumentRecord, Opportunity, RadarKeyword, Run } from "./api";
+import { api, CountryCode, LegalDocumentKey, LegalDocumentRecord, Opportunity, RadarKeyword, Run } from "./api";
 
-export type Country = "Peru" | "Chile";
+export type Country = "Peru" | "Chile" | "Argentina";
 
 export type CommercialClass = "green" | "amber" | "pending" | "red";
 
@@ -10,7 +10,12 @@ export const retiredRadarKeywords = new Set(["radio enlace"]);
 export const countryFlagUrls: Record<Country, string> = {
   Peru: "/assets/flag-peru.svg",
   Chile: "/assets/flag-chile.svg",
+  Argentina: "/assets/flag-argentina.svg",
 };
+
+export function countryCode(country: Country): CountryCode {
+  return country.toLowerCase() as CountryCode;
+}
 
 export const homeKeywordHints = [
   { label: "satelital", terms: ["satelital"] },
@@ -53,6 +58,7 @@ export function useDismissableMenu(open: boolean, onClose: () => void) {
 export function sourceBelongsToCountry(source: string, country: Country) {
   const normalized = source.toLowerCase();
   if (country === "Chile") return normalized.startsWith("mercado_publico");
+  if (country === "Argentina") return normalized.startsWith("comprar_argentina");
   return normalized.startsWith("seace") || normalized.includes("menor8") || normalized.startsWith("oece_ocds");
 }
 
@@ -62,6 +68,9 @@ export function formatMoney(value: number, country: Country = "Peru") {
   }
   if (country === "Chile") {
     return `PESO CL ${new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(value)}`;
+  }
+  if (country === "Argentina") {
+    return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
   }
   return new Intl.NumberFormat("es-PE", {
     style: "currency",
@@ -102,7 +111,7 @@ export function CountryFlagIcon({ country, className = "" }: { country: Country;
     <img
       className={className}
       src={countryFlagUrls[country]}
-      alt={country === "Chile" ? "Chile" : "Peru"}
+      alt={country}
       loading="eager"
     />
   );
@@ -150,6 +159,40 @@ export function commercialSignal(item: Opportunity): { label: string; hint: stri
   const consultationDeadline = parseDate(item.consultation_deadline);
   const presentationDeadline = parseDate(item.proposal_deadline) ?? parseDate(item.quote_deadline);
   const status = (item.status || "").toLowerCase();
+  if (item.source.toLowerCase().startsWith("comprar_argentina")) {
+    const sourceStatus = stripAccents(item.source_status || status).toLowerCase();
+    // COMPR.AR can keep an administrative state such as "En Apertura" or
+    // "Publicado" after the commercial window has elapsed. The proposal
+    // deadline is the authoritative signal for sales actionability.
+    if (presentationDeadline !== null && now > presentationDeadline) {
+      return { label: "Proceso culminado", hint: "Plazo de propuesta vencido", className: "red" };
+    }
+    if (["adjudicado", "dejado sin efecto", "fracasado", "desierto"].some((value) => sourceStatus.includes(value))) {
+      return { label: "Proceso finalizado", hint: item.source_status || "Cerrado en COMPR.AR", className: "red" };
+    }
+    if (consultationDeadline !== null && now <= consultationDeadline) {
+      return {
+        label: "Vigente para Consultas y Propuestas",
+        hint: "Consultas y propuestas abiertas",
+        className: "green",
+      };
+    }
+    if (presentationDeadline !== null && now <= presentationDeadline) {
+      return {
+        label: "Vigente para Propuesta",
+        hint: "Plazo de consultas vencido",
+        className: "amber",
+      };
+    }
+    if (sourceStatus.includes("publicado")) {
+      return {
+        label: item.record_type === "publicacion" ? "Publicado" : "Vigente para Consultas y Propuestas",
+        hint: item.record_type === "publicacion" ? "Publicación informativa" : "Cronograma pendiente de validación",
+        className: "green",
+      };
+    }
+    return { label: "En curso", hint: item.source_status || "Evaluación administrativa", className: "amber" };
+  }
 
   // Preserve the former Peru behavior while an SEACE proposal deadline is
   // still unavailable. OCDS continues to provide the discovery and enquiry
@@ -167,7 +210,7 @@ export function commercialSignal(item: Opportunity): { label: string; hint: stri
 
   if (consultationDeadline !== null && now <= consultationDeadline) {
     return {
-      label: "Vigente para Consultas y Propuesta",
+      label: "Vigente para Consultas y Propuestas",
       hint: "Consultas abiertas",
       className: "green",
     };
@@ -196,7 +239,7 @@ export function commercialSignal(item: Opportunity): { label: string; hint: stri
 
   if (status.includes("consulta")) {
     return {
-      label: "Vigente para Consultas y Propuesta",
+      label: "Vigente para Consultas y Propuestas",
       hint: "Consultas abiertas",
       className: "green",
     };
@@ -275,13 +318,13 @@ export function defaultRadarKeywords(country: Country): RadarKeyword[] {
     .filter((item) => item.label !== "telecomunicaciones")
     .map((item) => ({
       id: null,
-      country: country.toLowerCase() as "peru" | "chile",
+      country: countryCode(country),
       keyword: item.label,
     }));
 }
 
 export function useRadarKeywords(token: string, country: Country) {
-  const apiCountry = country.toLowerCase() as "peru" | "chile";
+  const apiCountry = countryCode(country);
   const [keywords, setKeywords] = useState<RadarKeyword[]>(() => defaultRadarKeywords(country));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -535,6 +578,7 @@ export function updateIntervalLabel(intervalSeconds: number | null | undefined) 
 }
 
 export function RunProgress({ run, batchRuns = [], batchKeywords = [], resultRows = [], resultsFocused = false, country, onToggleResults }: { run: Run; batchRuns?: Run[]; batchKeywords?: string[]; resultRows?: Opportunity[]; resultsFocused?: boolean; country?: Country; onToggleResults?: () => void }) {
+  const [resultsExpanded, setResultsExpanded] = useState(false);
   const detail = parseRunDetails(run);
   const runs = batchRuns.length > 1 ? batchRuns : [run];
   const isBatch = runs.length > 1;
@@ -551,6 +595,8 @@ export function RunProgress({ run, batchRuns = [], batchKeywords = [], resultRow
   const currentRun = runs.find((item) => item.status === "running") || runs.find((item) => item.status === "queued");
   const currentKeyword = currentRun ? keywordFromRun(currentRun) : "";
   const resultKeywords = uniqueKeywords(runs.map(keywordFromRun).filter(Boolean));
+  const hasMoreResultRows = resultRows.length > 1;
+  useEffect(() => setResultsExpanded(false), [run.id, resultRows.length]);
   const heading = isBatch
     ? isLive
       ? `Procesando búsqueda ${Math.min(terminalCount + 1, runs.length)} de ${runs.length}`
@@ -592,18 +638,30 @@ export function RunProgress({ run, batchRuns = [], batchKeywords = [], resultRow
         <div className="run-result-detail">
           <div className="run-result-list">
             <strong>{resultRows.length === 1 ? "Proceso identificado" : "Procesos identificados"}</strong>
-            {resultRows.map((item) => (
-              <div className="run-result-item" key={item.id}>
-                <b>{item.nomenclature || "Sin nomenclatura"}</b>
-                <span><strong>Palabra clave:</strong> {resultKeywords.join(", ") || "No disponible"}</span>
-                <span><strong>Entidad:</strong> {item.entity || "No disponible"}</span>
-                {country === "Peru" ? (
-                  <span><strong>Fin de propuesta (SEACE):</strong> {formatDate(presentationDeadline(item))}</span>
-                ) : (
-                  <span><strong>Fecha de convocatoria:</strong> {formatDate(item.publication_date)}</span>
-                )}
-              </div>
-            ))}
+            <div className={`run-result-items ${hasMoreResultRows && !resultsExpanded ? "is-collapsed" : ""}`}>
+              {resultRows.map((item) => (
+                <div className="run-result-item" key={item.id}>
+                  <b>{item.nomenclature || "Sin nomenclatura"}</b>
+                  <span><strong>Palabra clave:</strong> {resultKeywords.join(", ") || "No disponible"}</span>
+                  <span><strong>Entidad:</strong> {item.entity || "No disponible"}</span>
+                  {country === "Peru" ? (
+                    <span><strong>Fin de propuesta (SEACE):</strong> {formatDate(presentationDeadline(item))}</span>
+                  ) : (
+                    <span><strong>Fecha de convocatoria:</strong> {formatDate(item.publication_date)}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            {hasMoreResultRows ? (
+              <button
+                className="run-results-expand"
+                type="button"
+                aria-expanded={resultsExpanded}
+                onClick={() => setResultsExpanded((current) => !current)}
+              >
+                {resultsExpanded ? "Ver menos" : `Ver más (${resultRows.length - 1})`}
+              </button>
+            ) : null}
           </div>
           {onToggleResults ? <button className="ghost" type="button" onClick={onToggleResults}>{resultsFocused ? "Mostrar búsqueda completa" : "Ver en la tabla"}</button> : null}
         </div>
@@ -634,6 +692,22 @@ export function normalizedSearchTerm(value: string) {
 export function keywordFromRun(run: Run) {
   const match = String(run.diagnostics || "").match(/keyword=([^|]+)/i);
   return match?.[1]?.trim() || "";
+}
+
+// Perú OCDS: cuando el run apunta a un código de proceso puntual (revalidación
+// manual) en vez de una palabra clave del Radar, el log guarda una segunda línea
+// "keyword=<código>" -el término real usado contra OCDS/SEACE- distinta del
+// "Configuracion: keyword=..." inicial, que en ese caso trae la descripción
+// completa del proceso. Si ambas difieren, es una revalidación puntual, no una
+// búsqueda automática por palabra clave.
+export function runHistoryLabel(run: Run) {
+  const configKeyword = keywordFromRun(run);
+  const targetMatch = String(run.diagnostics || "").match(/\nkeyword=([^\n|]+)/i);
+  const target = targetMatch?.[1]?.trim() || "";
+  if (target && configKeyword && target.toLowerCase() !== configKeyword.toLowerCase()) {
+    return `Validación Manual · ${target}`;
+  }
+  return configKeyword;
 }
 
 export function ConfirmModal({

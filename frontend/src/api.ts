@@ -25,6 +25,10 @@ export type Opportunity = {
   nomenclature: string;
   object_type: string;
   description: string;
+  record_type: string;
+  expediente: string;
+  contracting_unit: string;
+  financial_service: string;
   region: string;
   buyer_ruc: string;
   ocid: string;
@@ -44,9 +48,12 @@ export type Opportunity = {
   requirement_pdf_url: string;
   requirement_pdf_local: string;
   publication_date: string | null;
+  opening_date: string | null;
   consultation_deadline: string | null;
   quote_deadline: string | null;
   proposal_deadline: string | null;
+  schedule_source: string;
+  schedule_validated_at: string | null;
   is_archived: boolean;
   archived_at: string | null;
   archived_by_id: number | null;
@@ -71,9 +78,11 @@ export type Run = {
   finished_at: string | null;
 };
 
+export type CountryCode = "peru" | "chile" | "argentina";
+
 export type SchedulerStatus = {
   enabled: boolean;
-  country: "peru" | "chile";
+  country: CountryCode;
   is_running: boolean;
   next_update_at: string | null;
   interval_minutes: number;
@@ -81,7 +90,7 @@ export type SchedulerStatus = {
 };
 
 export type SchedulerIntervalConfig = {
-  country: "peru" | "chile";
+  country: CountryCode;
   days: number;
   hours: number;
   minutes: number;
@@ -128,7 +137,7 @@ export type AlertRule = {
   destination: string;
   keywords: string;
   min_priority: string;
-  country: "peru" | "chile" | "both";
+  country: CountryCode | "both";
   is_active: boolean;
 };
 
@@ -148,7 +157,7 @@ export type Alert = {
   provider_message_id: string;
   sent_at: string | null;
   created_at: string;
-  country: "peru" | "chile";
+  country: CountryCode;
   channel: string;
   entity: string;
   description: string;
@@ -177,7 +186,7 @@ export type OpportunityViewStateRecord = {
   updated_at: string;
 };
 
-export type AccessProfile = "peru" | "chile" | "both";
+export type AccessProfile = CountryCode | "both";
 
 export type UserRecord = {
   id: number;
@@ -189,6 +198,7 @@ export type UserRecord = {
   address: string;
   phone_peru: string;
   phone_chile: string;
+  phone_argentina: string;
   access_profile: AccessProfile;
   role: "viewer" | "admin";
   is_active: boolean;
@@ -204,13 +214,14 @@ export type UserCreatePayload = {
   address: string;
   phone_peru: string;
   phone_chile: string;
+  phone_argentina: string;
   access_profile: AccessProfile;
   role: "viewer" | "admin";
 };
 
 export type RadarKeyword = {
   id: number | null;
-  country: "peru" | "chile";
+  country: CountryCode;
   keyword: string;
 };
 
@@ -228,7 +239,7 @@ export type AppSettingsRecord = {
   updated_at: string | null;
 };
 
-export type CountryScope = "peru" | "chile" | "ambos";
+export type CountryScope = CountryCode | "ambos";
 
 export type TrackingArea = {
   id: number;
@@ -263,7 +274,7 @@ export type TrackingResponsiblePayload = {
 
 export type TrackingPhase = {
   id: number;
-  country: "peru" | "chile";
+  country: CountryCode;
   key: string;
   name: string;
   sort_order: number;
@@ -327,7 +338,7 @@ export type OpportunityTracking = {
 export type AssignableUser = {
   id: number;
   full_name: string;
-  access_profile: "peru" | "chile" | "both";
+  access_profile: AccessProfile;
 };
 
 export type OpportunityTrackingSummary = {
@@ -372,7 +383,7 @@ export type OpportunityReviewDetail = {
 
 export type ScoringFactor = { label: string; points: number; enabled: boolean; value: string; value_type: "list" | "number" | "text"; field: "description" | "entity" | "region" | "amount" | "origin" | "status" };
 export type ScoringConfig = {
-  country: "peru" | "chile";
+  country: CountryCode;
   priority_a_min: number;
   priority_b_min: number;
   attractive_amount_min: number;
@@ -456,9 +467,9 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ version_label: versionLabel }),
     }),
-  scoringConfig: (token: string, country: "peru" | "chile") =>
+  scoringConfig: (token: string, country: CountryCode) =>
     request<ScoringConfig>(`/app-settings/scoring/${country}`, token),
-  updateScoringConfig: (token: string, country: "peru" | "chile", config: ScoringConfig) =>
+  updateScoringConfig: (token: string, country: CountryCode, config: ScoringConfig) =>
     request<ScoringConfig>(`/app-settings/scoring/${country}`, token, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -505,7 +516,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ state }),
     }),
-  exportOpportunitiesXlsx: async (token: string, payload: { title: string; country: "peru" | "chile"; headers: string[]; rows: Array<Array<string | number | null>> }) => {
+  exportOpportunitiesXlsx: async (token: string, payload: { title: string; country: CountryCode; headers: string[]; rows: Array<Array<string | number | null>> }) => {
     const response = await fetch(`${API_URL}/opportunities/export/xlsx`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -514,7 +525,7 @@ export const api = {
     if (!response.ok) throw new ApiError("No se pudo generar el archivo Excel", response.status);
     return response.blob();
   },
-  archivedOpportunities: (token: string, country: "peru" | "chile") =>
+  archivedOpportunities: (token: string, country: CountryCode) =>
     request<Opportunity[]>(`/opportunities/archived?country=${country}`, token),
   archiveOpportunity: (token: string, opportunityId: number, reason: string = "") =>
     request<Opportunity>(`/opportunities/${opportunityId}/archive`, token, {
@@ -528,7 +539,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason }),
     }),
-  archiveOpportunitiesByKeyword: (token: string, country: "peru" | "chile", keyword: string, remainingKeywords: string[]) =>
+  archiveOpportunitiesByKeyword: (token: string, country: CountryCode, keyword: string, remainingKeywords: string[]) =>
     request<{ archived: number; opportunity_ids: number[] }>("/opportunities/archive-by-keyword", token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -537,35 +548,35 @@ export const api = {
   restoreOpportunity: (token: string, opportunityId: number) =>
     request<Opportunity>(`/opportunities/${opportunityId}/restore`, token, { method: "POST" }),
   runs: (token: string) => request<Run[]>("/runs", token, { cache: "no-store" }),
-  schedulerStatus: (token: string, country: "peru" | "chile") =>
+  schedulerStatus: (token: string, country: CountryCode) =>
     request<SchedulerStatus>(`/runs/scheduler/status?country=${country}`, token),
-  triggerSchedulerRun: (token: string, country: "peru" | "chile") =>
+  triggerSchedulerRun: (token: string, country: CountryCode) =>
     request<SchedulerStatus>(`/runs/scheduler/trigger?country=${country}`, token, { method: "POST" }),
-  schedulerIntervalConfig: (token: string, country: "peru" | "chile") =>
+  schedulerIntervalConfig: (token: string, country: CountryCode) =>
     request<SchedulerIntervalConfig>(`/app-settings/scheduler/${country}`, token),
-  updateSchedulerIntervalConfig: (token: string, country: "peru" | "chile", config: Pick<SchedulerIntervalConfig, "days" | "hours" | "minutes">) =>
+  updateSchedulerIntervalConfig: (token: string, country: CountryCode, config: Pick<SchedulerIntervalConfig, "days" | "hours" | "minutes">) =>
     request<SchedulerIntervalConfig>(`/app-settings/scheduler/${country}`, token, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config),
     }),
-  trackingDateRefreshStatus: (token: string, country: "peru" | "chile") =>
+  trackingDateRefreshStatus: (token: string, country: CountryCode) =>
     request<TrackingDateRefreshStatus>(`/opportunity-tracking/date-refresh/status?country=${country}`, token),
-  updateTrackingDateRefreshInterval: (token: string, country: "peru" | "chile", config: { days: number; hours: number; minutes: number }) =>
+  updateTrackingDateRefreshInterval: (token: string, country: CountryCode, config: { days: number; hours: number; minutes: number }) =>
     request<TrackingDateRefreshStatus>(`/app-settings/tracking-date-refresh/${country}`, token, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(config),
     }),
-  radarKeywords: (token: string, country: "peru" | "chile") =>
+  radarKeywords: (token: string, country: CountryCode) =>
     request<RadarKeyword[]>(`/radar-keywords/${country}`, token),
-  createRadarKeyword: (token: string, country: "peru" | "chile", keyword: string) =>
+  createRadarKeyword: (token: string, country: CountryCode, keyword: string) =>
     request<RadarKeyword>(`/radar-keywords/${country}`, token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ keyword }),
     }),
-  deleteRadarKeyword: (token: string, country: "peru" | "chile", keywordId: number) =>
+  deleteRadarKeyword: (token: string, country: CountryCode, keywordId: number) =>
     request<void>(`/radar-keywords/${country}/${keywordId}`, token, { method: "DELETE" }),
   run: (token: string, id: number) => request<Run>(`/runs/${id}?_=${Date.now()}`, token, {
     cache: "no-store",
@@ -660,7 +671,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
-  trackingPhases: (token: string, country?: "peru" | "chile") =>
+  trackingPhases: (token: string, country?: CountryCode) =>
     request<TrackingPhase[]>(`/tracking-templates/phases${country ? `?country=${country}` : ""}`, token),
   trackingStageTemplates: (token: string, phaseId: number) =>
     request<TrackingStageTemplate[]>(`/tracking-templates/phases/${phaseId}/stages`, token),
@@ -684,7 +695,7 @@ export const api = {
     }),
   deleteStageTemplate: (token: string, stageTemplateId: number) =>
     request<void>(`/tracking-templates/stages/${stageTemplateId}`, token, { method: "DELETE" }),
-  opportunityTrackings: (token: string, options: { opportunityIds?: number[]; country?: "peru" | "chile"; mineOnly?: boolean } = {}) => {
+  opportunityTrackings: (token: string, options: { opportunityIds?: number[]; country?: CountryCode; mineOnly?: boolean } = {}) => {
     const params = new URLSearchParams();
     if (options.opportunityIds?.length) params.set("opportunity_ids", options.opportunityIds.join(","));
     if (options.country) params.set("country", options.country);
@@ -702,7 +713,7 @@ export const api = {
     }),
   withdrawTracking: (token: string, opportunityId: number) =>
     request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}/withdraw`, token, { method: "POST" }),
-  assignableUsers: (token: string, country?: "peru" | "chile") =>
+  assignableUsers: (token: string, country?: CountryCode) =>
     request<AssignableUser[]>(`/users/assignable${country ? `?country=${country}` : ""}`, token),
   startOpportunityTracking: (token: string, opportunityId: number) =>
     request<OpportunityTracking>(`/opportunity-tracking/${opportunityId}/start`, token, { method: "POST" }),

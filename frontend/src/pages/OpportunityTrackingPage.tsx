@@ -3,6 +3,7 @@ import {
   api,
   AssignableUser,
   CountryScope,
+  CountryCode,
   Opportunity,
   OpportunityTracking as OpportunityTrackingRecord,
   OpportunityTrackingStage,
@@ -18,7 +19,7 @@ import { ConfirmModal, Empty, formatDate, useDismissableMenu } from "../shared";
 import { deadlineCountdownText, excelLogoUrl, formatDeadlineCountdown, OpportunityDetailModal } from "./OpportunitiesPage";
 
 function countryScopeLabel(scope: CountryScope) {
-  return scope === "ambos" ? "Perú y Chile" : scope === "peru" ? "Perú" : "Chile";
+  return scope === "ambos" ? "Todos los países" : scope === "peru" ? "Perú" : scope === "chile" ? "Chile" : "Argentina";
 }
 
 // Ventana de una etapa: desde el vencimiento de la etapa anterior (o el inicio de la fase) hasta su propio vencimiento.
@@ -486,7 +487,7 @@ function TrackingTimeline({
   );
 }
 
-function DateRefreshStatusBlock({ token, country }: { token: string; country: "peru" | "chile" }) {
+function DateRefreshStatusBlock({ token, country }: { token: string; country: CountryCode }) {
   const [status, setStatus] = useState<TrackingDateRefreshStatus | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [expanded, setExpanded] = useState(false);
@@ -580,7 +581,7 @@ function TrackingWorkspace({
   currentUserId,
 }: {
   token: string;
-  country: "peru" | "chile";
+  country: CountryCode;
   currentUserId: number;
 }) {
   const [summaries, setSummaries] = useState<OpportunityTrackingSummary[]>([]);
@@ -752,12 +753,27 @@ function TrackingWorkspace({
     setError("");
     try {
       const result = await api.refreshTrackingDates(token, selectedId);
-      const changeCount = result.changed[0]?.changes.length ?? 0;
+      const changes = result.changed[0]?.changes ?? [];
       setRefreshDatesFeedback(
-        changeCount
-          ? `${changeCount} fecha${changeCount === 1 ? "" : "s"} actualizada${changeCount === 1 ? "" : "s"}.`
+        changes.length
+          ? `${changes.length} fecha${changes.length === 1 ? "" : "s"} actualizada${changes.length === 1 ? "" : "s"}.`
           : "Sin cambios, ya estaba al día.",
       );
+      // El resumen (encabezado con "Fecha fin de presentación de propuesta") se cargó
+      // una sola vez al abrir la página y no se refresca solo, a diferencia de `tracking`
+      // (recargado abajo) - sin este parche queda mostrando el valor viejo aunque el
+      // servidor ya haya guardado la fecha nueva.
+      const opportunityDateFields = new Set(["consultation_deadline", "quote_deadline", "proposal_deadline"]);
+      const summaryChanges = changes.filter((change) => opportunityDateFields.has(change.field));
+      if (summaryChanges.length) {
+        setSummaries((current) =>
+          current.map((item) =>
+            item.opportunity_id === selectedId
+              ? { ...item, ...Object.fromEntries(summaryChanges.map((change) => [change.field, change.new])) }
+              : item,
+          ),
+        );
+      }
       await refreshDetail();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo actualizar las fechas");
@@ -1028,7 +1044,7 @@ function buildStageColumns(phases: TrackingPhase[], details: OpportunityTracking
   return columns;
 }
 
-function ConsolidatedView({ token, country }: { token: string; country: "peru" | "chile" }) {
+function ConsolidatedView({ token, country }: { token: string; country: CountryCode }) {
   const [summaries, setSummaries] = useState<OpportunityTrackingSummary[]>([]);
   const [phases, setPhases] = useState<TrackingPhase[]>([]);
   const [details, setDetails] = useState<Map<number, OpportunityTrackingRecord>>(new Map());
@@ -1464,7 +1480,7 @@ function StageTemplateEditor({
   );
 }
 
-function ResponsiblesAdmin({ token, country, isAdmin }: { token: string; country: "peru" | "chile"; isAdmin: boolean }) {
+function ResponsiblesAdmin({ token, country, isAdmin }: { token: string; country: CountryCode; isAdmin: boolean }) {
   const [areas, setAreas] = useState<TrackingArea[]>([]);
   const [allAreas, setAllAreas] = useState<TrackingArea[]>([]);
   const [responsibles, setResponsibles] = useState<TrackingResponsible[]>([]);
@@ -1708,9 +1724,10 @@ function ResponsiblesAdmin({ token, country, isAdmin }: { token: string; country
             <label>
               País
               <select value={form.country_scope} onChange={(event) => updateField("country_scope", event.target.value as CountryScope)}>
-                <option value="ambos">Perú y Chile</option>
+                <option value="ambos">Todos los países</option>
                 <option value="peru">Perú</option>
                 <option value="chile">Chile</option>
+                <option value="argentina">Argentina</option>
               </select>
             </label>
             <fieldset className="tracking-area-checklist">
@@ -1806,10 +1823,10 @@ function OpportunityTrackingCountry({
   token: string;
   isAdmin: boolean;
   currentUserId: number;
-  country: "peru" | "chile";
+  country: CountryCode;
 }) {
   const [topTab, setTopTab] = useState<TopTab>("seguimiento");
-  const countryLabel = country === "peru" ? "Perú" : "Chile";
+  const countryLabel = country === "peru" ? "Perú" : country === "chile" ? "Chile" : "Argentina";
 
   return (
     <section className="panel tracking-page">
@@ -1843,6 +1860,10 @@ function OpportunityTrackingCountry({
 
 export function OpportunityTrackingPeru({ token, isAdmin, currentUserId }: { token: string; isAdmin: boolean; currentUserId: number }) {
   return <OpportunityTrackingCountry token={token} isAdmin={isAdmin} currentUserId={currentUserId} country="peru" />;
+}
+
+export function OpportunityTrackingArgentina({ token, isAdmin, currentUserId }: { token: string; isAdmin: boolean; currentUserId: number }) {
+  return <OpportunityTrackingCountry token={token} isAdmin={isAdmin} currentUserId={currentUserId} country="argentina" />;
 }
 
 export default function OpportunityTrackingChile({ token, isAdmin, currentUserId }: { token: string; isAdmin: boolean; currentUserId: number }) {

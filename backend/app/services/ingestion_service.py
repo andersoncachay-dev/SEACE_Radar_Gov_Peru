@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Opportunity, OpportunitySnapshot
+from ..radar_config import country_for_source
 from .entity_catalog_service import find_entity
 
 
@@ -73,7 +74,7 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
         external_id = _first_text(row, "nomenclatura", "codigo", "Nomenclatura")
         if not external_id:
             continue
-        archive_country = "chile" if source.lower().startswith("mercado_publico") else "peru"
+        archive_country = country_for_source(source)
         archive_key = external_id.casefold()
         archived_id = db.scalar(
             select(Opportunity.id).where(
@@ -98,6 +99,23 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
         opportunity.nomenclature = incoming_nomenclature or (opportunity.nomenclature if existing else external_id)
         opportunity.object_type = incoming_object_type or (opportunity.object_type if existing else "")
         opportunity.description = incoming_description or (opportunity.description if existing else "")
+        opportunity.record_type = _first_text(row, "record_type", "tipo_registro") or (
+            opportunity.record_type if existing else "proceso"
+        )
+        opportunity.expediente = _first_text(row, "expediente", "Expediente") or (
+            opportunity.expediente if existing else ""
+        )
+        opportunity.contracting_unit = _first_text(
+            row,
+            "contracting_unit",
+            "Unidad Ejecutora",
+            "Unidad Operativa de Contrataciones",
+        ) or (opportunity.contracting_unit if existing else "")
+        opportunity.financial_service = _first_text(
+            row,
+            "financial_service",
+            "Servicio Administrativo Financiero",
+        ) or (opportunity.financial_service if existing else "")
         catalog_entity = find_entity(opportunity.entity)
         previous_region = opportunity.region if existing else ""
         opportunity.region = (
@@ -147,7 +165,13 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
             proposal_deadline = _as_datetime(row.get("propuesta_fin"))
             incoming_status = "Vigente para Propuesta" if proposal_deadline is None or proposal_deadline > datetime.utcnow() else "Proceso Culminado"
         opportunity.status = incoming_status or (opportunity.status if existing else "Vigente para Propuesta")
-        incoming_source_status = _first_text(row, "estado_mercado_publico", "source_status")
+        incoming_source_status = _first_text(
+            row,
+            "estado_mercado_publico",
+            "estado_comprar",
+            "source_status",
+            "Estado",
+        )
         opportunity.source_status = incoming_source_status or (opportunity.source_status if existing else "")
         incoming_contract_duration = _as_text(row.get("contract_duration"))
         opportunity.contract_duration = incoming_contract_duration or (opportunity.contract_duration if existing else "")
@@ -168,6 +192,10 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
             opportunity.publication_date,
             row.get("fecha_publicacion") or row.get("Fecha y Hora de Publicacion") or row.get("Fecha y Hora de Publicación"),
         )
+        opportunity.opening_date = _merge_datetime(
+            opportunity.opening_date,
+            row.get("fecha_apertura") or row.get("opening_date") or row.get("Fecha de apertura"),
+        )
         replace_schedule = str(row.get("replace_schedule", "")).strip().lower() in {"true", "1", "yes"}
         if replace_schedule:
             opportunity.consultation_deadline = _as_datetime(row.get("consulta_fin"))
@@ -177,8 +205,8 @@ def upsert_opportunities(db: Session, rows: pd.DataFrame, source: str, run_id: i
             opportunity.consultation_deadline = _merge_datetime(opportunity.consultation_deadline, row.get("consulta_fin"))
             opportunity.quote_deadline = _merge_datetime(opportunity.quote_deadline, row.get("cotizacion_fin"))
             opportunity.proposal_deadline = _merge_datetime(opportunity.proposal_deadline, row.get("propuesta_fin"))
-        if incoming_schedule_source == "seace":
-            opportunity.schedule_source = "seace"
+        if incoming_schedule_source:
+            opportunity.schedule_source = incoming_schedule_source
             opportunity.schedule_validated_at = _as_datetime(row.get("schedule_validated_at")) or datetime.utcnow()
         current_hash = _content_hash(row)
         opportunity.content_hash = current_hash

@@ -46,8 +46,11 @@ def _format_amount(opportunity: Opportunity) -> str | None:
     if amount <= 0:
         return None
     grouped = f"{amount:,.0f}"
-    if country_for_source(opportunity.source) == "chile":
+    country = country_for_source(opportunity.source)
+    if country == "chile":
         return f"PESO CL {grouped.replace(',', '.')}"
+    if country == "argentina":
+        return f"ARS {grouped.replace(',', '.')}"
     return f"S/ {grouped}"
 
 
@@ -56,7 +59,8 @@ def _format_datetime(value: datetime | None) -> str | None:
 
 
 def _email_subject(opportunity: Opportunity | None) -> str:
-    country_label = "Chile" if opportunity and country_for_source(opportunity.source) == "chile" else "Perú"
+    country = country_for_source(opportunity.source) if opportunity else "peru"
+    country_label = "Chile" if country == "chile" else "Argentina" if country == "argentina" else "Perú"
     return f"Rodar Consulting GovRadar · Nueva Alerta Gobierno {country_label}"
 
 

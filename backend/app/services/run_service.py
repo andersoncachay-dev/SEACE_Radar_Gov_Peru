@@ -20,6 +20,7 @@ from .notification_service import evaluate_alerts, evaluate_new_opportunity_aler
 
 
 _mercado_publico_run_lock = Lock()
+_comprar_argentina_run_lock = Lock()
 _run_cancel_events: dict[int, Event] = {}
 _run_cancel_events_lock = Lock()
 
@@ -718,6 +719,7 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
         return
 
     mercado_publico_lock_acquired = False
+    comprar_argentina_lock_acquired = False
     cancel_event = _cancel_event(run_id)
 
     def check_cancelled() -> None:
@@ -766,6 +768,14 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
             while not mercado_publico_lock_acquired:
                 check_cancelled()
                 mercado_publico_lock_acquired = _mercado_publico_run_lock.acquire(timeout=0.5)
+        elif str(source).startswith("comprar_argentina"):
+            run.diagnostics = f"{config_line}\nEn cola: esperando turno para consultar COMPR.AR."
+            run.progress = 0
+            run.progress_message = "En cola para consultar COMPR.AR"
+            db.commit()
+            while not comprar_argentina_lock_acquired:
+                check_cancelled()
+                comprar_argentina_lock_acquired = _comprar_argentina_run_lock.acquire(timeout=0.5)
 
         run.status = "running"
         run.started_at = datetime.utcnow()
@@ -938,6 +948,41 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
             enriched = enriquecer_oportunidades(normalized, get_scoring_config(db, "chile")) if normalized is not None and not normalized.empty else normalized
             if enriched is not None and not enriched.empty and max_results:
                 enriched = enriched.head(max_results).copy()
+            rows_found = upsert_opportunities(db, enriched, source, run_id=run.id)
+        elif source in {"comprar_argentina_procesos", "comprar_argentina_publicaciones"}:
+            from src.comprar_argentina_scraper import (
+                search_comprar_processes,
+                search_comprar_publications,
+            )
+            from src.normalizer import normalize_columns
+            from src.scoring import enriquecer_oportunidades
+            from .scoring_config_service import get_scoring_config
+
+            search = (
+                search_comprar_processes
+                if source == "comprar_argentina_procesos"
+                else search_comprar_publications
+            )
+            raw, diagnostics = search(
+                keyword=keyword,
+                max_results=max_results,
+                nomenclature=str(payload.get("nomenclature") or "").strip(),
+                enrich_details=bool(payload.get("enrich_details", False)),
+                progress_callback=lambda value, message: update_progress(5 + value * 75, message),
+                cancel_callback=check_cancelled,
+            )
+            update_progress(84, "Procesando resultados de COMPR.AR")
+            normalized = normalize_columns(raw) if raw is not None and not raw.empty else raw
+            normalized = _filter_dataframe_entity(normalized, payload.get("entity_filter"))
+            normalized = _filter_dataframe_nomenclature(normalized, payload.get("nomenclature"))
+            normalized = _filter_dataframe_keyword(normalized, keyword)
+            if not str(payload.get("nomenclature") or "").strip():
+                normalized = _filter_dataframe_period(normalized, payload)
+            enriched = (
+                enriquecer_oportunidades(normalized, get_scoring_config(db, "argentina"))
+                if normalized is not None and not normalized.empty
+                else normalized
+            )
             rows_found = upsert_opportunities(db, enriched, source, run_id=run.id)
         elif source == "oece_ocds_api":
             from src.oece_ocds_connector import search_oece_ocds
@@ -1129,5 +1174,7 @@ def execute_scrape_run(run_id: int, payload: dict) -> None:
     finally:
         if mercado_publico_lock_acquired:
             _mercado_publico_run_lock.release()
+        if comprar_argentina_lock_acquired:
+            _comprar_argentina_run_lock.release()
         _forget_cancel_event(run_id)
         db.close()

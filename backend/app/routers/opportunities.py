@@ -18,6 +18,7 @@ from ..database import get_db
 from ..dependencies import get_current_user, require_source_access, source_access_condition
 from ..config import settings
 from ..models import Opportunity, OpportunitySnapshot, ScrapeRun, User
+from ..radar_config import SUPPORTED_COUNTRIES, country_for_source, source_for_country
 from ..schemas import OpportunityArchiveIn, OpportunityExcelExportIn, OpportunityImportIn, OpportunityImportResult, OpportunityKeywordArchiveIn, OpportunityKeywordArchiveOut, OpportunityOut, OpportunitySnapshotOut
 from src.keyword_matching import contains_complete_phrase
 from ..services.ingestion_service import upsert_opportunities
@@ -155,7 +156,7 @@ def export_opportunities_xlsx(
 
 
 def _country_for_source(source: str) -> str:
-    return "chile" if str(source or "").lower().startswith("mercado_publico") else "peru"
+    return country_for_source(source)
 
 
 def _archive_key(item: Opportunity) -> str:
@@ -306,9 +307,9 @@ def list_archived_opportunities(
     db: Session = Depends(get_db),
 ):
     normalized_country = country.strip().lower()
-    if normalized_country not in {"peru", "chile"}:
+    if normalized_country not in SUPPORTED_COUNTRIES:
         raise HTTPException(status_code=422, detail="El país debe ser Peru o Chile")
-    require_source_access(current_user, "mercado_publico_lmp_gc" if normalized_country == "chile" else "oece_ocds")
+    require_source_access(current_user, source_for_country(normalized_country))
     query = (
         select(Opportunity)
         .where(
@@ -329,9 +330,9 @@ def archive_opportunities_by_keyword(
     country = payload.country.strip().lower()
     keyword = payload.keyword.strip()
     remaining_keywords = [item.strip() for item in payload.remaining_keywords if item.strip()]
-    if country not in {"peru", "chile"}:
+    if country not in SUPPORTED_COUNTRIES:
         raise HTTPException(status_code=422, detail="El país debe ser Perú o Chile")
-    reference_source = "mercado_publico_lmp_gc" if country == "chile" else "oece_ocds"
+    reference_source = source_for_country(country)
     require_source_access(current_user, reference_source)
     candidates = db.scalars(select(Opportunity).where(Opportunity.is_archived.is_(False))).all()
     archived_ids: list[int] = []

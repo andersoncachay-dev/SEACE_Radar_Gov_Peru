@@ -139,6 +139,22 @@ class RadarProfileSyncTests(unittest.TestCase):
         self.assertEqual(window["date_filter_type"], "publication")
         self.assertFalse(window["skip_detail_enrichment"])
 
+    def test_argentina_incremental_window_covers_seven_days_back_and_thirty_three_forward(self) -> None:
+        window = current_ingestion_window(
+            self.db,
+            "argentina",
+            datetime(2026, 8, 1, 2, 30, tzinfo=timezone.utc),
+        )
+
+        # 02:30 UTC is still 31 July in Lima, the scheduler's reference day.
+        self.assertEqual(window["publication_date_from"], "2026-07-24")
+        self.assertEqual(window["publication_date_to"], "2026-09-02")
+        self.assertEqual(window["years"], ["2026"])
+        self.assertEqual(window["months"], ["7", "8", "9"])
+        self.assertEqual(window["date_filter_type"], "opening")
+        self.assertFalse(window["skip_detail_enrichment"])
+        self.assertTrue(window["automatic_incremental"])
+
     def test_radio_enlace_is_not_a_base_keyword(self) -> None:
         self.assertNotIn("radio enlace", {item.casefold() for item in DEFAULT_RADAR_KEYWORDS})
 

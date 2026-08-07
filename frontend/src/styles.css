@@ -1875,6 +1875,10 @@ input::placeholder {
   grid-template-columns: minmax(0, 0.75fr) minmax(300px, 1.25fr);
 }
 
+.country-map-layout.argentina {
+  grid-template-columns: minmax(0, 0.9fr) minmax(300px, 1.1fr);
+}
+
 .map-frame {
   position: relative;
   display: grid;
@@ -1900,6 +1904,11 @@ input::placeholder {
 
 .country-map-layout.chile .map-frame.interactive {
   height: 720px;
+  min-height: 0;
+}
+
+.country-map-layout.argentina .map-frame.interactive {
+  height: 690px;
   min-height: 0;
 }
 
@@ -1984,6 +1993,11 @@ input::placeholder {
   max-height: 680px;
   transform: scaleX(1.5);
   transform-origin: center;
+}
+
+.interactive-map-shell.argentina svg {
+  width: min(94%, 560px);
+  max-height: 620px;
 }
 
 .interactive-map-shell .country-region {
@@ -2115,6 +2129,32 @@ input::placeholder {
 
 .country-map-layout.chile .map-inspector {
   height: 720px;
+}
+
+.country-map-layout.argentina .map-inspector {
+  height: 690px;
+}
+
+.argentina-comprar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+  color: #35516f;
+  font-size: 0.72rem;
+}
+
+.argentina-comprar-meta > span {
+  padding: 4px 7px;
+  border: 1px solid #c9def4;
+  border-radius: 7px;
+  background: #f5faff;
+}
+
+.argentina-comprar-meta .comprar-record-type,
+.argentina-comprar-meta .comprar-status {
+  color: #064f82;
+  font-weight: 800;
 }
 
 .map-inspector-donut {
@@ -2425,6 +2465,36 @@ input::placeholder {
   font-size: 0.7rem;
   font-weight: 850;
   white-space: nowrap;
+}
+
+.map-opportunity-status-row {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.home-record-type-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid #bfd3ec;
+  border-radius: 999px;
+  background: #edf5ff;
+  color: #154f91;
+  font-size: 0.7rem;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.home-record-type-badge.publication {
+  border-color: #d8c7ed;
+  background: #f5effc;
+  color: #69369a;
 }
 
 .home-status-badge.green {
@@ -3389,6 +3459,10 @@ input::placeholder {
   margin-bottom: 12px;
 }
 
+.keyword-grid.single-keyword {
+  grid-template-columns: minmax(240px, 600px);
+}
+
 .required-filter-grid {
   display: grid;
   grid-template-columns: minmax(190px, 260px);
@@ -3404,6 +3478,10 @@ input::placeholder {
   grid-template-columns: minmax(250px, 1fr) minmax(250px, 1fr) minmax(330px, 1.15fr);
   gap: 12px;
   align-items: start;
+}
+
+.optional-filter-grid.argentina-manual {
+  grid-template-columns: minmax(280px, 680px);
 }
 
 .entity-search-field {
@@ -4922,6 +5000,7 @@ input::placeholder {
 }
 
 .run-result-list,
+.run-result-items,
 .run-result-item {
   display: grid;
   gap: 4px;
@@ -4929,11 +5008,21 @@ input::placeholder {
 
 .run-result-list {
   gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
-.run-result-list > strong {
-  grid-column: 1 / -1;
+.run-result-items {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 4px;
+}
+
+.run-result-items.is-collapsed {
+  display: flex;
+  overflow: hidden;
+}
+
+.run-result-items.is-collapsed .run-result-item {
+  min-width: min(240px, 100%);
+  flex: 1 0 240px;
 }
 
 .run-result-item {
@@ -4948,6 +5037,22 @@ input::placeholder {
 
 .run-result-item span strong {
   color: #263f5d;
+}
+
+.run-results-expand {
+  min-height: 34px;
+  justify-self: start;
+  border: 1px solid #9dbce2;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #fff;
+  color: #174f92;
+  font-weight: 850;
+}
+
+.run-results-expand:hover {
+  border-color: #6797d1;
+  background: #f5f9ff;
 }
 
 .run-result-detail button {
@@ -6585,6 +6690,43 @@ table.has-motivo-column td:nth-child(13) {
   outline-offset: 3px;
 }
 
+.official-process-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 16px;
+}
+
+.official-process-link-row strong {
+  display: block;
+  color: var(--ink);
+}
+
+.official-process-link-row p {
+  max-width: 68ch;
+  margin: 3px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.official-process-link-row .doc-link {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .official-process-link-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .official-process-link-row .doc-link {
+    min-height: 32px;
+    text-align: left;
+  }
+}
+
 @media (max-width: 1180px) {
   .radar-filter-section.optional {
     --optional-first-column: calc((100% - 12px) / 2);
@@ -6599,7 +6741,8 @@ table.has-motivo-column td:nth-child(13) {
   }
 
   .country-map-layout.peru,
-  .country-map-layout.chile {
+  .country-map-layout.chile,
+  .country-map-layout.argentina {
     grid-template-columns: 1fr;
   }
 
@@ -6610,6 +6753,11 @@ table.has-motivo-column td:nth-child(13) {
 
   .country-map-layout.chile .map-frame.interactive {
     height: 650px;
+    min-height: 0;
+  }
+
+  .country-map-layout.argentina .map-frame.interactive {
+    height: 620px;
     min-height: 0;
   }
 
@@ -6988,7 +7136,8 @@ table.has-motivo-column td:nth-child(13) {
   .home-intelligence-grid,
   .country-map-layout,
   .country-map-layout.peru,
-  .country-map-layout.chile {
+  .country-map-layout.chile,
+  .country-map-layout.argentina {
     width: 100%;
     min-width: 0;
     max-width: 100%;
@@ -7068,12 +7217,35 @@ table.has-motivo-column td:nth-child(13) {
     transform: scaleX(1.4);
   }
 
+  .country-map-layout.argentina .map-frame.interactive {
+    width: 100%;
+    max-width: 100%;
+    height: clamp(440px, 120vw, 610px);
+    min-height: 0;
+  }
+
+  .interactive-map-shell.argentina {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 10px;
+    overflow: hidden;
+  }
+
+  .interactive-map-shell.argentina svg {
+    width: auto;
+    max-width: calc(100vw - 72px);
+    height: min(112vw, 580px);
+    max-height: calc(100% - 20px);
+  }
+
   .map-inspector {
     min-width: 0;
   }
 
   .country-map-layout.peru .map-inspector,
-  .country-map-layout.chile .map-inspector {
+  .country-map-layout.chile .map-inspector,
+  .country-map-layout.argentina .map-inspector {
     height: auto;
   }
 
@@ -7082,7 +7254,8 @@ table.has-motivo-column td:nth-child(13) {
   }
 
   .map-process-list-panel.peru .region-opportunity-list,
-  .map-process-list-panel.chile .region-opportunity-list {
+  .map-process-list-panel.chile .region-opportunity-list,
+  .map-process-list-panel.argentina .region-opportunity-list {
     max-height: min(72dvh, 680px);
   }
 
@@ -8666,6 +8839,14 @@ table.has-motivo-column td:nth-child(13) {
   font-size: 0.76rem;
   font-weight: 800;
   white-space: nowrap;
+  background: #e6f7ef;
+  border-color: #a8dfc4;
+  color: #0f8a5f;
+}
+
+.tracking-refresh-dates-button:hover:not(:disabled) {
+  background: #d3f0e2;
+  border-color: #8bd2ae;
 }
 
 .tracking-refresh-dates-feedback {

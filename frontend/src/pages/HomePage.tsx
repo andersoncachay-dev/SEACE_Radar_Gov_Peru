@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, Alert, Opportunity, Run, SchedulerStatus, Stats } from "../api";
-import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, RunProgress, commercialSignal, countryFlagUrls, formatDate, formatMoney, formatUtcDate, keywordFromRun, matchesCompletePhrase, parseDate, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
+import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, RunProgress, commercialSignal, countryCode, countryFlagUrls, formatDate, formatMoney, formatUtcDate, matchesCompletePhrase, parseDate, runHistoryLabel, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
 import { alertStatusLabel, ChannelSymbol } from "./AlertsPage";
 import { excelLogoUrl, exportOpportunitiesToExcel, isOpportunityNew } from "./OpportunitiesPage";
 
@@ -19,9 +19,9 @@ export const unmappedRegionKey = "__sin_region__";
 
 export function sourceBelongsToCountryRadar(source: string, country: Country) {
   const normalized = source.trim().toLowerCase();
-  return country === "Chile"
-    ? normalized.startsWith("mercado_publico")
-    : normalized === "oece_ocds_api";
+  if (country === "Chile") return normalized.startsWith("mercado_publico");
+  if (country === "Argentina") return normalized.startsWith("comprar_argentina");
+  return normalized === "oece_ocds_api";
 }
 
 export function backendRunDate(value: string | null) {
@@ -108,7 +108,7 @@ export function homeStatusFilterLabel(filter: HomeStatusFilter) {
 }
 
 export function opportunityYear(item: Opportunity) {
-  const timestamp = parseDate(item.publication_date) ?? parseDate(item.proposal_deadline) ?? parseDate(item.quote_deadline);
+  const timestamp = parseDate(item.publication_date) ?? parseDate(item.opening_date) ?? parseDate(item.proposal_deadline) ?? parseDate(item.quote_deadline);
   return timestamp === null ? "Sin año" : String(new Date(timestamp).getFullYear());
 }
 
@@ -342,7 +342,7 @@ export function cleanSvgPathAttributes(value: string) {
 
 export function enrichMapSvg(country: Country, raw: string, regionCounts: Map<string, number>, selectedRegion: string | null) {
   const max = Math.max(1, ...Array.from(regionCounts.values()));
-  const rootClass = country === "Chile" ? "interactive-country-map chile" : "interactive-country-map peru";
+  const rootClass = `interactive-country-map ${country.toLowerCase()}`;
   let svg = raw
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/\swidth="[^"]*"/i, "")
@@ -399,7 +399,9 @@ export function InteractiveCountryMap({
     let active = true;
     const loader = country === "Chile"
       ? import("../assets_mapa/chile.svg?raw")
-      : import("../assets_mapa/peru-regions.svg?raw");
+      : country === "Argentina"
+        ? import("../assets_mapa/ar.svg?raw")
+        : import("../assets_mapa/peru-regions.svg?raw");
     setRawSvg("");
     loader.then((module) => {
       if (active) setRawSvg(module.default);
@@ -416,7 +418,7 @@ export function InteractiveCountryMap({
 
   return (
     <div
-      className={`interactive-map-shell ${country === "Chile" ? "chile" : "peru"}`}
+      className={`interactive-map-shell ${country.toLowerCase()}`}
       aria-busy={!rawSvg}
       onClick={(event) => selectFromTarget(event.target)}
       onKeyDown={(event) => {
@@ -647,7 +649,7 @@ export function Home({
     [radarKeywordState.keywords],
   );
   const recentCountryAlerts = useMemo(
-    () => alerts.filter((alert) => alert.country === (country === "Chile" ? "chile" : "peru") && alert.rule_is_active),
+    () => alerts.filter((alert) => alert.country === countryCode(country) && alert.rule_is_active),
     [alerts, country],
   );
   const yearSummaries = useMemo(() => summarizeByYear(countryOpportunities), [countryOpportunities]);
@@ -682,7 +684,7 @@ export function Home({
     ? Math.max(0, Math.ceil((new Date(schedulerStatus.next_update_at).getTime() - countdownNow) / 1000))
     : null;
   const regionRows = regionSummary(filteredHomeStats, filteredHomeOpportunities, country);
-  const countryLabel = country === "Chile" ? "Chile" : "Peru";
+  const countryLabel = country;
   const homeContextLabel = (
     <>
       <strong className="dashboard-context-title">Palabras Clave para el update automático</strong>
@@ -699,7 +701,7 @@ export function Home({
     let active = true;
     async function loadSchedulerStatus() {
       try {
-        const status = await api.schedulerStatus(token, country === "Chile" ? "chile" : "peru");
+        const status = await api.schedulerStatus(token, countryCode(country));
         if (active) {
           setSchedulerStatus(status);
           if (status.is_running || schedulerWasRunningRef.current) {
@@ -761,7 +763,7 @@ export function Home({
     setTriggerError("");
     setTriggeringUpdate(true);
     try {
-      const status = await api.triggerSchedulerRun(token, country === "Chile" ? "chile" : "peru");
+      const status = await api.triggerSchedulerRun(token, countryCode(country));
       setSchedulerStatus(status);
       await refresh();
     } catch (error) {
@@ -824,8 +826,8 @@ export function Home({
           <div className="hero-update-banner" role="note">
             <span>Update Automático del sistema cada {updateIntervalLabel(schedulerStatus?.interval_seconds)} para detectar nuevas oportunidades.</span>
           </div>
-          <p className="overline">{country === "Peru" ? "Modulo Peru" : "Modulo Chile"}</p>
-          <h2>{country === "Peru" ? "SEACE operativo, monitoreo automatico y alertas accionables." : "Mercado Público bajo vigilancia comercial y regional."}</h2>
+          <p className="overline">Módulo {country}</p>
+          <h2>{country === "Peru" ? "SEACE operativo, monitoreo automático y alertas accionables." : country === "Chile" ? "Mercado Público bajo vigilancia comercial y regional." : "COMPR.AR bajo vigilancia de procesos, publicaciones y estados de contratación."}</h2>
         </div>
         <div className="radar-sweep" aria-hidden="true">
           <span />
@@ -887,7 +889,7 @@ export function Home({
               <span className="data-pill">{regionRows.total} procesos</span>
             </div>
           </div>
-          <div className={`country-map-layout ${country === "Chile" ? "chile" : "peru"}`}>
+          <div className={`country-map-layout ${country.toLowerCase()}`}>
             <div className="map-frame interactive">
               <strong className="map-frame-title">Vista de Procesos por Región</strong>
               <InteractiveCountryMap
@@ -939,7 +941,7 @@ export function Home({
             </div>
           </div>
         </article>
-        <article className={`panel map-process-list-panel ${country === "Chile" ? "chile" : "peru"}`}>
+        <article className={`panel map-process-list-panel ${country.toLowerCase()}`}>
           <div className="panel-title">
             <div>
               <h3>Procesos {selectedRegionRow?.name || countryLabel}</h3>
@@ -1057,15 +1059,22 @@ export function Home({
                     </div>
                   </div>
                   <span className="map-opportunity-description"><HighlightedText text={item.description} terms={homeKeywordTerms} /></span>
-                  <span className={`home-status-badge ${commercialSignal(item).className}`}>{homeCommercialStatusLabel(item)}</span>
+                  <span className="map-opportunity-status-row">
+                    <span className={`home-status-badge ${commercialSignal(item).className}`}>{homeCommercialStatusLabel(item)}</span>
+                    {country === "Argentina" ? (
+                      <span className={`home-record-type-badge ${item.record_type === "publicacion" ? "publication" : "process"}`}>
+                        {item.record_type === "publicacion" ? "Publicación" : "Proceso"}
+                      </span>
+                    ) : null}
+                  </span>
                   {country === "Chile" && (item.source_status || item.contract_duration) ? (
                     <span className="map-opportunity-chile-meta">
                       {item.source_status ? <span className={`chile-ml-status ${chileStatusSlug(item.source_status)}`}>{item.source_status}</span> : null}
                       {item.contract_duration ? <span className="chile-ml-contract">Duración de contrato: {item.contract_duration}</span> : null}
                     </span>
                   ) : null}
-                  {item.publication_date ? (
-                    <span className="map-opportunity-publication-date">Fecha de convocatoria: {formatDate(item.publication_date)}</span>
+                  {item.publication_date || item.opening_date ? (
+                    <span className="map-opportunity-publication-date">{country === "Argentina" ? "Fecha de apertura" : "Fecha de convocatoria"}: {formatDate(item.publication_date || item.opening_date)}</span>
                   ) : null}
                   <span className="map-opportunity-amount">
                     <small className={item.amount > 0 ? "" : "amount-unpublished"}>
@@ -1114,7 +1123,7 @@ export function Home({
               return (
                 <div className="list-row recent-alert-row" key={alert.id}>
                   <span className="recent-alert-icons">
-                    <CountryFlagIcon country={alert.country === "chile" ? "Chile" : "Peru"} className="rule-country-flag-image" />
+                    <CountryFlagIcon country={alert.country === "chile" ? "Chile" : alert.country === "argentina" ? "Argentina" : "Peru"} className="rule-country-flag-image" />
                     <ChannelSymbol channel={alert.channel} />
                   </span>
                   <div className="recent-alert-copy">
@@ -1185,7 +1194,7 @@ export function RunHistoryToday({ runs }: { runs: Run[] }) {
       </div>
       <div className="run-history-scroll" tabIndex={0} aria-label="Historial desplazable de actualizaciones de hoy">
         {runs.map((run) => {
-          const keyword = keywordFromRun(run) || "Actualización automática";
+          const keyword = runHistoryLabel(run) || "Actualización automática";
           return (
             <article className="run-history-row" key={run.id}>
               <time dateTime={run.started_at || run.finished_at || undefined}>{formatRunTime(run.started_at || run.finished_at)}</time>

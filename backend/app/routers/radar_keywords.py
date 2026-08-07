@@ -18,7 +18,7 @@ router = APIRouter(prefix="/radar-keywords", tags=["radar keywords"])
 
 def _country(value: str) -> str:
     country = value.strip().lower()
-    if country not in {"peru", "chile"}:
+    if country not in {"peru", "chile", "argentina"}:
         raise HTTPException(status_code=404, detail="País no disponible")
     return country
 
