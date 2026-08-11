@@ -30,6 +30,10 @@ export type TableColumnFilters = {
   amountMin: string; amountMax: string; amountReserved: boolean;
 };
 
+export type DateSortColumn = "publication" | "consultation" | "proposal";
+export type DateSortDirection = "desc" | "asc";
+export type DateSortState = { column: DateSortColumn; direction: DateSortDirection };
+
 export const emptyTableColumnFilters: TableColumnFilters = {
   priority: "", entity: "", process: "", description: "", trackedOnly: false,
   publicationFrom: "", publicationTo: "",
@@ -2168,6 +2172,9 @@ export function OpportunityTable({
 }) {
   const [commercialFilter, setCommercialFilter] = useState<CommercialClass | null>(null);
   const [columnFilters, setColumnFilters] = useState<TableColumnFilters>(emptyTableColumnFilters);
+  const [dateSort, setDateSort] = useState<DateSortState | null>(
+    actionMode === "archive" ? { column: "publication", direction: "desc" } : null,
+  );
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [activeRowId, setActiveRowId] = useState<number | null>(null);
@@ -2212,7 +2219,8 @@ export function OpportunityTable({
     setUnavailableProposalIds(new Set());
     setManualProposalUpdates(new Map());
     setColumnFilters(emptyTableColumnFilters);
-  }, [resetKey]);
+    setDateSort(actionMode === "archive" ? { column: "publication", direction: "desc" } : null);
+  }, [resetKey, actionMode]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCountdownNow(Date.now()), 30_000);
@@ -2256,7 +2264,7 @@ export function OpportunityTable({
   }, [rowsWithSignals, commercialFilter, columnFilters, countdownNow, trackedOpportunityIds]);
 
   const sortedRows = useMemo(() => {
-    if (actionMode === "restore") {
+    if (!dateSort && actionMode === "restore") {
       // Histórico: most recently retired process first, regardless of
       // commercial signal - that's the order that matches how it was built.
       return [...filteredRows].sort((left, right) => {
@@ -2266,13 +2274,24 @@ export function OpportunityTable({
       });
     }
     return [...filteredRows].sort((left, right) => {
+      const leftDate = dateSort ? opportunityDateForSort(left.item, dateSort.column) : null;
+      const rightDate = dateSort ? opportunityDateForSort(right.item, dateSort.column) : null;
+      if (leftDate === null && rightDate !== null) return 1;
+      if (leftDate !== null && rightDate === null) return -1;
+      if (leftDate !== null && rightDate !== null && leftDate !== rightDate) {
+        return dateSort?.direction === "asc" ? leftDate - rightDate : rightDate - leftDate;
+      }
       const commercialResult = commercialOrder(left.signal.className) - commercialOrder(right.signal.className);
       if (commercialResult !== 0) return commercialResult;
-      const dateResult = compareValues(parseDate(left.item.publication_date), parseDate(right.item.publication_date));
-      if (dateResult !== 0) return -dateResult;
       return right.item.id - left.item.id;
     });
-  }, [filteredRows, actionMode]);
+  }, [filteredRows, actionMode, dateSort]);
+
+  function toggleDateSort(column: DateSortColumn) {
+    setDateSort((current) => current?.column === column
+      ? { column, direction: current.direction === "desc" ? "asc" : "desc" }
+      : { column, direction: "desc" });
+  }
 
   function updateColumnFilter(key: keyof TableColumnFilters, value: string | boolean) {
     setColumnFilters((current) => ({ ...current, [key]: value }));
@@ -2402,16 +2421,16 @@ export function OpportunityTable({
                 <label>Descripción<input value={columnFilters.description} onChange={(event) => updateColumnFilter("description", event.target.value)} placeholder="Escribir descripción" /></label>
                 <label className="reserved-amount-filter"><input type="checkbox" checked={columnFilters.trackedOnly} onChange={(event) => updateColumnFilter("trackedOnly", event.target.checked)} /><span>Solo "En módulo Seguimiento"</span></label>
               </FilterTh>
-              <FilterTh label="Fecha de\nconvocatoria" active={Boolean(columnFilters.publicationFrom || columnFilters.publicationTo)} onClear={() => setColumnFilters((current) => ({ ...current, publicationFrom: "", publicationTo: "" }))}>
+              <FilterTh label="Fecha de\nconvocatoria" active={Boolean(columnFilters.publicationFrom || columnFilters.publicationTo)} onClear={() => setColumnFilters((current) => ({ ...current, publicationFrom: "", publicationTo: "" }))} sort={{ active: dateSort?.column === "publication", direction: dateSort?.column === "publication" ? dateSort.direction : null, onToggle: () => toggleDateSort("publication") }}>
                 <DateRangeFilter from={columnFilters.publicationFrom} to={columnFilters.publicationTo} onFromChange={(value) => updateColumnFilter("publicationFrom", value)} onToChange={(value) => updateColumnFilter("publicationTo", value)} />
               </FilterTh>
-              <FilterTh label="Fin\nConsultas" active={Boolean(columnFilters.consultationFrom || columnFilters.consultationTo)} onClear={() => setColumnFilters((current) => ({ ...current, consultationFrom: "", consultationTo: "" }))}>
+              <FilterTh label="Fin\nConsultas" active={Boolean(columnFilters.consultationFrom || columnFilters.consultationTo)} onClear={() => setColumnFilters((current) => ({ ...current, consultationFrom: "", consultationTo: "" }))} sort={{ active: dateSort?.column === "consultation", direction: dateSort?.column === "consultation" ? dateSort.direction : null, onToggle: () => toggleDateSort("consultation") }}>
                 <DateRangeFilter from={columnFilters.consultationFrom} to={columnFilters.consultationTo} onFromChange={(value) => updateColumnFilter("consultationFrom", value)} onToChange={(value) => updateColumnFilter("consultationTo", value)} />
               </FilterTh>
               <FilterTh label="Dias\nConsultas" active={Boolean(columnFilters.consultationDaysMin || columnFilters.consultationDaysMax)} onClear={() => setColumnFilters((current) => ({ ...current, consultationDaysMin: "", consultationDaysMax: "" }))}>
                 <NumberRangeFilter unit="días" minimum={columnFilters.consultationDaysMin} maximum={columnFilters.consultationDaysMax} onMinimumChange={(value) => updateColumnFilter("consultationDaysMin", value)} onMaximumChange={(value) => updateColumnFilter("consultationDaysMax", value)} />
               </FilterTh>
-              <FilterTh label="Fin\nPropuesta" active={Boolean(columnFilters.proposalFrom || columnFilters.proposalTo)} onClear={() => setColumnFilters((current) => ({ ...current, proposalFrom: "", proposalTo: "" }))}>
+              <FilterTh label="Fin\nPropuesta" active={Boolean(columnFilters.proposalFrom || columnFilters.proposalTo)} onClear={() => setColumnFilters((current) => ({ ...current, proposalFrom: "", proposalTo: "" }))} sort={{ active: dateSort?.column === "proposal", direction: dateSort?.column === "proposal" ? dateSort.direction : null, onToggle: () => toggleDateSort("proposal") }}>
                 <DateRangeFilter from={columnFilters.proposalFrom} to={columnFilters.proposalTo} onFromChange={(value) => updateColumnFilter("proposalFrom", value)} onToChange={(value) => updateColumnFilter("proposalTo", value)} />
               </FilterTh>
               <FilterTh label="Dias\nPropuesta" active={Boolean(columnFilters.proposalDaysMin || columnFilters.proposalDaysMax)} onClear={() => setColumnFilters((current) => ({ ...current, proposalDaysMin: "", proposalDaysMax: "" }))}>
@@ -2509,22 +2528,40 @@ export function OpportunityTable({
   );
 }
 
-export function FilterTh({ label, active, onClear, align = "left", children }: {
+export function FilterTh({ label, active, onClear, align = "left", sort, children }: {
   label: string;
   active: boolean;
   onClear: () => void;
   align?: "left" | "right";
+  sort?: {
+    active: boolean;
+    direction: DateSortDirection | null;
+    onToggle: () => void;
+  };
   children: React.ReactNode;
 }) {
   const labelParts = label.split(/\\n|\n/);
+  const plainLabel = label.replace(/\\n|\n/g, " ");
+  const sortDescription = sort?.direction === "asc" ? "más antiguo a más reciente" : "más reciente a más antiguo";
   return (
-    <th className="filter-table-header">
-      <div className="filter-header">
+    <th className="filter-table-header" aria-sort={sort?.active ? (sort.direction === "asc" ? "ascending" : "descending") : undefined}>
+      <div className={`filter-header ${sort ? "has-sort" : ""}`}>
         <span>{labelParts.map((part, index) => <React.Fragment key={`${part}-${index}`}>{part}{index < labelParts.length - 1 ? <br /> : null}</React.Fragment>)}</span>
+        {sort ? (
+          <button
+            className={`column-sort-button ${sort.active ? "active" : ""}`}
+            type="button"
+            onClick={sort.onToggle}
+            aria-label={sort.active ? `Ordenar ${plainLabel}: cambiar a ${sort.direction === "desc" ? "más antiguo a más reciente" : "más reciente a más antiguo"}` : `Ordenar ${plainLabel} de más reciente a más antiguo`}
+            title={sort.active ? `Orden actual: ${sortDescription}. Haz clic para invertir.` : "Ordenar de más reciente a más antiguo"}
+          >
+            <span aria-hidden="true">{sort.active ? (sort.direction === "desc" ? "↓" : "↑") : "↕"}</span>
+          </button>
+        ) : null}
         <details className={`column-filter ${active ? "active" : ""} ${align === "right" ? "align-right" : ""}`}>
           <summary
-            aria-label={`Filtrar por ${label.replace("\\n", " ")}`}
-            title={`Filtrar por ${label.replace("\\n", " ")}`}
+            aria-label={`Filtrar por ${plainLabel}`}
+            title={`Filtrar por ${plainLabel}`}
             onClick={(event) => {
               const current = event.currentTarget.closest("details");
               document.querySelectorAll<HTMLDetailsElement>("details.column-filter[open]").forEach((details) => {
@@ -3268,6 +3305,12 @@ export function formatDeadlineCountdown(value: string | null, now: number) {
 
 export function commercialOrder(value: CommercialClass) {
   return value === "green" ? 1 : value === "amber" ? 2 : 3;
+}
+
+export function opportunityDateForSort(item: Opportunity, column: DateSortColumn) {
+  if (column === "consultation") return parseDate(item.consultation_deadline);
+  if (column === "proposal") return parseDate(presentationDeadline(item));
+  return parseDate(item.publication_date);
 }
 
 export function compareValues(left: string | number | null, right: string | number | null) {

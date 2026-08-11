@@ -5405,9 +5405,51 @@ th {
   min-height: 46px;
 }
 
+.filter-header.has-sort {
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  gap: 5px;
+}
+
 .filter-header > span {
   line-height: 1.15;
   text-align: center;
+}
+
+.column-sort-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #bfd0e7;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #255a9f;
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 900;
+  line-height: 1;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.column-sort-button:hover {
+  border-color: var(--blue-700);
+  background: #e5eefb;
+}
+
+.column-sort-button.active {
+  border-color: var(--blue-700);
+  background: var(--blue-700);
+  color: #ffffff;
+}
+
+.column-sort-button:focus-visible {
+  outline: 3px solid rgba(31, 111, 207, 0.32);
+  outline-offset: 2px;
+}
+
+.column-sort-button span {
+  transform: translateY(-1px);
 }
 
 .column-filter {
