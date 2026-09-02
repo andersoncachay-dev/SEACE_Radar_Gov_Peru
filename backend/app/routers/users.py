@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..access_profile import VALID_COUNTRIES, has_country_access
 from ..database import get_db
 from ..dependencies import get_current_user, require_admin
 from ..models import User
@@ -21,10 +22,9 @@ def list_assignable_users(
     _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = select(User).where(User.is_active.is_(True))
-    if country in {"peru", "chile", "argentina"}:
-        query = query.where(User.access_profile.in_([country, "both"]))
-    users = list(db.scalars(query.order_by(User.full_name)).all())
+    users = list(db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.full_name)).all())
+    if country in VALID_COUNTRIES:
+        users = [user for user in users if has_country_access(user.access_profile, country)]
     return [AssignableUserOut(id=user.id, full_name=user.full_name, access_profile=user.access_profile) for user in users]
 
 
@@ -101,11 +101,11 @@ def update_user(user_id: int, payload: UserUpdate, _: User = Depends(require_adm
         value is not None
         for value in (payload.access_profile, payload.phone_peru, payload.phone_chile, payload.phone_argentina)
     )
-    if contact_changed and user.access_profile in {"peru", "both"} and not user.phone_peru.strip():
+    if contact_changed and has_country_access(user.access_profile, "peru") and not user.phone_peru.strip():
         raise HTTPException(status_code=422, detail="El celular de Peru es obligatorio para este perfil")
-    if contact_changed and user.access_profile in {"chile", "both"} and not user.phone_chile.strip():
+    if contact_changed and has_country_access(user.access_profile, "chile") and not user.phone_chile.strip():
         raise HTTPException(status_code=422, detail="El celular de Chile es obligatorio para este perfil")
-    if contact_changed and user.access_profile in {"argentina", "both"} and not user.phone_argentina.strip():
+    if contact_changed and has_country_access(user.access_profile, "argentina") and not user.phone_argentina.strip():
         raise HTTPException(status_code=422, detail="El celular de Argentina es obligatorio para este perfil")
     user.full_name = f"{user.first_name} {user.last_name}".strip() or user.full_name
     if payload.password:

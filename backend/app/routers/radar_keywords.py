@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..access_profile import has_country_access
 from ..database import get_db
 from ..dependencies import get_current_user, require_admin
 from ..models import RadarKeyword, User
@@ -24,7 +25,7 @@ def _country(value: str) -> str:
 
 
 def _require_country_access(user: User, country: str) -> None:
-    if user.access_profile not in {country, "both"}:
+    if not has_country_access(user.access_profile, country):
         raise HTTPException(status_code=403, detail="Este país no está habilitado para tu perfil")
 
 

@@ -17,6 +17,10 @@ from .proxy_utils import requests_proxies
 
 API_BASE = "https://contratacionesabiertas.oece.gob.pe/api/v1"
 DEFAULT_SOURCES = ("seace_v3",)
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
 
 
 def _clean(value: Any) -> str:
@@ -199,7 +203,7 @@ def _fetch_releases(source_id: str, max_pages: int, page_size: int) -> tuple[lis
     releases: list[dict[str, Any]] = []
     url = f"{API_BASE}/releases"
     params: dict[str, Any] = {"format": "json", "sourceId": source_id, "size": page_size}
-    headers = {"User-Agent": "GovRadar CRM/1.0"}
+    headers = {"User-Agent": BROWSER_USER_AGENT}
     with requests.Session() as session:
         session.proxies = requests_proxies() or {}
         for page in range(1, max_pages + 1):
@@ -221,7 +225,7 @@ def _read_monthly_csv(source_id: str, year: int, month: int) -> tuple[pd.DataFra
     diagnostics: list[str] = []
     file_url = f"{API_BASE}/file/{source_id}/csv/{year}/{month:02d}/es"
     response = requests.get(
-        file_url, timeout=90, headers={"User-Agent": "GovRadar CRM/1.0"}, proxies=requests_proxies()
+        file_url, timeout=90, headers={"User-Agent": BROWSER_USER_AGENT}, proxies=requests_proxies()
     )
     response.raise_for_status()
     content = BytesIO(response.content)

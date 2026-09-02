@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, TypeAdapter, model_validator
 
+from .access_profile import format_access_profile, parse_access_profile
+
 
 class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -44,15 +46,17 @@ class UserCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_profile_contact(self):
-        if self.access_profile not in {"peru", "chile", "argentina", "both"}:
-            raise ValueError("El perfil debe ser Perú, Chile, Argentina o todos")
+        countries = parse_access_profile(self.access_profile)
+        if not countries:
+            raise ValueError("Selecciona al menos un país (Perú, Chile o Argentina)")
+        self.access_profile = format_access_profile(countries)
         if self.role not in {"viewer", "admin"}:
             raise ValueError("El rol debe ser usuario o administrador")
-        if self.access_profile in {"peru", "both"} and not self.phone_peru.strip():
+        if "peru" in countries and not self.phone_peru.strip():
             raise ValueError("El celular de Peru es obligatorio para este perfil")
-        if self.access_profile in {"chile", "both"} and not self.phone_chile.strip():
+        if "chile" in countries and not self.phone_chile.strip():
             raise ValueError("El celular de Chile es obligatorio para este perfil")
-        if self.access_profile in {"argentina", "both"} and not self.phone_argentina.strip():
+        if "argentina" in countries and not self.phone_argentina.strip():
             raise ValueError("El celular de Argentina es obligatorio para este perfil")
         return self
 
@@ -73,8 +77,11 @@ class UserUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_permissions(self):
-        if self.access_profile is not None and self.access_profile not in {"peru", "chile", "argentina", "both"}:
-            raise ValueError("El perfil debe ser Perú, Chile, Argentina o todos")
+        if self.access_profile is not None:
+            countries = parse_access_profile(self.access_profile)
+            if not countries:
+                raise ValueError("Selecciona al menos un país (Perú, Chile o Argentina)")
+            self.access_profile = format_access_profile(countries)
         if self.role is not None and self.role not in {"viewer", "admin"}:
             raise ValueError("El rol debe ser usuario o administrador")
         return self

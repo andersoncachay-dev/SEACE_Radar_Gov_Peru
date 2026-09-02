@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
+from .access_profile import has_country_access, parse_access_profile
 from .database import get_db
 from .models import User
 from .radar_config import country_for_source
@@ -30,8 +31,7 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
 
 
 def source_is_allowed(current_user: User, source: str) -> bool:
-    profile = current_user.access_profile or "peru"
-    return profile == "both" or profile == country_for_source(source)
+    return has_country_access(current_user.access_profile or "peru", country_for_source(source))
 
 
 def require_source_access(current_user: User, source: str) -> None:
@@ -40,11 +40,14 @@ def require_source_access(current_user: User, source: str) -> None:
 
 
 def source_access_condition(column, current_user: User):
-    profile = current_user.access_profile or "peru"
-    if profile == "both":
+    countries = parse_access_profile(current_user.access_profile or "peru") or {"peru"}
+    if len(countries) >= 3:
         return None
-    if profile == "chile":
-        return column.ilike("mercado_publico%")
-    if profile == "argentina":
-        return column.ilike("comprar_argentina%")
-    return and_(~column.ilike("mercado_publico%"), ~column.ilike("comprar_argentina%"))
+    conditions = []
+    if "chile" in countries:
+        conditions.append(column.ilike("mercado_publico%"))
+    if "argentina" in countries:
+        conditions.append(column.ilike("comprar_argentina%"))
+    if "peru" in countries:
+        conditions.append(and_(~column.ilike("mercado_publico%"), ~column.ilike("comprar_argentina%")))
+    return or_(*conditions)

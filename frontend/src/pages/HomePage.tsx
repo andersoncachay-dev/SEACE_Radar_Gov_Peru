@@ -600,6 +600,8 @@ export function Home({
   alerts,
   opportunities,
   refresh,
+  onGoToDetail,
+  scrollToMapSignal,
 }: {
   country: Country;
   token: string;
@@ -607,8 +609,14 @@ export function Home({
   alerts: Alert[];
   opportunities: Opportunity[];
   refresh: () => Promise<void>;
+  onGoToDetail?: (country: Country, opportunityId: number, recordType?: string) => void;
+  scrollToMapSignal?: number;
 }) {
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
+  useEffect(() => {
+    if (!scrollToMapSignal) return;
+    document.getElementById("home-map-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [scrollToMapSignal]);
   const [processSort, setProcessSort] = useState<ProcessSortMode>("date-desc");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [processSearchOpen, setProcessSearchOpen] = useState(false);
@@ -873,7 +881,7 @@ export function Home({
         contextLabel={homeContextLabel}
       />
       <section className="home-intelligence-grid">
-        <article className="panel map-panel">
+        <article className="panel map-panel" id="home-map-panel">
           <div className="panel-title">
             <div>
               <h3>Mapa comercial {countryLabel}</h3>
@@ -1044,7 +1052,12 @@ export function Home({
                   <div className="map-opportunity-top">
                     <span className="map-opportunity-order" aria-label={`Proceso ${index + 1}`}>{index + 1}</span>
                     <span className="map-opportunity-heading">
-                      <strong>{item.nomenclature || "Proceso sin nomenclatura"}</strong>
+                      <span className="map-opportunity-heading-row">
+                        <strong>{item.nomenclature || "Proceso sin nomenclatura"}</strong>
+                        <button className="detail-link-button" type="button" onClick={() => onGoToDetail?.(country, item.id, item.record_type)} title="Ir al detalle de la oportunidad">
+                          Ir a Detalle
+                        </button>
+                      </span>
                       <span>{item.entity || "Entidad no informada"}</span>
                     </span>
                     <div className="map-opportunity-action">

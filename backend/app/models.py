@@ -26,7 +26,7 @@ class User(TimestampMixin, Base):
     phone_peru: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     phone_chile: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     phone_argentina: Mapped[str] = mapped_column(String(32), default="", nullable=False)
-    access_profile: Mapped[str] = mapped_column(String(20), default="peru", nullable=False)
+    access_profile: Mapped[str] = mapped_column(String(40), default="peru", nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), default="viewer", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

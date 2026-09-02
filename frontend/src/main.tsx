@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, AccessProfile, Alert, AlertRule, confirmPasswordReset, login, Opportunity, requestPasswordReset, Run, Stats, UserRecord } from "./api";
+import { api, Alert, AlertRule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
 import "./styles.css";
 import { Country, CountryFlagIcon, LegalDialog, LegalDocumentsMap, LegalView, countryFlagUrls, userInitials } from "./shared";
 
@@ -18,11 +18,10 @@ type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades
 
 type NavIconName = "home" | "target" | "globe" | "database" | "money" | "bell" | "users" | "settings";
 
-const profilePages: Record<AccessProfile, Page[]> = {
+const pagesByCountry: Record<CountryCode, Page[]> = {
   peru: ["Inicio Peru", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Alertas", "Seguimiento de Oportunidades Peru"],
   chile: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Alertas", "Seguimiento de Oportunidades Chile"],
-  argentina: ["Inicio Argentina", "Procesos COMPR.AR Argentina", "Histórico Procesos Eliminados AR", "Alertas", "Seguimiento de Oportunidades Argentina"],
-  both: ["Inicio Peru", "Inicio Chile", "Inicio Argentina", "Oportunidades Chile LMP-GC", "Procesos COMPR.AR Argentina", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Histórico Procesos Eliminados CL", "Histórico Procesos Eliminados AR", "Alertas", "Seguimiento de Oportunidades Peru", "Seguimiento de Oportunidades Chile", "Seguimiento de Oportunidades Argentina"],
+  argentina: ["Inicio Argentina", "Procesos COMPR.AR Argentina", "Publicaciones COMPR.AR Argentina", "Histórico Procesos Eliminados AR", "Alertas", "Seguimiento de Oportunidades Argentina"],
 };
 
 const rodarLogoUrl = "/assets/Rodarfondoblanco.png";
@@ -60,9 +59,9 @@ const launcherLabels: Record<Page, string> = {
   "Inicio Chile": "Inicio Chile",
   "Inicio Argentina": "Inicio Argentina",
   Oportunidades: "Oportunidades",
-  "Oportunidades Chile LMP-GC": "Buscador Oportunidades Chile",
-  "Oportunidades OCDS Peru": "Buscador Oportunidades Peru",
-  "Procesos COMPR.AR Argentina": "Buscador Argentina",
+  "Oportunidades Chile LMP-GC": "Detalle Oportunidades Chile",
+  "Oportunidades OCDS Peru": "Detalle Oportunidades Perú",
+  "Procesos COMPR.AR Argentina": "Detalle Oportunidades Argentina",
   "Publicaciones COMPR.AR Argentina": "Publicaciones Argentina",
   "Histórico Procesos Eliminados PE": "Histórico Procesos Eliminados PE",
   "Histórico Procesos Eliminados CL": "Histórico Procesos Eliminados CL",
@@ -372,6 +371,8 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   const [currentUser, setCurrentUser] = useState<UserRecord | null>(null);
   const [sessionError, setSessionError] = useState("");
   const [keywordSearchHandoff, setKeywordSearchHandoff] = useState<{ country: Country; keyword: string } | null>(null);
+  const [opportunityHandoff, setOpportunityHandoff] = useState<{ country: Country; opportunityId: number } | null>(null);
+  const [homeScrollSignal, setHomeScrollSignal] = useState(0);
   const [legalView, setLegalView] = useState<LegalView | null>(null);
   const [versionLabel, setVersionLabel] = useState("Versión 1.0 (Beta)");
   const legalDocuments = useLegalDocuments();
@@ -380,12 +381,25 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   const backend = useBackend(token);
   const userName = currentUser?.full_name || "Cargando usuario…";
   const visibleNav = useMemo(() => {
-    const allowed = currentUser ? profilePages[currentUser.access_profile] : profilePages.peru;
+    const countries = currentUser ? parseAccessProfile(currentUser.access_profile) : (["peru"] as CountryCode[]);
+    const allowed = Array.from(new Set(countries.flatMap((country) => pagesByCountry[country])));
     return currentUser?.role === "admin" ? [...allowed, "Usuarios", "Sistema"] as Page[] : allowed;
   }, [currentUser]);
   const visibleLauncherGroups = useMemo(() => launcherNavGroups
     .map((group) => ({ ...group, pages: group.pages.filter((item) => visibleNav.includes(item)) }))
     .filter((group) => group.pages.length > 0), [visibleNav]);
+  const [expandedLauncherGroups, setExpandedLauncherGroups] = useState<Set<string>>(() => {
+    const active = launcherNavGroups.find((group) => group.pages.includes(page));
+    return new Set(active ? [active.label] : []);
+  });
+  function toggleLauncherGroup(label: string) {
+    setExpandedLauncherGroups((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
 
   useEffect(() => {
     api.appSettings()
@@ -404,7 +418,8 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (currentUser && !visibleNav.includes(page)) {
-      setPage(currentUser.access_profile === "chile" ? "Inicio Chile" : currentUser.access_profile === "argentina" ? "Inicio Argentina" : "Inicio Peru");
+      const firstCountry = parseAccessProfile(currentUser.access_profile)[0];
+      setPage(firstCountry === "chile" ? "Inicio Chile" : firstCountry === "argentina" ? "Inicio Argentina" : "Inicio Peru");
     }
   }, [currentUser, page, visibleNav]);
 
@@ -464,6 +479,24 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
     setPage(targetCountry === "Chile" ? "Oportunidades Chile LMP-GC" : targetCountry === "Argentina" ? "Procesos COMPR.AR Argentina" : "Oportunidades OCDS Peru");
   }
 
+  function openOpportunityDetail(targetCountry: Country, opportunityId: number, recordType?: string) {
+    setOpportunityHandoff({ country: targetCountry, opportunityId });
+    setPage(
+      targetCountry === "Chile"
+        ? "Oportunidades Chile LMP-GC"
+        : targetCountry === "Argentina"
+          ? recordType === "publicacion"
+            ? "Publicaciones COMPR.AR Argentina"
+            : "Procesos COMPR.AR Argentina"
+          : "Oportunidades OCDS Peru",
+    );
+  }
+
+  function goToHomeAndScrollToMap(targetCountry: Country) {
+    setPage(targetCountry === "Chile" ? "Inicio Chile" : targetCountry === "Argentina" ? "Inicio Argentina" : "Inicio Peru");
+    setHomeScrollSignal((current) => current + 1);
+  }
+
   return (
     <div className="app-shell">
       <div className="workspace">
@@ -510,29 +543,42 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
                     <span>Accede a los módulos habilitados para tu perfil.</span>
                   </div>
                   <nav className="launcher-nav" aria-label="Módulos disponibles">
-                    {visibleLauncherGroups.map((group) => (
-                      <div className="launcher-group" key={group.label}>
-                        <h2>{group.label}</h2>
-                        <div>
-                          {group.pages.map((item) => (
-                            <button
-                              className={`launcher-nav-item ${item === page ? "active" : ""}`}
-                              type="button"
-                              key={item}
-                              onClick={() => navigateFromLauncher(item)}
-                              aria-current={item === page ? "page" : undefined}
-                            >
-                              <span className="launcher-icon-shell"><NavIcon name={navIcons[item]} /></span>
-                              <span className="launcher-item-copy">
-                                <strong>{launcherLabels[item]}</strong>
-                                <small>{launcherDescriptions[item]}</small>
-                              </span>
-                              {item === page ? <span className="launcher-current">Actual</span> : null}
-                            </button>
-                          ))}
+                    {visibleLauncherGroups.map((group) => {
+                      const isExpanded = expandedLauncherGroups.has(group.label);
+                      return (
+                        <div className="launcher-group" key={group.label}>
+                          <button
+                            className="launcher-group-toggle"
+                            type="button"
+                            onClick={() => toggleLauncherGroup(group.label)}
+                            aria-expanded={isExpanded}
+                          >
+                            <span>{group.label}</span>
+                            <span className={`launcher-group-chevron ${isExpanded ? "open" : ""}`} aria-hidden="true">▾</span>
+                          </button>
+                          {isExpanded ? (
+                            <div>
+                              {group.pages.map((item) => (
+                                <button
+                                  className={`launcher-nav-item ${item === page ? "active" : ""}`}
+                                  type="button"
+                                  key={item}
+                                  onClick={() => navigateFromLauncher(item)}
+                                  aria-current={item === page ? "page" : undefined}
+                                >
+                                  <span className="launcher-icon-shell"><NavIcon name={navIcons[item]} /></span>
+                                  <span className="launcher-item-copy">
+                                    <strong>{launcherLabels[item]}</strong>
+                                    <small>{launcherDescriptions[item]}</small>
+                                  </span>
+                                  {item === page ? <span className="launcher-current">Actual</span> : null}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </nav>
                   <div className="launcher-footer">
                     <strong className="launcher-version">{versionLabel}</strong>
@@ -574,14 +620,14 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
         {backend.error ? <div className="notice danger">{backend.error}</div> : null}
         <Suspense fallback={<div className="panel module-loading" role="status">Cargando módulo…</div>}>
         {!currentUser ? <div className="panel module-loading" role="status">Validando sesión y perfil…</div> : null}
-        {currentUser && page === "Inicio Peru" ? <Home country="Peru" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} /> : null}
-        {currentUser && page === "Inicio Chile" ? <Home country="Chile" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} /> : null}
-        {currentUser && page === "Inicio Argentina" ? <Home country="Argentina" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} /> : null}
-        {currentUser && page === "Oportunidades" ? <Opportunities country="Peru" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} /> : null}
-        {currentUser && page === "Oportunidades Chile LMP-GC" ? <Opportunities country="Chile" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} prefillKeyword={keywordSearchHandoff?.country === "Chile" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
-        {currentUser && page === "Procesos COMPR.AR Argentina" ? <Opportunities country="Argentina" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} argentinaRecordType="procesos" prefillKeyword={keywordSearchHandoff?.country === "Argentina" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
-        {currentUser && page === "Publicaciones COMPR.AR Argentina" ? <Opportunities country="Argentina" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} argentinaRecordType="publicaciones" /> : null}
-        {currentUser && page === "Oportunidades OCDS Peru" ? <Opportunities country="Peru" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} variant="ocds" prefillKeyword={keywordSearchHandoff?.country === "Peru" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} /> : null}
+        {currentUser && page === "Inicio Peru" ? <Home country="Peru" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} onGoToDetail={openOpportunityDetail} scrollToMapSignal={homeScrollSignal} /> : null}
+        {currentUser && page === "Inicio Chile" ? <Home country="Chile" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} onGoToDetail={openOpportunityDetail} scrollToMapSignal={homeScrollSignal} /> : null}
+        {currentUser && page === "Inicio Argentina" ? <Home country="Argentina" token={token} runs={backend.runs} alerts={backend.alerts} opportunities={backend.opportunities} refresh={backend.refresh} onGoToDetail={openOpportunityDetail} scrollToMapSignal={homeScrollSignal} /> : null}
+        {currentUser && page === "Oportunidades" ? <Opportunities country="Peru" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} onGoHome={goToHomeAndScrollToMap} /> : null}
+        {currentUser && page === "Oportunidades Chile LMP-GC" ? <Opportunities country="Chile" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} prefillKeyword={keywordSearchHandoff?.country === "Chile" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} targetOpportunityId={opportunityHandoff?.country === "Chile" ? opportunityHandoff.opportunityId : null} onTargetConsumed={() => setOpportunityHandoff(null)} onGoHome={goToHomeAndScrollToMap} /> : null}
+        {currentUser && page === "Procesos COMPR.AR Argentina" ? <Opportunities country="Argentina" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} argentinaRecordType="procesos" prefillKeyword={keywordSearchHandoff?.country === "Argentina" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} targetOpportunityId={opportunityHandoff?.country === "Argentina" ? opportunityHandoff.opportunityId : null} onTargetConsumed={() => setOpportunityHandoff(null)} onGoHome={goToHomeAndScrollToMap} /> : null}
+        {currentUser && page === "Publicaciones COMPR.AR Argentina" ? <Opportunities country="Argentina" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} argentinaRecordType="publicaciones" targetOpportunityId={opportunityHandoff?.country === "Argentina" ? opportunityHandoff.opportunityId : null} onTargetConsumed={() => setOpportunityHandoff(null)} onGoHome={goToHomeAndScrollToMap} /> : null}
+        {currentUser && page === "Oportunidades OCDS Peru" ? <Opportunities country="Peru" userId={currentUser.id} token={token} data={backend.opportunities} runs={backend.runs} refresh={backend.refresh} variant="ocds" prefillKeyword={keywordSearchHandoff?.country === "Peru" ? keywordSearchHandoff.keyword : null} onPrefillConsumed={() => setKeywordSearchHandoff(null)} targetOpportunityId={opportunityHandoff?.country === "Peru" ? opportunityHandoff.opportunityId : null} onTargetConsumed={() => setOpportunityHandoff(null)} onGoHome={goToHomeAndScrollToMap} /> : null}
         {page === "Histórico Procesos Eliminados PE" ? <ArchivedProcesses country="Peru" token={token} onRestored={backend.refresh} /> : null}
         {page === "Histórico Procesos Eliminados CL" ? <ArchivedProcesses country="Chile" token={token} onRestored={backend.refresh} /> : null}
         {page === "Histórico Procesos Eliminados AR" ? <ArchivedProcesses country="Argentina" token={token} onRestored={backend.refresh} /> : null}
@@ -621,6 +667,14 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
 function Root() {
   const [token, setToken] = useState(localStorage.getItem("rodar_token") || "");
   const resetToken = new URLSearchParams(window.location.search).get("reset_token") || "";
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      localStorage.removeItem("rodar_token");
+      localStorage.removeItem("rodar_email");
+      setToken("");
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
   if (!token || resetToken) {
     return (
       <Login

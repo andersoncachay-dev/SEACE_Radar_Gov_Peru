@@ -204,6 +204,7 @@ def _discover_argentina_documents(
         ]
 
     session = requests.Session()
+    session.proxies = requests_proxies() or {}
     is_publication = opportunity.source.startswith("comprar_argentina_publicaciones") or opportunity.record_type == "publicacion"
     search_url = PUBLICATION_SEARCH_URL if is_publication else PROCESS_SEARCH_URL
     search_kind = "publicacion" if is_publication else "proceso"

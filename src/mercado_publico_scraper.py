@@ -161,10 +161,19 @@ def _excel_column(frame: pd.DataFrame, *labels: str) -> str | None:
     return None
 
 
-def _download_excel_dataframe(driver, download_dir: str, timeout: float = 25.0) -> pd.DataFrame | None:
+def _download_excel_dataframe(driver, download_dir: str, timeout: float = 25.0, link_timeout: float = 12.0) -> pd.DataFrame | None:
     """Returns None when Mercado Publico genuinely found nothing to export -
     a search with zero matches never renders the download link."""
+    # The results grid and the "Exportar a Excel" link come from separate
+    # ASP.NET postbacks, so the link can still be missing right after the
+    # grid finishes rendering - poll briefly instead of checking once.
+    deadline = time.time() + link_timeout
     excel_url = _find_excel_download_url(driver)
+    while not excel_url and time.time() < deadline:
+        if "no se encontraron" in _norm(driver.page_source):
+            return None
+        time.sleep(0.5)
+        excel_url = _find_excel_download_url(driver)
     if not excel_url:
         if "no se encontraron" in _norm(driver.page_source):
             return None

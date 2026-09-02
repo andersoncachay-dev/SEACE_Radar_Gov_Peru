@@ -11,6 +11,8 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+from .proxy_utils import requests_proxies
+
 BASE_URL = "https://comprar.gob.ar"
 PROCESS_SEARCH_URL = f"{BASE_URL}/BuscarAvanzado.aspx"
 PUBLICATION_SEARCH_URL = f"{BASE_URL}/BuscarAvanzadoPublicacion.aspx"
@@ -416,6 +418,7 @@ def search_comprar_processes(
     **_: object,
 ) -> tuple[pd.DataFrame, list[str]]:
     session = requests.Session()
+    session.proxies = requests_proxies() or {}
     if cancel_callback:
         cancel_callback()
     if progress_callback:
@@ -463,6 +466,7 @@ def search_comprar_publications(
     **_: object,
 ) -> tuple[pd.DataFrame, list[str]]:
     session = requests.Session()
+    session.proxies = requests_proxies() or {}
     if progress_callback:
         progress_callback(0.1, "Consultando publicaciones en COMPR.AR")
     response = _post_search(session, PUBLICATION_SEARCH_URL, keyword, "publicacion", nomenclature)

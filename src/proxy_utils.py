@@ -3,9 +3,25 @@
 Azure's outbound IP range is blocked by both prod2.seace.gob.pe and
 contratacionesabiertas.oece.gob.pe (confirmed: identical requests return 403
 from Azure and 200 through a residential/datacenter proxy in Spain or
-Poland). ``OUTBOUND_PROXY_URL`` routes both the ``requests``-based OCDS calls
+Poland, and this holds for a real Chrome/Selenium request just as much as a
+bare ``requests`` call - it's an IP-level block, not a browser-fingerprint
+one). ``OUTBOUND_PROXY_URL`` routes both the ``requests``-based OCDS calls
 and the Selenium-based SEACE scraper through that proxy. Leave it unset to
 keep calling these hosts directly (e.g. from a machine that isn't blocked).
+
+Whichever proxy provider is behind ``OUTBOUND_PROXY_URL``, OECE's block list
+is per-IP/subnet, not per-provider: when a proxy plan/pool stops working,
+don't assume the whole provider (or its whole datacenter ASN) got
+blacklisted from a handful of failed attempts. Confirmed 2026-08-12 against
+a Webshare "Proxy Server" pool of 100 datacenter IPs: a 3-IP sample gave
+403 on all three (looked like a wholesale block), but a 16-IP sample landed
+4 clean 200s (~25% hit rate) - the pool is a mix of blocked and clean
+subnets. Test at least ~15 IPs from the pool before concluding a provider
+is entirely blocked and paying for a different one (e.g. residential).
+A quick way to test a batch: loop `requests.get(..., proxies=...)` against
+one of the OCDS CSV download URLs (small, fast, same endpoint the real
+pipeline hits) from inside the deployed container (`az containerapp exec`),
+one IP at a time.
 
 Chrome has no working command-line flag for an *authenticated* proxy: a
 username/password embedded in ``--proxy-server`` is rejected outright

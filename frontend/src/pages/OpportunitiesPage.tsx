@@ -336,6 +336,9 @@ export function Opportunities({
   prefillKeyword = null,
   onPrefillConsumed,
   argentinaRecordType = "procesos",
+  targetOpportunityId = null,
+  onTargetConsumed,
+  onGoHome,
 }: {
   country: Country;
   userId: number;
@@ -347,6 +350,9 @@ export function Opportunities({
   prefillKeyword?: string | null;
   onPrefillConsumed?: () => void;
   argentinaRecordType?: "procesos" | "publicaciones";
+  targetOpportunityId?: number | null;
+  onTargetConsumed?: () => void;
+  onGoHome?: (country: Country) => void;
 }) {
   const serverScope = `${variant}.${country}`;
   const storageScope = `${userId}.${serverScope}`;
@@ -402,13 +408,13 @@ export function Opportunities({
   const visibleRuns = useMemo(() => runs.filter((run) => sourceBelongsToView(run.source, country, variant)), [runs, country, variant]);
   const invalidPublicationDateRange = Boolean(publicationDateFrom && publicationDateTo && publicationDateFrom > publicationDateTo);
   const entitySearchKeywords = uniqueKeywords([entityKeyword, entityKeyword2, entityKeyword3]);
-  const additionalSearchReady = country === "Argentina"
+  const additionalSearchReady = country === "Argentina" || nomenclatureFilter.trim()
     ? Boolean(nomenclatureFilter.trim())
     : Boolean(
         publicationDateFrom
         && publicationDateTo
         && !invalidPublicationDateRange
-        && (nomenclatureFilter.trim() || (entityFilter.trim() && entitySearchKeywords.length)),
+        && entityFilter.trim() && entitySearchKeywords.length,
       );
   const activePeriodKeywordGroups = useMemo(
     () => {
@@ -1003,7 +1009,22 @@ export function Opportunities({
       years.push(...ocdsYears);
       months.push(...ocdsMonths);
     }
-    const groups = years.map((year) => ({ year, months: [...months], keywords: [...searchTerms], commercialMode: "all" as MaxResultsMode }));
+    // A nomenclature-only lookup (no dates) has nothing to build a year/month
+    // group from, but the "assign out-of-period rows to the first pending
+    // group" fallback below needs at least one group to attach the exact
+    // match to - otherwise the found opportunity is silently dropped from
+    // the table. Argentina always has this covered via its own ocdsYears/
+    // ocdsMonths fallback; give Peru/Chile the same single placeholder group.
+    // mergeAdditionalPeriodKeywordGroups drops any group with an empty
+    // year/months, so the placeholder must carry a real (if approximate)
+    // date - the exact match itself is later attached by opportunity ID,
+    // not by this date, so its accuracy doesn't matter.
+    const now = new Date();
+    const groups = years.length
+      ? years.map((year) => ({ year, months: [...months], keywords: [...searchTerms], commercialMode: "all" as MaxResultsMode }))
+      : cleanNomenclature
+        ? [{ year: String(now.getFullYear()), months: [String(now.getMonth() + 1)], keywords: [...searchTerms], commercialMode: "all" as MaxResultsMode }]
+        : [];
     setStarting(true);
     try {
       const startedRuns = await Promise.all(searchTerms.map((searchTerm) => api.startRun(token, {
@@ -1506,7 +1527,7 @@ export function Opportunities({
           </div>
           <p className="additional-search-requirements">{country === "Argentina"
             ? "La consulta manual busca una sola ficha y actualiza sus fechas de publicación, consultas y acto de apertura."
-            : "Completa la fecha de convocatoria y, además, la nomenclatura, el nombre de la entidad o ambos. Si ingresas nomenclatura, tendrá prioridad. Una búsqueda solo por entidad requiere entre una y tres keywords de negocio."}</p>
+            : "Si conoces la nomenclatura del proceso, ingrésala y listo - no hace falta completar entidad ni fechas. Sin nomenclatura, completa la fecha de convocatoria y el nombre de la entidad con entre una y tres keywords de negocio."}</p>
           <div className="radar-action-row optional-action-row">
             <button className="primary additional-search-button" type="button" onClick={executeAdditionalSearch} disabled={!additionalSearchReady || isRadarProcessing}>
               {isRadarProcessing ? "Procesando..." : country === "Argentina" ? "Buscar ficha y cronograma" : "Ejecutar búsqueda adicional"}
@@ -1525,6 +1546,9 @@ export function Opportunities({
         onRevalidateProposal={revalidateProposalDate}
         highlightTerms={activeKeywords}
         onProcessAction={archiveProcess}
+        targetOpportunityId={targetOpportunityId}
+        onTargetConsumed={onTargetConsumed}
+        onGoHome={onGoHome}
       />
       {confirmNewSearch ? (
         <ConfirmModal
@@ -2158,6 +2182,9 @@ export function OpportunityTable({
   onProcessAction,
   onUpdateArchiveReason,
   allowRevalidation = true,
+  targetOpportunityId = null,
+  onTargetConsumed,
+  onGoHome,
 }: {
   rows: Opportunity[];
   country: Country;
@@ -2169,6 +2196,9 @@ export function OpportunityTable({
   onProcessAction: (item: Opportunity, reason?: string) => Promise<void>;
   onUpdateArchiveReason?: (item: Opportunity, reason: string) => Promise<void>;
   allowRevalidation?: boolean;
+  targetOpportunityId?: number | null;
+  onTargetConsumed?: () => void;
+  onGoHome?: (country: Country) => void;
 }) {
   const [commercialFilter, setCommercialFilter] = useState<CommercialClass | null>(null);
   const [columnFilters, setColumnFilters] = useState<TableColumnFilters>(emptyTableColumnFilters);
@@ -2287,6 +2317,17 @@ export function OpportunityTable({
     });
   }, [filteredRows, actionMode, dateSort]);
 
+  useEffect(() => {
+    if (targetOpportunityId == null) return;
+    const found = sortedRows.some((row) => row.item.id === targetOpportunityId);
+    if (found) {
+      setActiveRowId(targetOpportunityId);
+      const node = document.getElementById(`opportunity-row-${targetOpportunityId}`);
+      node?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    onTargetConsumed?.();
+  }, [targetOpportunityId, sortedRows]);
+
   function toggleDateSort(column: DateSortColumn) {
     setDateSort((current) => current?.column === column
       ? { column, direction: current.direction === "desc" ? "asc" : "desc" }
@@ -2371,6 +2412,12 @@ export function OpportunityTable({
           ))}
         </div>
         <div className="table-action-buttons">
+          {onGoHome ? (
+            <button className="go-home-button" type="button" onClick={() => onGoHome(country)} title="Ir a Inicio">
+              <span aria-hidden="true">🏠</span>
+              <span>Ir a Inicio</span>
+            </button>
+          ) : null}
           <button className="export-excel-button" type="button" onClick={() => void exportOpportunitiesToExcel(token, sortedRows, "Oportunidades GovRadar", country, actionMode === "restore" ? "historico" : "table")}>
             <img src={excelLogoUrl} alt="" aria-hidden="true" loading="lazy" decoding="async" />
             <span>Exportar a Excel</span>
@@ -2888,7 +2935,7 @@ export function OpportunityRow({
   const isLargePurchase = item.source.toLowerCase() === "mercado_publico_grandes_compras";
   const isNewOpportunity = isOpportunityNew(item);
   return (
-    <tr className={`${isActive ? "row-active" : ""} ${isTracked ? "row-tracked" : ""}`} onClick={onActivate}>
+    <tr id={`opportunity-row-${item.id}`} className={`${isActive ? "row-active" : ""} ${isTracked ? "row-tracked" : ""}`} onClick={onActivate}>
       <td><span className={`priority p${item.priority}`}>{item.priority}</span></td>
       {actionMode === "restore" ? (
         <td>

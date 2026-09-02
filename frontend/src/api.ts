@@ -186,7 +186,23 @@ export type OpportunityViewStateRecord = {
   updated_at: string;
 };
 
-export type AccessProfile = CountryCode | "both";
+// Comma-separated subset of CountryCode, e.g. "peru,chile". "both" is the
+// legacy all-countries value predating Argentina support, still accepted
+// for backward compatibility - see parseAccessProfile/formatAccessProfile.
+export type AccessProfile = string;
+
+const ACCESS_PROFILE_COUNTRIES: CountryCode[] = ["peru", "chile", "argentina"];
+
+export function parseAccessProfile(profile: AccessProfile): CountryCode[] {
+  if (profile === "both") return [...ACCESS_PROFILE_COUNTRIES];
+  const selected = new Set(profile.split(",").map((value) => value.trim()));
+  return ACCESS_PROFILE_COUNTRIES.filter((country) => selected.has(country));
+}
+
+export function formatAccessProfile(countries: CountryCode[]): AccessProfile {
+  const selected = new Set(countries);
+  return ACCESS_PROFILE_COUNTRIES.filter((country) => selected.has(country)).join(",");
+}
 
 export type UserRecord = {
   id: number;
@@ -399,6 +415,15 @@ export class ApiError extends Error {
   }
 }
 
+let onUnauthorized: (() => void) | null = null;
+
+// Called once from main.tsx so any expired/invalid token, from any API call
+// through `request`, sends the user back to the login screen instead of
+// leaving the UI stuck on failed requests.
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler;
+}
+
 async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -407,6 +432,9 @@ async function request<T>(path: string, token: string, init: RequestInit = {}): 
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
+  if (response.status === 401 && token) {
+    onUnauthorized?.();
+  }
   if (!response.ok) {
     const body = await response.text();
     let detail = body;

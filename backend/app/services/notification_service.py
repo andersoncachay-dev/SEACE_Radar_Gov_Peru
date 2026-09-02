@@ -61,7 +61,7 @@ def _format_datetime(value: datetime | None) -> str | None:
 def _email_subject(opportunity: Opportunity | None) -> str:
     country = country_for_source(opportunity.source) if opportunity else "peru"
     country_label = "Chile" if country == "chile" else "Argentina" if country == "argentina" else "Perú"
-    return f"Rodar Consulting GovRadar · Nueva Alerta Gobierno {country_label}"
+    return f"{country_label} Nueva Alerta Gobierno . Rodar Consulting GovRadar"
 
 
 def _is_active_new_process(opportunity: Opportunity, now: datetime | None = None) -> bool:
@@ -169,12 +169,11 @@ def _build_message_html(opportunity: Opportunity, alert_type: str, keywords: str
     if row_html:
         row_html[-1] = row_html[-1].replace("margin:0 0 10px;", "margin:0;", 1)
     body_html = "".join(row_html)
-    detail_url = opportunity.detail_url or ""
     return _branded_email_html(
         alert_labels.get(alert_type, "Alerta de oportunidad"),
         body_html,
-        cta_url=detail_url or None,
-        cta_label="Ver oportunidad" if detail_url else None,
+        cta_url=settings.frontend_url,
+        cta_label="Revisar OPP en Plataforma",
     )
 
 

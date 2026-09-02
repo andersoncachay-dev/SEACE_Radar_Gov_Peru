@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, AccessProfile, UserCreatePayload, UserRecord } from "../api";
+import { api, AccessProfile, CountryCode, formatAccessProfile, parseAccessProfile, UserCreatePayload, UserRecord } from "../api";
 import { Country, CountryFlagIcon, Empty, userInitials } from "../shared";
 
 export const emptyUserForm: UserCreatePayload = {
@@ -16,15 +16,19 @@ export const emptyUserForm: UserCreatePayload = {
   role: "viewer",
 };
 
-export const accessProfileOptions: Array<{ value: AccessProfile; title: string; description: string; flags: Country[] }> = [
+export const accessProfileOptions: Array<{ value: CountryCode; title: string; description: string; flags: Country[] }> = [
   { value: "peru", title: "Perfil Perú", description: "Inicio Perú, Oportunidades Perú y alertas", flags: ["Peru"] },
   { value: "chile", title: "Perfil Chile", description: "Inicio Chile, Oportunidades Chile y alertas", flags: ["Chile"] },
   { value: "argentina", title: "Perfil Argentina", description: "Inicio Argentina, COMPR.AR y alertas", flags: ["Argentina"] },
-  { value: "both", title: "Todos los países", description: "Acceso operativo a los módulos de Perú, Chile y Argentina", flags: ["Peru", "Chile", "Argentina"] },
 ];
 
+const countryLabels: Record<CountryCode, string> = { peru: "Perú", chile: "Chile", argentina: "Argentina" };
+
 export function profileName(profile: AccessProfile) {
-  return profile === "both" ? "Todos los países" : profile === "chile" ? "Chile" : profile === "argentina" ? "Argentina" : "Perú";
+  const countries = parseAccessProfile(profile);
+  if (countries.length === 3) return "Todos los países";
+  if (!countries.length) return "Sin país asignado";
+  return countries.map((country) => countryLabels[country]).join(" + ");
 }
 
 export function userLocalPhone(value: string, countryCode: "51" | "56" | "54") {
@@ -159,9 +163,17 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
       .some((value) => value.toLocaleLowerCase("es").includes(term)));
   }, [search, users]);
 
-  const needsPeruPhone = form.access_profile === "peru" || form.access_profile === "both";
-  const needsChilePhone = form.access_profile === "chile" || form.access_profile === "both";
-  const needsArgentinaPhone = form.access_profile === "argentina" || form.access_profile === "both";
+  const selectedCountries = parseAccessProfile(form.access_profile);
+  const needsPeruPhone = selectedCountries.includes("peru");
+  const needsChilePhone = selectedCountries.includes("chile");
+  const needsArgentinaPhone = selectedCountries.includes("argentina");
+
+  function toggleCountry(country: CountryCode) {
+    const current = parseAccessProfile(form.access_profile);
+    const next = current.includes(country) ? current.filter((value) => value !== country) : [...current, country];
+    if (!next.length) return;
+    updateField("access_profile", formatAccessProfile(next));
+  }
 
   return (
     <div className="users-module">
@@ -187,16 +199,16 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
           </div>
 
           <fieldset className="profile-fieldset">
-            <legend>Perfil de visualización</legend>
+            <legend>Perfil de visualización <span className="field-hint">Puedes marcar varios países</span></legend>
             <div className="profile-choice-grid">
               {accessProfileOptions.map((option) => (
-                <label className={`profile-choice ${form.access_profile === option.value ? "selected" : ""}`} key={option.value}>
+                <label className={`profile-choice ${selectedCountries.includes(option.value) ? "selected" : ""}`} key={option.value}>
                   <input
-                    type="radio"
+                    type="checkbox"
                     name="access-profile"
                     value={option.value}
-                    checked={form.access_profile === option.value}
-                    onChange={() => updateField("access_profile", option.value)}
+                    checked={selectedCountries.includes(option.value)}
+                    onChange={() => toggleCountry(option.value)}
                   />
                   <span className="profile-flags">{option.flags.map((flag) => <CountryFlagIcon country={flag} key={flag} />)}</span>
                   <span><strong>{option.title}</strong><small>{option.description}</small></span>
@@ -227,7 +239,7 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
                 <span className="phone-input-group user-phone-input"><b>+54</b><input required type="tel" inputMode="numeric" autoComplete="tel-national" minLength={10} maxLength={11} pattern="[0-9]{10,11}" title="Ingresa 10 u 11 dígitos del celular de Argentina" value={form.phone_argentina} onChange={(event) => updateField("phone_argentina", event.target.value.replace(/\D/g, "").slice(0, 11))} placeholder="11 9999 9999" /></span>
               </label>
             ) : null}
-            <label className={form.access_profile === "both" ? "full-field" : ""}>{editingId !== null ? "Nueva contraseña" : "Contraseña temporal"} <span className="field-hint">{editingId !== null ? "Opcional" : "Mínimo 8 caracteres"}</span><input required={editingId === null} minLength={8} type="password" autoComplete="new-password" value={form.password} onChange={(event) => updateField("password", event.target.value)} placeholder={editingId !== null ? "Dejar vacío para conservarla" : "Crea una contraseña segura"} /></label>
+            <label className={selectedCountries.length === 3 ? "full-field" : ""}>{editingId !== null ? "Nueva contraseña" : "Contraseña temporal"} <span className="field-hint">{editingId !== null ? "Opcional" : "Mínimo 8 caracteres"}</span><input required={editingId === null} minLength={8} type="password" autoComplete="new-password" value={form.password} onChange={(event) => updateField("password", event.target.value)} placeholder={editingId !== null ? "Dejar vacío para conservarla" : "Crea una contraseña segura"} /></label>
           </div>
 
           {error ? <div className="notice danger" role="alert">{error}</div> : null}
@@ -255,10 +267,10 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
                     <small>{user.position || "Posición no registrada"}</small>
                   </div>
                   <div className="user-access">
-                    <span className={`profile-badge ${user.access_profile}`}>
-                      {user.access_profile === "peru" || user.access_profile === "both" ? <CountryFlagIcon country="Peru" /> : null}
-                      {user.access_profile === "chile" || user.access_profile === "both" ? <CountryFlagIcon country="Chile" /> : null}
-                      {user.access_profile === "argentina" || user.access_profile === "both" ? <CountryFlagIcon country="Argentina" /> : null}
+                    <span className="profile-badge">
+                      {parseAccessProfile(user.access_profile).includes("peru") ? <CountryFlagIcon country="Peru" /> : null}
+                      {parseAccessProfile(user.access_profile).includes("chile") ? <CountryFlagIcon country="Chile" /> : null}
+                      {parseAccessProfile(user.access_profile).includes("argentina") ? <CountryFlagIcon country="Argentina" /> : null}
                       {profileName(user.access_profile)}
                     </span>
                     <small>{user.role === "admin" ? "Administrador" : "Usuario"}</small>
