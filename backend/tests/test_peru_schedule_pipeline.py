@@ -11,6 +11,7 @@ from backend.app.database import Base
 from backend.app.models import Opportunity
 from backend.app.services.ingestion_service import _as_datetime
 from backend.app.services.run_service import (
+    _active_row_mask,
     _finalize_stale_peru_consultations,
     _peru_pending_schedule_rows,
     _peru_schedule_targets,
@@ -21,6 +22,25 @@ from src.oece_ocds_connector import _parse_csv_row, _parse_date
 
 
 class PeruSchedulePipelineTests(unittest.TestCase):
+    def test_active_row_mask_keeps_open_consultation_despite_same_day_propuesta_fin(self) -> None:
+        # OECE's "Periodo de licitacion" (-> propuesta_fin) is a same-day
+        # placeholder for many methods (confirmed 2026-09-15 against a real
+        # "Concurso Publico de Servicios" from EGASA): propuesta_fin looks
+        # already past on day one while the real activity window - Periodo
+        # de consulta (-> consulta_fin) - stays open for another week. The
+        # incremental discovery filter must not drop these.
+        now = datetime.now()
+        rows = pd.DataFrame({
+            "Nomenclatura": ["OPEN-VIA-CONSULTA", "GENUINELY-CLOSED"],
+            "Estado Comercial": ["Vigente para Consultas y Propuesta", "Proceso Culminado"],
+            "propuesta_fin": [now - timedelta(days=1), now - timedelta(days=10)],
+            "consulta_fin": [now + timedelta(days=8), now - timedelta(days=5)],
+        })
+
+        kept = rows[_active_row_mask(rows)]["Nomenclatura"].tolist()
+
+        self.assertEqual(kept, ["OPEN-VIA-CONSULTA"])
+
     def test_seace_result_requires_requested_process_with_proposal_deadline(self) -> None:
         unrelated = pd.DataFrame({
             "Nomenclatura": ["CP-ABR-99-2026-OTRA-1"],

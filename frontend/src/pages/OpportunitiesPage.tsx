@@ -434,6 +434,30 @@ export function Opportunities({
     },
     [visibleRuns, activeRunIds, appliedPeriodYears, appliedPeriodMonths, appliedPeriodKeywordGroups, activeKeywords, maxResultsMode],
   );
+  useEffect(() => {
+    // The automatic radar keeps discovering opportunities every month, but
+    // the table only shows what matches an explicitly-searched year/month +
+    // keyword combination. Without this, the table silently stops surfacing
+    // anything new the moment the calendar rolls into a month nobody has
+    // searched yet - seed the current month for the country's radar
+    // keywords so newly-discovered opportunities stay visible without a
+    // manual re-search. This only widens the in-memory display filter; it
+    // does not start a new scrape run or touch the saved search state.
+    // Must run after the saved-search hydration effect (viewStateHydrated)
+    // finishes, since that effect replaces appliedPeriodKeywordGroups
+    // wholesale and would otherwise wipe this out if it resolved later.
+    if (!usesPeriodFilters || !viewStateHydrated) return;
+    const keywords = radarKeywordState.keywords.map((item) => item.keyword).filter(Boolean);
+    if (!keywords.length) return;
+    const now = new Date();
+    const currentYear = String(now.getFullYear());
+    const currentMonth = String(now.getMonth() + 1);
+    const currentGroups = periodKeywordGroupsForSelection([currentYear], [currentMonth], keywords, "active");
+    setAppliedPeriodKeywordGroups((current) => mergePeriodKeywordGroups(current, currentGroups));
+    setAppliedPeriodYears((current) => uniqueDefined([...current, currentYear]));
+    setAppliedPeriodMonths((current) => uniqueDefined([...current, currentMonth]));
+  }, [usesPeriodFilters, viewStateHydrated, radarKeywordState.keywords, country]);
+
   const visibleRequiredPeriodGroups = useMemo(() => {
     const optionalTerms = [nomenclatureFilter, entityFilter].map((item) => item.trim().toLowerCase()).filter(Boolean);
     const additionalTerms = new Set(additionalPeriodKeywordGroups.flatMap((group) => group.keywords).map(normalizedSearchTerm));

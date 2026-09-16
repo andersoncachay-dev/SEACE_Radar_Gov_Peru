@@ -93,16 +93,26 @@ def _filter_dataframe_period(rows: Any, payload: dict):
         return rows
     publication_column = "fecha_publicacion" if "fecha_publicacion" in rows.columns else "Fecha y Hora de Publicacion"
     proposal_column = "propuesta_fin" if "propuesta_fin" in rows.columns else None
+    opening_column = "fecha_apertura" if "fecha_apertura" in rows.columns else None
     is_chile = str(payload.get("source") or "").lower().startswith("mercado_publico")
-    if publication_column not in rows.columns and proposal_column is None:
+    is_argentina_opening = str(payload.get("date_filter_type") or "").lower() == "opening" and opening_column is not None
+    if publication_column not in rows.columns and proposal_column is None and opening_column is None:
         return rows
     publication_dates = rows[publication_column] if publication_column in rows.columns else None
     proposal_dates = rows[proposal_column] if proposal_column else None
+    opening_dates = rows[opening_column] if opening_column else None
     # Mercado Publico presents searches by their closing date. For Chile, a
     # selected month therefore means the complete month of proposal closing,
     # including future months, even when the tender was published earlier.
     if is_chile and proposal_dates is not None:
         dates = proposal_dates if publication_dates is None else proposal_dates.combine_first(publication_dates)
+    elif is_argentina_opening:
+        # COMPR.AR's incremental window targets the bid-opening date
+        # (fecha_apertura), not the announcement date: a process can be
+        # published weeks before it opens, so filtering on fecha_publicacion
+        # alone was silently dropping still-open tenders merely announced
+        # earlier (confirmed 2026-09-04: 121 keyword matches -> 1 kept).
+        dates = opening_dates if publication_dates is None else opening_dates.combine_first(publication_dates)
     elif publication_dates is not None:
         dates = publication_dates if proposal_dates is None else publication_dates.combine_first(proposal_dates)
     else:
@@ -135,15 +145,34 @@ def _terminal_status(value: Any) -> bool:
 
 
 def _active_row_mask(rows: Any):
-    status_columns = [column for column in ("estado_comercial", "vigencia") if column in rows.columns]
+    # OECE's "Estado Comercial"/"Vigencia" columns keep their original case
+    # (set by _parse_csv_row, not normalize_columns) for the Peru automatic
+    # incremental path this feeds - match both spellings so the terminal-
+    # status check isn't silently a no-op here.
+    status_columns = [
+        column for column in ("estado_comercial", "vigencia", "Estado Comercial", "Vigencia") if column in rows.columns
+    ]
     terminal_mask = False
     for column in status_columns:
         column_mask = rows[column].fillna("").map(_terminal_status)
         terminal_mask = column_mask if terminal_mask is False else terminal_mask | column_mask
     active_mask = ~terminal_mask if terminal_mask is not False else rows.index.to_series().map(lambda _: True)
-    if "propuesta_fin" in rows.columns:
-        deadlines = rows["propuesta_fin"]
-        deadline_mask = deadlines.isna() | (deadlines > datetime.now())
+    # OECE's "Periodo de licitacion" (-> propuesta_fin) is frequently a
+    # same-day placeholder unrelated to the real activity window - e.g. a
+    # "Concurso Publico de Servicios" published today with propuesta_fin
+    # already "past" while its Periodo de consulta (-> consulta_fin) stays
+    # open for another week. Requiring only propuesta_fin to be future
+    # silently dropped these from automatic discovery on day one even
+    # though they were genuinely still open. A row counts as active if
+    # either deadline hasn't passed yet.
+    deadline_columns = [column for column in ("propuesta_fin", "consulta_fin") if column in rows.columns]
+    if deadline_columns:
+        now = datetime.now()
+        deadline_mask = False
+        for column in deadline_columns:
+            deadlines = rows[column]
+            column_mask = deadlines.isna() | (deadlines > now)
+            deadline_mask = column_mask if deadline_mask is False else deadline_mask | column_mask
         active_mask = active_mask & deadline_mask
     return active_mask
 
