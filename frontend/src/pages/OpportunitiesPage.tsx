@@ -450,12 +450,20 @@ export function Opportunities({
     const keywords = radarKeywordState.keywords.map((item) => item.keyword).filter(Boolean);
     if (!keywords.length) return;
     const now = new Date();
-    const currentYear = String(now.getFullYear());
-    const currentMonth = String(now.getMonth() + 1);
-    const currentGroups = periodKeywordGroupsForSelection([currentYear], [currentMonth], keywords, "active");
+    // Chile rows are matched by closing date, and the automatic radar
+    // (run_service.chile_closing_window) collects closings in the current
+    // month + the next one - seed both so a process published this month
+    // but closing next month isn't hidden from the table.
+    const seedDates = country === "Chile"
+      ? [now, new Date(now.getFullYear(), now.getMonth() + 1, 1)]
+      : [now];
+    const seeds = seedDates.map((date) => ({ year: String(date.getFullYear()), month: String(date.getMonth() + 1) }));
+    const currentGroups = mergePeriodKeywordGroups(
+      ...seeds.map((seed) => periodKeywordGroupsForSelection([seed.year], [seed.month], keywords, "active")),
+    );
     setAppliedPeriodKeywordGroups((current) => mergePeriodKeywordGroups(current, currentGroups));
-    setAppliedPeriodYears((current) => uniqueDefined([...current, currentYear]));
-    setAppliedPeriodMonths((current) => uniqueDefined([...current, currentMonth]));
+    setAppliedPeriodYears((current) => uniqueDefined([...current, ...seeds.map((seed) => seed.year)]));
+    setAppliedPeriodMonths((current) => uniqueDefined([...current, ...seeds.map((seed) => seed.month)]));
   }, [usesPeriodFilters, viewStateHydrated, radarKeywordState.keywords, country]);
 
   const visibleRequiredPeriodGroups = useMemo(() => {
