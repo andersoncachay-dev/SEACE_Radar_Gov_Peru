@@ -18,6 +18,12 @@ scheduler = None
 LIMA_TIMEZONE = ZoneInfo("America/Lima")
 DEFAULT_INTERVAL_SECONDS = 15 * 60
 DEFAULT_INCREMENTAL_LOOKBACK_DAYS = 2
+# OECE's OCDS feed lags SEACE: CP SER-SM-5-2026-MTC/24-1 was published in
+# SEACE 2026-09-18 but only reached OCDS 2026-09-21, so a 2-day publication
+# window never saw it. Already-known processes are skipped downstream
+# (_peru_schedule_targets only_new) and closed ones by _active_row_mask, so
+# the wider window only costs a filter pass over the same monthly CSV.
+PERU_INCREMENTAL_LOOKBACK_DAYS = 7
 CHILE_INCREMENTAL_FUTURE_DAYS = 38
 ARGENTINA_INCREMENTAL_LOOKBACK_DAYS = 7
 ARGENTINA_INCREMENTAL_FUTURE_DAYS = 33
@@ -210,6 +216,8 @@ def current_ingestion_window(db, country: str, now: datetime | None = None) -> d
     lookback_days = (
         ARGENTINA_INCREMENTAL_LOOKBACK_DAYS
         if normalized_country == "argentina"
+        else PERU_INCREMENTAL_LOOKBACK_DAYS
+        if normalized_country == "peru"
         else DEFAULT_INCREMENTAL_LOOKBACK_DAYS
     )
     start_date = current.date() - timedelta(days=lookback_days)

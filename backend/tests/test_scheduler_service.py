@@ -127,14 +127,14 @@ class RadarProfileSyncTests(unittest.TestCase):
         self.assertTrue(window["active_only"])
         self.assertTrue(window["automatic_incremental"])
 
-    def test_peru_incremental_window_remains_anteayer_through_today(self) -> None:
+    def test_peru_incremental_window_covers_seven_days_for_ocds_lag(self) -> None:
         window = current_ingestion_window(
             self.db,
             "peru",
             datetime(2026, 8, 1, 2, 30, tzinfo=timezone.utc),
         )
 
-        self.assertEqual(window["publication_date_from"], "2026-07-29")
+        self.assertEqual(window["publication_date_from"], "2026-07-24")
         self.assertEqual(window["publication_date_to"], "2026-07-31")
         self.assertEqual(window["date_filter_type"], "publication")
         self.assertFalse(window["skip_detail_enrichment"])
