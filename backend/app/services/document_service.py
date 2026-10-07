@@ -1343,6 +1343,12 @@ def discover_documents_for_opportunity(db: Session, opportunity_id: int) -> list
         "--ignore-certificate-errors",
     ]:
         options.add_argument(opt)
+    # Mercado Publico's ficha fires an AJAX call (ObtenerEspecialidades) on
+    # load whose error handler alert()s the server message, e.g. "Object
+    # reference not set to an instance of an object". Selenium's default
+    # ("dismiss and notify") turns that into UnexpectedAlertPresentException
+    # on the next command and aborts the whole discovery; accept it silently.
+    options.set_capability("unhandledPromptBehavior", "accept")
     options.add_experimental_option(
         "prefs",
         {
