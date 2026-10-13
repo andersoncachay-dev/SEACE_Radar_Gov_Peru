@@ -146,6 +146,24 @@ class HistoricoImportTests(unittest.TestCase):
         self.assertEqual(self.db.scalar(select(func.count()).select_from(HistContracting).where(HistContracting.dataset == "adjudicacion")), 3)
         self.assertEqual(self.db.get(HistAlert, alert.id).status, "descartada")
 
+    def test_item_awarded_next_year_survives_the_next_years_file(self) -> None:
+        # In the 2025 awards file but with its buena pro in January 2026.
+        late = self._xlsx("CONOSCE_ADJUDICACIONES2025_0.xlsx", AWARD_HEADERS, [_award("7001", "1", "SERVICIO DE INTERNET", 80000.0, "15/01/2026")])
+        self._import([late])
+        row = self.db.scalars(select(HistContracting)).one()
+        self.assertEqual((row.year, row.source_period), (2026, "2025"))
+        other = self._xlsx("CONOSCE_ADJUDICACIONES2026_0.xlsx", AWARD_HEADERS, [_award("7002", "1", "SERVICIO DE INTERNET", 50000.0, "10/03/2026")])
+        self._import([other])
+        self.assertEqual(sorted(self.db.scalars(select(HistContracting.convocatoria_code)).all()), ["7001", "7002"])
+
+    def test_same_order_in_two_monthly_files_is_kept_once(self) -> None:
+        august = self._xlsx("CONOSCE_ORDENESCOMPRAAGOSTO2026_0.xlsx", ORDER_HEADERS, [_order(9, "SERVICIO DE INTERNET", 1000.0, "30/08/2026")])
+        september = self._xlsx("CONOSCE_ORDENESCOMPRASEPTIEMBRE2026_0.xlsx", ORDER_HEADERS, [_order(9, "SERVICIO DE INTERNET", 1200.0, "30/08/2026")])
+        run = self._import([august, september])
+        self.assertEqual(run.status, "completed", run.error)
+        row = self.db.scalars(select(HistContracting)).one()
+        self.assertEqual((row.amount, row.source_period, row.month), (1200.0, "2026-09", "2026-08"))
+
     def test_query_service_lists_filters_and_export(self) -> None:
         self._import(self._fixture_files())
         listing = query_service.list_expiring(self.db, query_service.Filters(buckets=["Vence ≤ 90 días"]))

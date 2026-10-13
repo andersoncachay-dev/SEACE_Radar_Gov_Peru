@@ -207,6 +207,13 @@ def _load_file(db: Session, run: HistImportRun, classifier: Classifier, source: 
 
 def _flush(db: Session, model, rows: list[dict]) -> None:
     if rows:
+        if model is HistContracting:
+            # The same order/item can show up in two CONOSCE files (e.g. an
+            # order registered one month and issued the next): the file read
+            # last wins instead of tripping the (dataset, source_key) key.
+            for dataset in {row["dataset"] for row in rows}:
+                keys = [row["source_key"] for row in rows if row["dataset"] == dataset]
+                db.execute(delete(HistContracting).where(HistContracting.dataset == dataset, HistContracting.source_key.in_(keys)))
         now = datetime.utcnow()
         for row in rows:
             row.setdefault("created_at", now)
@@ -242,11 +249,11 @@ def _load_awards(db: Session, run, classifier: Classifier, source, path) -> int:
     """adjudicaciones (all selection procedures) and directa (adds causal)."""
     is_direct = source.dataset == "directa"
     if not is_direct:
-        db.execute(delete(HistContracting).where(HistContracting.dataset == "adjudicacion", HistContracting.year == source.year))
+        db.execute(delete(HistContracting).where(HistContracting.dataset == "adjudicacion", HistContracting.source_period == str(source.year)))
         db.commit()
     existing_direct = set()
     if is_direct:
-        existing_direct = set(db.scalars(select(HistContracting.source_key).where(HistContracting.dataset == "adjudicacion", HistContracting.year == source.year)).all())
+        existing_direct = set(db.scalars(select(HistContracting.source_key).where(HistContracting.dataset == "adjudicacion", HistContracting.source_period == str(source.year))).all())
     levels: dict[str, str] = {}
     pending: list[dict] = []
     count = 0
@@ -272,6 +279,7 @@ def _load_awards(db: Session, run, classifier: Classifier, source, path) -> int:
         pending.append({
             "dataset": "adjudicacion",
             "source_key": key[:120],
+            "source_period": str(source.year),
             "year": award_date.year,
             "month": f"{award_date.year:04d}-{award_date.month:02d}",
             "event_date": award_date,
@@ -403,7 +411,7 @@ def _load_pac(db: Session, run, classifier: Classifier, source, path) -> int:
 
 def _load_orders(db: Session, run, classifier: Classifier, source, path) -> int:
     month_key = f"{source.year:04d}-{source.month:02d}"
-    db.execute(delete(HistContracting).where(HistContracting.dataset == "orden", HistContracting.month == month_key))
+    db.execute(delete(HistContracting).where(HistContracting.dataset == "orden", HistContracting.source_period == month_key))
     db.commit()
     levels = dict(db.execute(select(HistEntity.ruc, HistEntity.government_level)).all())
     pending: list[dict] = []
@@ -429,8 +437,9 @@ def _load_orders(db: Session, run, classifier: Classifier, source, path) -> int:
         pending.append({
             "dataset": "orden",
             "source_key": key,
-            "year": source.year,
-            "month": month_key,
+            "source_period": month_key,
+            "year": issued.year,
+            "month": f"{issued.year:04d}-{issued.month:02d}",
             "event_date": issued,
             "process_group": "Menores a 8 UIT",
             "procedure": f"{conosce.to_text(row.get('tipoorden')) or 'Orden'} (≤ 8 UIT)"[:160],

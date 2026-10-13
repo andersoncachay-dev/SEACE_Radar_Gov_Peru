@@ -454,6 +454,10 @@ class HistContracting(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     dataset: Mapped[str] = mapped_column(String(20), nullable=False)  # orden | adjudicacion
     source_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    # The CONOSCE file the row came from ("2025" yearly, "2026-09" monthly).
+    # A re-import replaces by this, never by year/month: an item in the 2025
+    # awards file can have its buena pro in 2026.
+    source_period: Mapped[str] = mapped_column(String(7), default="", index=True, nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
     event_date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)  # emisión / buena pro

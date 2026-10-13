@@ -82,6 +82,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("dataset", sa.String(length=20), nullable=False),
         sa.Column("source_key", sa.String(length=120), nullable=False),
+        _str("source_period", 7, index=True),
         sa.Column("year", sa.Integer(), nullable=False),
         sa.Column("month", sa.String(length=7), nullable=False),
         sa.Column("event_date", sa.Date(), nullable=True, index=True),
