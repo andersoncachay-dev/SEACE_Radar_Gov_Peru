@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -27,6 +27,10 @@ class User(TimestampMixin, Base):
     phone_chile: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     phone_argentina: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     access_profile: Mapped[str] = mapped_column(String(40), default="peru", nullable=False)
+    # Comma-separated module_access.VALID_MODULES, independent of the
+    # per-country access_profile above.
+    module_access: Mapped[str] = mapped_column(String(80), default="radar", nullable=False)
+    historico_digest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), default="viewer", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -387,3 +391,219 @@ class OpportunityReviewComment(TimestampMixin, Base):
     opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id", ondelete="CASCADE"), index=True, nullable=False)
     author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+# --- Histórico Perú (CONOSCE open data, refreshed monthly) -----------------
+# Only rows matching an active HistKeyword are persisted; derived tables
+# (hist_expirings, hist_recurrings) and hist_alerts are rebuilt on every import.
+
+
+class HistImportRun(TimestampMixin, Base):
+    __tablename__ = "hist_import_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    origin: Mapped[str] = mapped_column(String(30), default="manual_upload", nullable=False)  # azure_job | pc_script | manual_upload | reprocess
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True, nullable=False)  # queued | running | completed | failed
+    triggered_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    data_cut_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    files_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    counts_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class HistKeyword(TimestampMixin, Base):
+    __tablename__ = "hist_keywords"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    keyword: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="Internet (sin especificar)", nullable=False)
+    # include: matches count as the rubro; review: kept but flagged "revisar";
+    # exclude: a match removes the row (known false-positive phrases).
+    kind: Mapped[str] = mapped_column(String(20), default="include", nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False)  # lower wins for category assignment
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class HistEntity(TimestampMixin, Base):
+    __tablename__ = "hist_entities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ruc: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
+    code: Mapped[str] = mapped_column(String(20), default="", index=True, nullable=False)  # CODCONSUCODE / CODIGOENTIDAD
+    name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    government_level: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    department: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    province: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    district: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+
+
+class HistContracting(TimestampMixin, Base):
+    """One purchase order <= 8 UIT, or one awarded item > 8 UIT."""
+
+    __tablename__ = "hist_contractings"
+    __table_args__ = (
+        UniqueConstraint("dataset", "source_key", name="uq_hist_contracting_source"),
+        Index("ix_hist_contracting_period", "year", "month"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dataset: Mapped[str] = mapped_column(String(20), nullable=False)  # orden | adjudicacion
+    source_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
+    event_date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)  # emisión / buena pro
+    process_group: Mapped[str] = mapped_column(String(60), default="", index=True, nullable=False)
+    procedure: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    nomenclature: Mapped[str] = mapped_column(String(200), default="", index=True, nullable=False)
+    convocatoria_code: Mapped[str] = mapped_column(String(30), default="", index=True, nullable=False)
+    item_number: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    entity_code: Mapped[str] = mapped_column(String(20), default="", index=True, nullable=False)
+    entity_ruc: Mapped[str] = mapped_column(String(20), default="", index=True, nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    department: Mapped[str] = mapped_column(String(80), default="", index=True, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="", index=True, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    reference_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    supplier_ruc: Mapped[str] = mapped_column(String(20), default="", index=True, nullable=False)
+    supplier_name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    direct_cause: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    object_type: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    government_level: Mapped[str] = mapped_column(String(40), default="", index=True, nullable=False)
+    relevance: Mapped[str] = mapped_column(String(30), default="ok", index=True, nullable=False)  # ok | revisar
+    import_run_id: Mapped[int | None] = mapped_column(ForeignKey("hist_import_runs.id", ondelete="SET NULL"), nullable=True)
+
+
+class HistContract(TimestampMixin, Base):
+    __tablename__ = "hist_contracts"
+    __table_args__ = (Index("ix_hist_contract_item", "entity_code", "convocatoria_code", "item_number"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    contract_code: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    entity_code: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    convocatoria_code: Mapped[str] = mapped_column(String(30), default="", nullable=False)
+    item_number: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    contract_number: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    amount_item: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    amount_additional: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    amount_reduction: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    amount_extension: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    amount_complementary: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    contractor_ruc: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    signed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date_updated: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class HistExpiring(TimestampMixin, Base):
+    """Derived: awarded item > 8 UIT with its (real or estimated) end date."""
+
+    __tablename__ = "hist_expirings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    contracting_id: Mapped[int] = mapped_column(ForeignKey("hist_contractings.id", ondelete="CASCADE"), unique=True, nullable=False)
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("hist_contracts.id", ondelete="SET NULL"), nullable=True)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    date_source: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    is_real_date: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    days_to_end: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    bucket: Mapped[str] = mapped_column(String(30), default="", index=True, nullable=False)
+    monthly_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    extras_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    possibly_renewed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class HistRecurring(TimestampMixin, Base):
+    """Derived: entity + supplier with <= 8 UIT orders in the last 12 months."""
+
+    __tablename__ = "hist_recurrings"
+    __table_args__ = (UniqueConstraint("entity_ruc", "supplier_ruc", name="uq_hist_recurring_pair"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_ruc: Mapped[str] = mapped_column(String(20), nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    department: Mapped[str] = mapped_column(String(80), default="", index=True, nullable=False)
+    government_level: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    supplier_ruc: Mapped[str] = mapped_column(String(20), nullable=False)
+    supplier_name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    orders_12m: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    months_12m: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    amount_12m_supplier: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    amount_12m_entity: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    suppliers_12m: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_order_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_order_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    last_order_description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    last_order_id: Mapped[int | None] = mapped_column(ForeignKey("hist_contractings.id", ondelete="SET NULL"), nullable=True)
+    pattern: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    next_purchase_date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)
+    days_to_next: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    bucket: Mapped[str] = mapped_column(String(30), default="", index=True, nullable=False)
+
+
+class HistPacItem(TimestampMixin, Base):
+    __tablename__ = "hist_pac_items"
+    __table_args__ = (UniqueConstraint("year", "entity_code", "reference_number", "item_number", name="uq_hist_pac_item"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    entity_code: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    entity_ruc: Mapped[str] = mapped_column(String(20), default="", index=True, nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    department: Mapped[str] = mapped_column(String(80), default="", index=True, nullable=False)
+    government_level: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    version: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    reference_number: Mapped[str] = mapped_column(String(30), default="", nullable=False)
+    process_description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    process_type: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    process_group: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    object_type: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    item_number: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    item_description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    unit: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    item_department: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    province: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    district: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    planned_month: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    published_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    situation: Mapped[str] = mapped_column(String(60), default="", index=True, nullable=False)
+    already_awarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    relevance: Mapped[str] = mapped_column(String(30), default="ok", nullable=False)
+
+
+class HistAlert(TimestampMixin, Base):
+    __tablename__ = "hist_alerts"
+    __table_args__ = (UniqueConstraint("kind", "ref_key", name="uq_hist_alert_ref"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # vencimiento | recurrente | pac
+    ref_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    expiring_id: Mapped[int | None] = mapped_column(ForeignKey("hist_expirings.id", ondelete="SET NULL"), nullable=True)
+    recurring_id: Mapped[int | None] = mapped_column(ForeignKey("hist_recurrings.id", ondelete="SET NULL"), nullable=True)
+    pac_item_id: Mapped[int | None] = mapped_column(ForeignKey("hist_pac_items.id", ondelete="SET NULL"), nullable=True)
+    priority: Mapped[str] = mapped_column(String(4), default="P4", index=True, nullable=False)
+    score: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    title: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    detail: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    department: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    due_date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="nueva", index=True, nullable=False)  # nueva | vista | en_gestion | descartada
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
+    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    dismissed_due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    first_seen_import_id: Mapped[int | None] = mapped_column(ForeignKey("hist_import_runs.id", ondelete="SET NULL"), nullable=True)
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from .access_profile import has_country_access, parse_access_profile
 from .database import get_db
 from .models import User
+from .module_access import has_module_access
 from .radar_config import country_for_source
 from .security import parse_access_token
 
@@ -51,3 +52,17 @@ def source_access_condition(column, current_user: User):
     if "peru" in countries:
         conditions.append(and_(~column.ilike("mercado_publico%"), ~column.ilike("comprar_argentina%")))
     return or_(*conditions)
+
+
+def user_has_module(current_user: User, module: str) -> bool:
+    # Admins always reach every module: they run imports and manage access.
+    return current_user.role == "admin" or has_module_access(current_user.module_access, module)
+
+
+def require_module(module: str):
+    def dependency(current_user: User = Depends(get_current_user)) -> User:
+        if not user_has_module(current_user, module):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Este modulo no esta habilitado para tu perfil")
+        return current_user
+
+    return dependency

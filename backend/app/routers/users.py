@@ -67,6 +67,8 @@ def create_user(payload: UserCreate, _: User = Depends(require_admin), db: Sessi
         phone_chile=_normalize_phone(payload.phone_chile, "56", "Chile"),
         phone_argentina=_normalize_phone(payload.phone_argentina, "54", "Argentina", (10, 11)),
         access_profile=payload.access_profile,
+        module_access=payload.module_access,
+        historico_digest=payload.historico_digest,
         password_hash=hash_password(payload.password),
         role=payload.role,
     )
@@ -87,7 +89,7 @@ def update_user(user_id: int, payload: UserUpdate, _: User = Depends(require_adm
         if existing:
             raise HTTPException(status_code=409, detail="El correo ya esta registrado")
         user.email = normalized_email
-    for field in ["first_name", "last_name", "position", "address", "access_profile", "role", "is_active"]:
+    for field in ["first_name", "last_name", "position", "address", "access_profile", "module_access", "historico_digest", "role", "is_active"]:
         value = getattr(payload, field)
         if value is not None:
             setattr(user, field, value.strip() if isinstance(value, str) else value)

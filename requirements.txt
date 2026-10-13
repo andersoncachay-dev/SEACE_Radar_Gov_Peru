@@ -1,6 +1,7 @@
 streamlit
 pandas
 openpyxl
+python-calamine
 xlrd
 python-dateutil
 requests

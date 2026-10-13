@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, TypeAdapter, model_validator
 
 from .access_profile import format_access_profile, parse_access_profile
+from .module_access import DEFAULT_MODULES, format_module_access, parse_module_access
 
 
 class ORMModel(BaseModel):
@@ -41,6 +42,8 @@ class UserCreate(BaseModel):
     phone_chile: str = Field(default="", max_length=32)
     phone_argentina: str = Field(default="", max_length=32)
     access_profile: str = "peru"
+    module_access: str = DEFAULT_MODULES
+    historico_digest: bool = False
     password: str = Field(min_length=8)
     role: str = "viewer"
 
@@ -50,6 +53,10 @@ class UserCreate(BaseModel):
         if not countries:
             raise ValueError("Selecciona al menos un país (Perú, Chile o Argentina)")
         self.access_profile = format_access_profile(countries)
+        modules = parse_module_access(self.module_access)
+        if not modules:
+            raise ValueError("Selecciona al menos un módulo (Radar en vivo o Histórico Perú)")
+        self.module_access = format_module_access(modules)
         if self.role not in {"viewer", "admin"}:
             raise ValueError("El rol debe ser usuario o administrador")
         if "peru" in countries and not self.phone_peru.strip():
@@ -71,6 +78,8 @@ class UserUpdate(BaseModel):
     phone_chile: str | None = Field(default=None, max_length=32)
     phone_argentina: str | None = Field(default=None, max_length=32)
     access_profile: str | None = None
+    module_access: str | None = None
+    historico_digest: bool | None = None
     role: str | None = None
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=8)
@@ -82,6 +91,11 @@ class UserUpdate(BaseModel):
             if not countries:
                 raise ValueError("Selecciona al menos un país (Perú, Chile o Argentina)")
             self.access_profile = format_access_profile(countries)
+        if self.module_access is not None:
+            modules = parse_module_access(self.module_access)
+            if not modules:
+                raise ValueError("Selecciona al menos un módulo (Radar en vivo o Histórico Perú)")
+            self.module_access = format_module_access(modules)
         if self.role is not None and self.role not in {"viewer", "admin"}:
             raise ValueError("El rol debe ser usuario o administrador")
         return self
@@ -99,6 +113,8 @@ class UserOut(ORMModel):
     phone_chile: str
     phone_argentina: str
     access_profile: str
+    module_access: str
+    historico_digest: bool
     role: str
     is_active: bool
     created_at: datetime
