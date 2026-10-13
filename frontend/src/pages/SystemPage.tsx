@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, CountryCode, LegalDocumentRecord, RadarKeyword, Run, SchedulerIntervalConfig, TrackingDateRefreshStatus } from "../api";
+import { HistoricoAdmin } from "./historico/HistoricoAdmin";
 import { ConfidentialityContent, Country, Empty, LegalDialog, LegalDocumentsMap, LegalView, LockIcon, formatDate, updateIntervalLabel, useRadarKeywords } from "../shared";
 
 export function SchedulerScheduleAdmin({ token }: { token: string }) {
@@ -453,6 +454,7 @@ export function System({
       <SchedulerScheduleAdmin token={token} />
       <RadarKeywordsAdmin token={token} onOpenLegal={onOpenLegal} onSearchKeyword={onSearchKeyword} />
       <TrackingDateRefreshAdmin token={token} />
+      <HistoricoAdmin token={token} />
       <section className="panel scoring-admin-panel" aria-labelledby="scoring-admin-title">
         <div className="scoring-admin-heading">
           <div>
