@@ -12,6 +12,11 @@ const Users = lazy(() => import("./pages/UsersPage"));
 const System = lazy(() => import("./pages/SystemPage"));
 const OpportunityTrackingChile = lazy(() => import("./pages/OpportunityTrackingPage"));
 const OpportunityTrackingPeru = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingPeru })));
+const HistoricoResumen = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoResumen })));
+const HistoricoContrataciones = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoContrataciones })));
+const HistoricoVencimientos = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoVencimientos })));
+const HistoricoPac = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoPac })));
+const HistoricoAlertas = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoAlertas })));
 const OpportunityTrackingArgentina = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingArgentina })));
 
 type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Procesos COMPR.AR Argentina" | "Publicaciones COMPR.AR Argentina" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Histórico Procesos Eliminados AR" | "Alertas" | "Seguimiento de Oportunidades Peru" | "Seguimiento de Oportunidades Chile" | "Seguimiento de Oportunidades Argentina" | "Usuarios" | "Sistema" | HistoricoPage;
@@ -707,6 +712,11 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
         {currentUser && page === "Seguimiento de Oportunidades Peru" ? <OpportunityTrackingPeru token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
         {currentUser && page === "Seguimiento de Oportunidades Chile" ? <OpportunityTrackingChile token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
         {currentUser && page === "Seguimiento de Oportunidades Argentina" ? <OpportunityTrackingArgentina token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
+        {currentUser && page === "Resumen Histórico Perú" ? <HistoricoResumen token={token} onGo={setPage} /> : null}
+        {currentUser && page === "Historial de Contrataciones" ? <HistoricoContrataciones token={token} /> : null}
+        {currentUser && page === "Contratos por Vencer" ? <HistoricoVencimientos token={token} /> : null}
+        {currentUser && page === "PAC Perú" ? <HistoricoPac token={token} /> : null}
+        {currentUser && page === "Alertas Histórico Perú" ? <HistoricoAlertas token={token} /> : null}
         {page === "Usuarios" && currentUser?.role === "admin" ? <Users token={token} currentUserId={currentUser.id} /> : null}
         {page === "Sistema" ? (
           <System

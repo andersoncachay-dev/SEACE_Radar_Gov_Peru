@@ -865,6 +865,29 @@ export type HistoricoFilters = {
   relevance?: "ok" | "revisar";
   real_date_only?: boolean;
   hide_renewed?: boolean;
+  min_amount?: number;
+};
+
+export type HistoricoAlertPreference = {
+  configured?: boolean;
+  kinds: string[];
+  categories: string[];
+  departments: string[];
+  government_levels: string[];
+  process_groups: string[];
+  keywords: string[];
+  min_amount: number;
+  min_priority: HistoricoPriority;
+  historico_digest: boolean;
+};
+
+export type HistoricoPacSummary = {
+  totals: { items: number; entities: number; already_awarded: number; to_call: number };
+  by_month: Array<{ key: number; count: number }>;
+  by_process_group: Array<{ key: string; count: number }>;
+  by_department: Array<{ key: string; count: number }>;
+  by_situation: Array<{ key: string; count: number }>;
+  by_category: Array<{ key: string; count: number }>;
 };
 
 export type HistoricoStatus = {
@@ -1042,6 +1065,9 @@ export type HistoricoAlert = {
   department: string;
   amount: number;
   due_date: string | null;
+  category: string;
+  process_group: string;
+  government_level: string;
   status: HistoricoAlertStatus;
   assignee_id: number | null;
   expiring_id: number | null;
@@ -1108,10 +1134,25 @@ export const historicoApi = {
     if (!response.ok) throw new ApiError("No se pudo generar el archivo Excel", response.status);
     return response.blob();
   },
-  alerts: (token: string, params: { kinds?: string[]; priorities?: string[]; statuses?: string[]; departments?: string[]; q?: string; page?: number; page_size?: number }) => {
-    const { page, page_size, ...filters } = params;
-    return request<HistoricoAlertPage>(`/historico/alerts/list${historicoQuery(filters as HistoricoFilters, { page, page_size })}`, token, { cache: "no-store" });
+  runway: (token: string, filters: HistoricoFilters) => request<HistoricoRunwayItem[]>(`/historico/vencimientos-runway${historicoQuery(filters)}`, token),
+  pacSummary: (token: string, filters: HistoricoFilters) => request<HistoricoPacSummary>(`/historico/pac-summary${historicoQuery(filters)}`, token),
+  alerts: (token: string, params: { kinds?: string[]; priorities?: string[]; statuses?: string[]; departments?: string[]; categories?: string[]; q?: string; mine?: boolean; page?: number; page_size?: number }) => {
+    const { page, page_size, mine, ...filters } = params;
+    return request<HistoricoAlertPage>(`/historico/alerts/list${historicoQuery(filters as HistoricoFilters, { page, page_size, mine: mine ? "true" : undefined })}`, token, { cache: "no-store" });
   },
+  alertPreferences: (token: string) => request<HistoricoAlertPreference>("/historico/alerts/preferences", token, { cache: "no-store" }),
+  saveAlertPreferences: (token: string, preference: HistoricoAlertPreference) =>
+    request<HistoricoAlertPreference>("/historico/alerts/preferences", token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(preference),
+    }),
+  previewAlertPreferences: (token: string, preference: HistoricoAlertPreference) =>
+    request<{ total: number; counts: Record<HistoricoPriority, number> }>("/historico/alerts/preview", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(preference),
+    }),
   updateAlert: (token: string, id: number, payload: { status?: HistoricoAlertStatus; assignee_id?: number | null }) =>
     request<HistoricoAlert>(`/historico/alerts/${id}`, token, {
       method: "PATCH",
