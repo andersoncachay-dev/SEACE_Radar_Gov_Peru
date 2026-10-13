@@ -204,6 +204,22 @@ export function formatAccessProfile(countries: CountryCode[]): AccessProfile {
   return ACCESS_PROFILE_COUNTRIES.filter((country) => selected.has(country)).join(",");
 }
 
+// Product modules, independent of the per-country access_profile. Admins
+// always reach every module (the backend's require_module enforces it too).
+export type AppModule = "radar" | "historico_peru";
+export type ModuleAccess = string;
+export const APP_MODULES: AppModule[] = ["radar", "historico_peru"];
+
+export function parseModuleAccess(value: ModuleAccess | undefined | null): AppModule[] {
+  const selected = new Set((value || "").split(",").map((item) => item.trim()));
+  return APP_MODULES.filter((module) => selected.has(module));
+}
+
+export function formatModuleAccess(modules: AppModule[]): ModuleAccess {
+  const selected = new Set(modules);
+  return APP_MODULES.filter((module) => selected.has(module)).join(",");
+}
+
 export type UserRecord = {
   id: number;
   email: string;
@@ -216,6 +232,8 @@ export type UserRecord = {
   phone_chile: string;
   phone_argentina: string;
   access_profile: AccessProfile;
+  module_access: ModuleAccess;
+  historico_digest: boolean;
   role: "viewer" | "admin";
   is_active: boolean;
   created_at: string;
@@ -232,6 +250,8 @@ export type UserCreatePayload = {
   phone_chile: string;
   phone_argentina: string;
   access_profile: AccessProfile;
+  module_access: ModuleAccess;
+  historico_digest: boolean;
   role: "viewer" | "admin";
 };
 
@@ -823,4 +843,312 @@ export const api = {
     if (!response.ok) throw new ApiError("No se pudo generar el archivo Excel", response.status);
     return response.blob();
   },
+};
+
+// --- Histórico Perú (CONOSCE open data) -------------------------------------
+
+export type HistoricoKind = "contrataciones" | "vencimientos" | "recurrentes" | "pac";
+export type HistoricoPriority = "P1" | "P2" | "P3" | "P4";
+
+export type HistoricoFilters = {
+  years?: number[];
+  months?: number[];
+  departments?: string[];
+  categories?: string[];
+  process_groups?: string[];
+  government_levels?: string[];
+  buckets?: string[];
+  patterns?: string[];
+  situations?: string[];
+  datasets?: string[];
+  q?: string;
+  relevance?: "ok" | "revisar";
+  real_date_only?: boolean;
+  hide_renewed?: boolean;
+};
+
+export type HistoricoStatus = {
+  latest_run_id: number | null;
+  latest_status: string | null;
+  latest_completed_at: string | null;
+  data_cut_date: string | null;
+  refresh_day: number;
+  refresh_requested: boolean;
+  import_due: boolean;
+  needs_fallback: boolean;
+  completed_this_month: boolean;
+};
+
+export type HistoricoFilterOptions = {
+  years: number[];
+  departments: string[];
+  categories: string[];
+  process_groups: string[];
+  government_levels: string[];
+  expiring_buckets: string[];
+  recurring_buckets: string[];
+  recurring_patterns: string[];
+  pac_situations: string[];
+  pac_years: number[];
+};
+
+export type HistoricoGroup = { key: string; amount: number; count: number };
+
+export type HistoricoRunwayItem = {
+  id: number;
+  end_date: string;
+  days: number;
+  amount: number;
+  entity_name: string;
+  department: string;
+  is_real_date: boolean;
+  possibly_renewed: boolean;
+  priority: HistoricoPriority;
+};
+
+export type HistoricoSummary = {
+  totals: { amount: number; count: number; entities: number; suppliers: number };
+  by_month: HistoricoGroup[];
+  by_process_group: HistoricoGroup[];
+  by_category: HistoricoGroup[];
+  by_government_level: HistoricoGroup[];
+  by_department: HistoricoGroup[];
+  top_entities: Array<{ ruc: string; name: string; department: string; amount: number; count: number }>;
+  top_suppliers: Array<{ ruc: string; name: string; amount: number; count: number; entities: number }>;
+  expiring_buckets: HistoricoGroup[];
+  recurring_buckets: HistoricoGroup[];
+  runway: HistoricoRunwayItem[];
+};
+
+export type HistoricoContracting = {
+  id: number;
+  dataset: "orden" | "adjudicacion";
+  year: number;
+  month: string;
+  date: string | null;
+  process_group: string;
+  procedure: string;
+  nomenclature: string;
+  entity_ruc: string;
+  entity_name: string;
+  department: string;
+  description: string;
+  category: string;
+  amount: number;
+  reference_amount: number;
+  supplier_ruc: string;
+  supplier_name: string;
+  status: string;
+  direct_cause: string;
+  object_type: string;
+  government_level: string;
+  relevance: string;
+};
+
+export type HistoricoExpiring = HistoricoContracting & {
+  contracting_id: number;
+  start_date: string | null;
+  end_date: string;
+  date_source: string;
+  is_real_date: boolean;
+  days_to_end: number;
+  bucket: string;
+  monthly_amount: number;
+  extras_amount: number;
+  possibly_renewed: boolean;
+  priority: HistoricoPriority | null;
+  contract_number: string;
+  contract_url: string;
+};
+
+export type HistoricoRecurring = {
+  id: number;
+  entity_ruc: string;
+  entity_name: string;
+  department: string;
+  government_level: string;
+  supplier_ruc: string;
+  supplier_name: string;
+  category: string;
+  orders_12m: number;
+  months_12m: number;
+  amount_12m_supplier: number;
+  amount_12m_entity: number;
+  suppliers_12m: number;
+  last_order_date: string | null;
+  last_order_amount: number;
+  last_order_description: string;
+  pattern: string;
+  next_purchase_date: string | null;
+  days_to_next: number;
+  bucket: string;
+};
+
+export type HistoricoPacItem = {
+  id: number;
+  year: number;
+  entity_ruc: string;
+  entity_name: string;
+  department: string;
+  government_level: string;
+  version: string;
+  reference_number: string;
+  process_description: string;
+  process_type: string;
+  process_group: string;
+  object_type: string;
+  item_number: string;
+  item_description: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  item_department: string;
+  province: string;
+  district: string;
+  planned_month: number;
+  published_at: string | null;
+  situation: string;
+  already_awarded: boolean;
+};
+
+export type HistoricoRowByKind = {
+  contrataciones: HistoricoContracting;
+  vencimientos: HistoricoExpiring;
+  recurrentes: HistoricoRecurring;
+  pac: HistoricoPacItem;
+};
+
+export type HistoricoPage<T> = { items: T[]; total: number; amount: number; page: number; page_size: number };
+
+export type HistoricoDetail = {
+  kind: HistoricoKind;
+  record: Record<string, unknown> & { orders?: HistoricoContracting[] };
+  entity_history: Array<{ year: number; amount: number; count: number }>;
+  entity_suppliers: Array<{ ruc: string; name: string; amount: number; count: number; last_date: string | null }>;
+  related_awards: HistoricoContracting[];
+};
+
+export type HistoricoAlertStatus = "nueva" | "vista" | "en_gestion" | "descartada";
+
+export type HistoricoAlert = {
+  id: number;
+  kind: "vencimiento" | "recurrente" | "pac";
+  priority: HistoricoPriority;
+  priority_label: string;
+  score: number;
+  title: string;
+  detail: string;
+  entity_name: string;
+  department: string;
+  amount: number;
+  due_date: string | null;
+  status: HistoricoAlertStatus;
+  assignee_id: number | null;
+  expiring_id: number | null;
+  recurring_id: number | null;
+  pac_item_id: number | null;
+  created_at: string;
+  is_active: boolean;
+};
+
+export type HistoricoAlertPage = HistoricoPage<HistoricoAlert> & { counts: Record<HistoricoPriority, number> };
+
+export type HistoricoKeyword = {
+  id: number;
+  keyword: string;
+  category: string;
+  kind: "include" | "review" | "exclude";
+  priority: number;
+  is_active: boolean;
+};
+
+export type HistoricoImportRun = {
+  id: number;
+  origin: string;
+  status: string;
+  progress: number;
+  message: string;
+  error: string;
+  files: string[];
+  counts: Record<string, number | string[]>;
+  data_cut_date: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+function historicoQuery(filters: HistoricoFilters = {}, extra: Record<string, string | number | undefined> = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (Array.isArray(value)) value.forEach((item) => params.append(key, String(item)));
+    else if (typeof value === "boolean") {
+      if (value) params.set(key, "true");
+    } else if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  Object.entries(extra).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+export const historicoApi = {
+  status: (token: string) => request<HistoricoStatus>("/historico/status", token, { cache: "no-store" }),
+  filters: (token: string) => request<HistoricoFilterOptions>("/historico/filters", token),
+  summary: (token: string, filters: HistoricoFilters) => request<HistoricoSummary>(`/historico/summary${historicoQuery(filters)}`, token),
+  list: <K extends HistoricoKind>(token: string, kind: K, filters: HistoricoFilters, page = 1, pageSize = 50, sort?: string) =>
+    request<HistoricoPage<HistoricoRowByKind[K]>>(`/historico/${kind}${historicoQuery(filters, { page, page_size: pageSize, sort })}`, token),
+  buckets: (token: string, kind: "vencimientos" | "recurrentes", filters: HistoricoFilters) =>
+    request<HistoricoGroup[]>(`/historico/${kind}/buckets${historicoQuery(filters)}`, token),
+  detail: (token: string, kind: HistoricoKind, id: number) => request<HistoricoDetail>(`/historico/${kind}/${id}`, token),
+  exportXlsx: async (token: string, kind: HistoricoKind, filters: HistoricoFilters, sort?: string) => {
+    const response = await fetch(`${API_URL}/historico/${kind}/export.xlsx${historicoQuery(filters, { sort })}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new ApiError("No se pudo generar el archivo Excel", response.status);
+    return response.blob();
+  },
+  alerts: (token: string, params: { kinds?: string[]; priorities?: string[]; statuses?: string[]; departments?: string[]; q?: string; page?: number; page_size?: number }) => {
+    const { page, page_size, ...filters } = params;
+    return request<HistoricoAlertPage>(`/historico/alerts/list${historicoQuery(filters as HistoricoFilters, { page, page_size })}`, token, { cache: "no-store" });
+  },
+  updateAlert: (token: string, id: number, payload: { status?: HistoricoAlertStatus; assignee_id?: number | null }) =>
+    request<HistoricoAlert>(`/historico/alerts/${id}`, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  keywords: (token: string) => request<HistoricoKeyword[]>("/historico/admin/keywords", token),
+  createKeyword: (token: string, payload: Omit<HistoricoKeyword, "id">) =>
+    request<HistoricoKeyword>("/historico/admin/keywords", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  updateKeyword: (token: string, id: number, payload: Omit<HistoricoKeyword, "id">) =>
+    request<HistoricoKeyword>(`/historico/admin/keywords/${id}`, token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deleteKeyword: (token: string, id: number) => request<void>(`/historico/admin/keywords/${id}`, token, { method: "DELETE" }),
+  imports: (token: string) => request<{ status: HistoricoStatus; runs: HistoricoImportRun[] }>("/historico/admin/imports", token, { cache: "no-store" }),
+  importRun: (token: string, id: number) => request<HistoricoImportRun>(`/historico/admin/imports/${id}`, token, { cache: "no-store" }),
+  requestRefresh: (token: string) => request<HistoricoStatus>("/historico/admin/refresh", token, { method: "POST" }),
+  updateSettings: (token: string, refreshDay: number) =>
+    request<HistoricoStatus>("/historico/admin/settings", token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_day: refreshDay }),
+    }),
+  createUpload: (token: string) => request<HistoricoImportRun>("/historico/admin/imports", token, { method: "POST" }),
+  uploadFile: (token: string, runId: number, file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    return request<{ filename: string; dataset: string; year: number | null; month: number | null }>(`/historico/admin/imports/${runId}/files`, token, {
+      method: "POST",
+      body,
+    });
+  },
+  processUpload: (token: string, runId: number) => request<HistoricoImportRun>(`/historico/admin/imports/${runId}/process`, token, { method: "POST" }),
 };

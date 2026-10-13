@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, AccessProfile, CountryCode, formatAccessProfile, parseAccessProfile, UserCreatePayload, UserRecord } from "../api";
+import { api, AccessProfile, AppModule, CountryCode, formatAccessProfile, formatModuleAccess, parseAccessProfile, parseModuleAccess, UserCreatePayload, UserRecord } from "../api";
 import { Country, CountryFlagIcon, Empty, userInitials } from "../shared";
 
 export const emptyUserForm: UserCreatePayload = {
@@ -13,8 +13,15 @@ export const emptyUserForm: UserCreatePayload = {
   phone_chile: "",
   phone_argentina: "",
   access_profile: "peru",
+  module_access: "radar",
+  historico_digest: false,
   role: "viewer",
 };
+
+export const moduleOptions: Array<{ value: AppModule; title: string; description: string }> = [
+  { value: "radar", title: "Radar en vivo", description: "Procesos vigentes, oportunidades y seguimiento por país" },
+  { value: "historico_peru", title: "Histórico Perú", description: "Contrataciones, contratos por vencer y PAC (datos OECE)" },
+];
 
 export const accessProfileOptions: Array<{ value: CountryCode; title: string; description: string; flags: Country[] }> = [
   { value: "peru", title: "Perfil Perú", description: "Inicio Perú, Oportunidades Perú y alertas", flags: ["Peru"] },
@@ -96,6 +103,8 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
       phone_chile: userLocalPhone(user.phone_chile, "56"),
       phone_argentina: userLocalPhone(user.phone_argentina, "54"),
       access_profile: user.access_profile,
+      module_access: user.module_access || "radar",
+      historico_digest: Boolean(user.historico_digest),
       role: user.role,
     });
     setError("");
@@ -168,6 +177,15 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
   const needsChilePhone = selectedCountries.includes("chile");
   const needsArgentinaPhone = selectedCountries.includes("argentina");
 
+  const selectedModules = parseModuleAccess(form.module_access);
+
+  function toggleModule(module: AppModule) {
+    const next = selectedModules.includes(module) ? selectedModules.filter((value) => value !== module) : [...selectedModules, module];
+    if (!next.length) return;
+    updateField("module_access", formatModuleAccess(next));
+    if (!next.includes("historico_peru")) updateField("historico_digest", false);
+  }
+
   function toggleCountry(country: CountryCode) {
     const current = parseAccessProfile(form.access_profile);
     const next = current.includes(country) ? current.filter((value) => value !== country) : [...current, country];
@@ -215,6 +233,30 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
                 </label>
               ))}
             </div>
+          </fieldset>
+
+          <fieldset className="profile-fieldset">
+            <legend>Módulos <span className="field-hint">Los administradores acceden a todos</span></legend>
+            <div className="profile-choice-grid">
+              {moduleOptions.map((option) => (
+                <label className={`profile-choice ${selectedModules.includes(option.value) ? "selected" : ""}`} key={option.value}>
+                  <input
+                    type="checkbox"
+                    name="module-access"
+                    value={option.value}
+                    checked={selectedModules.includes(option.value)}
+                    onChange={() => toggleModule(option.value)}
+                  />
+                  <span><strong>{option.title}</strong><small>{option.description}</small></span>
+                </label>
+              ))}
+            </div>
+            {selectedModules.includes("historico_peru") || form.role === "admin" ? (
+              <label className="digest-toggle">
+                <input type="checkbox" checked={form.historico_digest} onChange={(event) => updateField("historico_digest", event.target.checked)} />
+                <span>Recibir el resumen semanal de alertas de Histórico Perú (lunes, 8:00)</span>
+              </label>
+            ) : null}
           </fieldset>
 
           <div className="user-fields">

@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, Alert, AlertRule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
+import { api, Alert, AlertRule, APP_MODULES, AppModule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, parseModuleAccess, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
 import "./styles.css";
 import { Country, CountryFlagIcon, LegalDialog, LegalDocumentsMap, LegalView, countryFlagUrls, userInitials } from "./shared";
 
@@ -14,9 +14,21 @@ const OpportunityTrackingChile = lazy(() => import("./pages/OpportunityTrackingP
 const OpportunityTrackingPeru = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingPeru })));
 const OpportunityTrackingArgentina = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingArgentina })));
 
-type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Procesos COMPR.AR Argentina" | "Publicaciones COMPR.AR Argentina" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Histórico Procesos Eliminados AR" | "Alertas" | "Seguimiento de Oportunidades Peru" | "Seguimiento de Oportunidades Chile" | "Seguimiento de Oportunidades Argentina" | "Usuarios" | "Sistema";
+type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Procesos COMPR.AR Argentina" | "Publicaciones COMPR.AR Argentina" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Histórico Procesos Eliminados AR" | "Alertas" | "Seguimiento de Oportunidades Peru" | "Seguimiento de Oportunidades Chile" | "Seguimiento de Oportunidades Argentina" | "Usuarios" | "Sistema" | HistoricoPage;
 
-type NavIconName = "home" | "target" | "globe" | "database" | "money" | "bell" | "users" | "settings";
+type HistoricoPage = "Resumen Histórico Perú" | "Historial de Contrataciones" | "Contratos por Vencer" | "PAC Perú" | "Alertas Histórico Perú";
+
+type NavIconName = "home" | "target" | "globe" | "database" | "money" | "bell" | "users" | "settings" | "calendar" | "chart" | "clipboard";
+
+// Histórico Perú is a separate product module (monthly CONOSCE open data),
+// gated by User.module_access rather than by the per-country access_profile.
+const historicoPages: HistoricoPage[] = ["Resumen Histórico Perú", "Historial de Contrataciones", "Contratos por Vencer", "PAC Perú", "Alertas Histórico Perú"];
+const adminPages: Page[] = ["Usuarios", "Sistema"];
+const moduleLabels: Record<AppModule, string> = { radar: "Radar en vivo", historico_peru: "Histórico Perú" };
+
+function isHistoricoPage(page: Page): page is HistoricoPage {
+  return (historicoPages as Page[]).includes(page);
+}
 
 const pagesByCountry: Record<CountryCode, Page[]> = {
   peru: ["Inicio Peru", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Alertas", "Seguimiento de Oportunidades Peru"],
@@ -44,14 +56,20 @@ const navIcons: Record<Page, NavIconName> = {
   "Seguimiento de Oportunidades Argentina": "target",
   Usuarios: "users",
   Sistema: "settings",
+  "Resumen Histórico Perú": "chart",
+  "Historial de Contrataciones": "database",
+  "Contratos por Vencer": "calendar",
+  "PAC Perú": "clipboard",
+  "Alertas Histórico Perú": "bell",
 };
 
-const launcherNavGroups: Array<{ label: string; pages: Page[] }> = [
-  { label: "Perú", pages: ["Inicio Peru", "Oportunidades OCDS Peru", "Oportunidades", "Histórico Procesos Eliminados PE", "Seguimiento de Oportunidades Peru"] },
-  { label: "Chile", pages: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Seguimiento de Oportunidades Chile"] },
-  { label: "Argentina", pages: ["Inicio Argentina", "Procesos COMPR.AR Argentina", "Histórico Procesos Eliminados AR", "Seguimiento de Oportunidades Argentina"] },
-  { label: "Operación", pages: ["Alertas"] },
-  { label: "Administración", pages: ["Usuarios", "Sistema"] },
+const launcherNavGroups: Array<{ label: string; pages: Page[]; module: AppModule | "admin" }> = [
+  { label: "Perú", pages: ["Inicio Peru", "Oportunidades OCDS Peru", "Oportunidades", "Histórico Procesos Eliminados PE", "Seguimiento de Oportunidades Peru"], module: "radar" },
+  { label: "Chile", pages: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Seguimiento de Oportunidades Chile"], module: "radar" },
+  { label: "Argentina", pages: ["Inicio Argentina", "Procesos COMPR.AR Argentina", "Histórico Procesos Eliminados AR", "Seguimiento de Oportunidades Argentina"], module: "radar" },
+  { label: "Operación", pages: ["Alertas"], module: "radar" },
+  { label: "Histórico Perú", pages: historicoPages, module: "historico_peru" },
+  { label: "Administración", pages: adminPages, module: "admin" },
 ];
 
 const launcherLabels: Record<Page, string> = {
@@ -72,6 +90,11 @@ const launcherLabels: Record<Page, string> = {
   "Seguimiento de Oportunidades Argentina": "Seguimiento de Oportunidades Argentina",
   Usuarios: "Usuarios",
   Sistema: "Sistema",
+  "Resumen Histórico Perú": "Resumen",
+  "Historial de Contrataciones": "Historial de contrataciones",
+  "Contratos por Vencer": "Contratos por vencer",
+  "PAC Perú": "PAC",
+  "Alertas Histórico Perú": "Centro de alertas",
 };
 
 const launcherDescriptions: Record<Page, string> = {
@@ -92,6 +115,11 @@ const launcherDescriptions: Record<Page, string> = {
   "Seguimiento de Oportunidades Argentina": "Fases, etapas y responsables — Argentina",
   Usuarios: "Accesos, perfiles y permisos",
   Sistema: "Ejecuciones y configuración",
+  "Resumen Histórico Perú": "Cuánto, quién y dónde compra el Estado",
+  "Historial de Contrataciones": "Órdenes ≤ 8 UIT y adjudicaciones desde 2023",
+  "Contratos por Vencer": "Vencimientos > 8 UIT y compras recurrentes",
+  "PAC Perú": "Procesos programados en el Plan Anual",
+  "Alertas Histórico Perú": "Prioridades comerciales del mes",
 };
 
 function NavIcon({ name }: { name: NavIconName }) {
@@ -105,6 +133,9 @@ function NavIcon({ name }: { name: NavIconName }) {
       {name === "money" ? <><circle {...common} cx="12" cy="12" r="9" /><path {...common} d="M15.5 8.5C14.8 7.5 13.6 7 12 7c-2 0-3.5 1-3.5 2.5S10 12 12 12s3.5 1 3.5 2.5S14 17 12 17c-1.6 0-2.8-.5-3.5-1.5M12 5v14" /></> : null}
       {name === "bell" ? <><path {...common} d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path {...common} d="M10 21h4" /></> : null}
       {name === "users" ? <><path {...common} d="M16 21v-2a4 4 0 0 0-8 0v2" /><circle {...common} cx="12" cy="7" r="4" /><path {...common} d="M22 21v-2a4 4 0 0 0-3-3.8M16 3.2a4 4 0 0 1 0 7.6" /></> : null}
+      {name === "calendar" ? <><rect {...common} x="3.5" y="5" width="17" height="15" rx="2" /><path {...common} d="M3.5 10h17M8 3v4M16 3v4M8 14h3" /></> : null}
+      {name === "chart" ? <path {...common} d="M4 20V10M10 20V4M16 20v-7M22 20H2" /> : null}
+      {name === "clipboard" ? <><rect {...common} x="5" y="4" width="14" height="17" rx="2" /><path {...common} d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3" /></> : null}
       {name === "settings" ? <><path {...common} d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z" /><path {...common} d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.7 1.7 0 0 0-2 .2 1.7 1.7 0 0 0-.8 1.7V22H9.2v-.2a1.7 1.7 0 0 0-.8-1.7 1.7 1.7 0 0 0-2-.2l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.4-1.1H3v-4h.2a1.7 1.7 0 0 0 1.4-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.7 1.7 0 0 0 2-.2A1.7 1.7 0 0 0 9.2 2V2h5.6v.2a1.7 1.7 0 0 0 .8 1.7 1.7 1.7 0 0 0 2 .2l.2-.1 2 3.4-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.4 1.1h.2v4h-.2A1.7 1.7 0 0 0 19.4 15Z" /></> : null}
     </svg>
   );
@@ -380,14 +411,25 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   const launcherButtonRef = useRef<HTMLButtonElement | null>(null);
   const backend = useBackend(token);
   const userName = currentUser?.full_name || "Cargando usuario…";
+  const allowedModules = useMemo<AppModule[]>(() => {
+    if (!currentUser) return ["radar"];
+    if (currentUser.role === "admin") return [...APP_MODULES];
+    const modules = parseModuleAccess(currentUser.module_access);
+    return modules.length ? modules : ["radar"];
+  }, [currentUser]);
   const visibleNav = useMemo(() => {
     const countries = currentUser ? parseAccessProfile(currentUser.access_profile) : (["peru"] as CountryCode[]);
-    const allowed = Array.from(new Set(countries.flatMap((country) => pagesByCountry[country])));
-    return currentUser?.role === "admin" ? [...allowed, "Usuarios", "Sistema"] as Page[] : allowed;
-  }, [currentUser]);
+    const radarPages = allowedModules.includes("radar") ? countries.flatMap((country) => pagesByCountry[country]) : [];
+    const moduleHistorico = allowedModules.includes("historico_peru") ? historicoPages : [];
+    const allowed = Array.from(new Set<Page>([...radarPages, ...moduleHistorico]));
+    return currentUser?.role === "admin" ? [...allowed, ...adminPages] : allowed;
+  }, [currentUser, allowedModules]);
+  const activeModule: AppModule = isHistoricoPage(page) ? "historico_peru" : "radar";
+  const [launcherModule, setLauncherModule] = useState<AppModule>(activeModule);
   const visibleLauncherGroups = useMemo(() => launcherNavGroups
+    .filter((group) => group.module === "admin" || group.module === launcherModule)
     .map((group) => ({ ...group, pages: group.pages.filter((item) => visibleNav.includes(item)) }))
-    .filter((group) => group.pages.length > 0), [visibleNav]);
+    .filter((group) => group.pages.length > 0), [visibleNav, launcherModule]);
   const [expandedLauncherGroups, setExpandedLauncherGroups] = useState<Set<string>>(() => {
     const active = launcherNavGroups.find((group) => group.pages.includes(page));
     return new Set(active ? [active.label] : []);
@@ -418,17 +460,26 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (currentUser && !visibleNav.includes(page)) {
+      if (!allowedModules.includes("radar")) {
+        setPage("Resumen Histórico Perú");
+        return;
+      }
       const firstCountry = parseAccessProfile(currentUser.access_profile)[0];
       setPage(firstCountry === "chile" ? "Inicio Chile" : firstCountry === "argentina" ? "Inicio Argentina" : "Inicio Peru");
     }
-  }, [currentUser, page, visibleNav]);
+  }, [currentUser, page, visibleNav, allowedModules]);
+
+  useEffect(() => {
+    // Opening the launcher always starts on the module the user is in.
+    if (launcherOpen) setLauncherModule(activeModule);
+  }, [launcherOpen, activeModule]);
 
   useEffect(() => {
     if (page === "Inicio Chile" || page === "Oportunidades Chile LMP-GC" || page === "Histórico Procesos Eliminados CL" || page === "Seguimiento de Oportunidades Chile") {
       setCountry("Chile");
     } else if (page === "Inicio Argentina" || page === "Procesos COMPR.AR Argentina" || page === "Publicaciones COMPR.AR Argentina" || page === "Histórico Procesos Eliminados AR" || page === "Seguimiento de Oportunidades Argentina") {
       setCountry("Argentina");
-    } else if (page === "Inicio Peru" || page === "Oportunidades" || page === "Oportunidades OCDS Peru" || page === "Histórico Procesos Eliminados PE" || page === "Seguimiento de Oportunidades Peru") {
+    } else if (page === "Inicio Peru" || page === "Oportunidades" || page === "Oportunidades OCDS Peru" || page === "Histórico Procesos Eliminados PE" || page === "Seguimiento de Oportunidades Peru" || isHistoricoPage(page)) {
       setCountry("Peru");
     }
   }, [page]);
@@ -538,10 +589,31 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
                       aria-label="Cerrar navegación"
                     >×</button>
                   </div>
-                  <div className="launcher-intro">
-                    <strong>Centro de navegación</strong>
-                    <span>Accede a los módulos habilitados para tu perfil.</span>
-                  </div>
+                  {allowedModules.length > 1 ? (
+                    <div className="launcher-modules" role="tablist" aria-label="Módulo">
+                      {allowedModules.map((module) => (
+                        <button
+                          key={module}
+                          type="button"
+                          role="tab"
+                          aria-selected={launcherModule === module}
+                          className={`launcher-module ${launcherModule === module ? "active" : ""}`}
+                          onClick={() => {
+                            setLauncherModule(module);
+                            setExpandedLauncherGroups(new Set(module === "historico_peru" ? ["Histórico Perú"] : []));
+                          }}
+                        >
+                          <strong>{moduleLabels[module]}</strong>
+                          <small>{module === "radar" ? "Procesos vigentes en Perú, Chile y Argentina" : "Contrataciones, vencimientos y PAC"}</small>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="launcher-intro">
+                      <strong>Centro de navegación</strong>
+                      <span>Accede a los módulos habilitados para tu perfil.</span>
+                    </div>
+                  )}
                   <nav className="launcher-nav" aria-label="Módulos disponibles">
                     {visibleLauncherGroups.map((group) => {
                       const isExpanded = expandedLauncherGroups.has(group.label);
@@ -601,8 +673,8 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
               ) : null}
             </div>
             <div>
-              <p className="overline">Sala de control comercial</p>
-              <h1>{page}</h1>
+              <p className="overline">{activeModule === "historico_peru" ? "Histórico Perú · datos abiertos OECE" : "Radar en vivo · sala de control comercial"}</p>
+              <h1>{isHistoricoPage(page) ? launcherLabels[page] : page}</h1>
             </div>
           </div>
           <div className="top-actions">
