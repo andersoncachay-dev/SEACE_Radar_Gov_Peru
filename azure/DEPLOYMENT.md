@@ -115,7 +115,42 @@ El scheduler embebido esta desactivado en Azure (`ENABLE_SCHEDULER=false`), asi 
 
 Reemplazar los marcadores igual que en los jobs anteriores y establecer los mismos secretos de base de datos y comunicaciones.
 
-### 9. Prueba de aceptacion
+### 10. Modulo Historico Peru (datos abiertos CONOSCE)
+
+Fuente: archivos estaticos del Portal de Datos Abiertos del OECE en `https://conosce.osce.gob.pe/buscador/assets/67ae6c4a/reportes/...` (patrones en `backend/app/services/historico/conosce.py`). OECE los regenera todos, incluidos los meses pasados, dentro de los primeros cinco dias de cada mes. El 12/10/2026 se verifico que la descarga funciona desde Azure Container Apps y desde una PC, sin proxy.
+
+Cadena de actualizacion:
+
+1. **Job de Azure** [historico-peru-job.yaml](historico-peru-job.yaml) (`govradar-historico-peru`). El cron es horario (`50 * * * *`) y casi siempre termina sin hacer nada (patron claim).
+   - **Importacion completa:** se ejecuta desde el dia de actualizacion (9 por defecto, editable en Sistema › Historico Peru) hasta que una importacion del mes termina bien, o cuando un admin pulsa "Actualizar ahora".
+   - **Mantenimiento:** una vez al dia recalcula los dias restantes y las alertas; los lunes despues de las 8:00 (Lima) envia el resumen semanal.
+   - Cada archivo se descarga, se procesa y se borra antes de pasar al siguiente, para que el disco nunca pase de unos 70 MB.
+   - Recursos: 1 CPU / 2 GiB, timeout de 2 h.
+2. **Script de la PC** `backend/scripts/historico_pc_sync.py`. Solo actua si la importacion del mes no termino o si el job fallo (`GET /historico/status`). Sube los archivos a la API uno por uno y la API procesa cada uno al recibirlo, para no llenar el disco efimero (4 GiB). Programarlo en el Programador de tareas de Windows, a diario desde el dia 10 a las 08:00:
+
+   ```powershell
+   $action = New-ScheduledTaskAction -Execute "py" -Argument "backend\scripts\historico_pc_sync.py" -WorkingDirectory "<ruta del repo>"
+   $trigger = New-ScheduledTaskTrigger -Daily -At 8:00am
+   Register-ScheduledTask -TaskName "GovRadar Historico Peru" -Action $action -Trigger $trigger
+   [Environment]::SetEnvironmentVariable("GOVRADAR_API_URL", "https://api.crmprocesosgobierno.rodarlab.com", "User")
+   [Environment]::SetEnvironmentVariable("GOVRADAR_EMAIL", "<admin>", "User")
+   [Environment]::SetEnvironmentVariable("GOVRADAR_PASSWORD", "<clave>", "User")
+   ```
+
+3. **Carga manual.** Si el script tambien falla, o no aparece dentro de 24 h despues de una falla del job, los admins reciben el correo "Historico Peru · Carga manual requerida" (como maximo uno cada 3 dias). La carga se hace en Sistema › Historico Peru › Cargar archivos, con los nombres originales de CONOSCE (`SETIEMBRE` y `SEPTIEMBRE` se aceptan por igual).
+
+Alta del job (una sola vez, despues de desplegar la imagen y aplicar la migracion `20261012_0035`):
+
+```powershell
+(Get-Content azure/historico-peru-job.yaml) -replace 'IMAGE_TAG', '<tag>' | Set-Content $env:TEMP\historico-job.yaml
+az containerapp job create -g govradar-rg -n govradar-historico-peru --yaml $env:TEMP\historico-job.yaml
+# primera carga sin esperar al dia 9:
+az containerapp job start -g govradar-rg -n govradar-historico-peru --env-vars HISTORICO_FORCE=true
+```
+
+Una importacion completa (unos 60 archivos, cerca de 3 GB) toma alrededor de 40 minutos; la mayor parte es la lectura de las ordenes mensuales con `python-calamine`.
+
+### 11. Prueba de aceptacion
 
 1. Crear una regla interna y verificar estado `sent`.
 2. Crear una regla email a una cuenta controlada y confirmar el correo.
