@@ -135,7 +135,7 @@ def bucket_counts(db: Session, kind: str, filters: Filters) -> list[dict]:
         query = (
             select(HistExpiring.bucket, func.count(), func.coalesce(func.sum(HistContracting.amount), 0))
             .join(HistContracting, HistContracting.id == HistExpiring.contracting_id)
-            .where(*_contracting_conditions(_without(filters, "years", "months")))
+            .where(*_expiring_conditions(_without(filters, "years", "months", "buckets")))
             .group_by(HistExpiring.bucket)
         )
         order = EXPIRING_BUCKETS
@@ -286,6 +286,8 @@ def _recurring_conditions(filters: Filters) -> list:
         conditions.append(HistRecurring.bucket.in_(filters.buckets))
     if filters.patterns:
         conditions.append(HistRecurring.pattern.in_(filters.patterns))
+    if filters.min_amount:
+        conditions.append(HistRecurring.amount_12m_supplier >= filters.min_amount)
     if filters.q.strip():
         term = _like(filters.q)
         conditions.append(or_(HistRecurring.entity_name.ilike(term), HistRecurring.supplier_name.ilike(term), HistRecurring.last_order_description.ilike(term)))

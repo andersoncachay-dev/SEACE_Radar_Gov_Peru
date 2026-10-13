@@ -80,6 +80,12 @@ def get_filters(_: User = Depends(module_user), db: Session = Depends(get_db)):
     return query_service.filter_options(db)
 
 
+@router.get("/vencimientos-runway")
+def get_runway(filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
+    """Contracts ending in the next 12 months under the page's filters."""
+    return query_service.expiring_runway(db, filters, _today())
+
+
 @router.get("/pac-summary")
 def get_pac_summary(filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
     return query_service.pac_summary(db, filters)
@@ -144,20 +150,37 @@ def get_alert_preferences(user: User = Depends(module_user), db: Session = Depen
 @router.put("/alerts/preferences")
 def save_alert_preferences(payload: AlertPreferenceIn, user: User = Depends(module_user), db: Session = Depends(get_db)):
     preference = get_preference(db, user.id) or HistAlertPreference(user_id=user.id)
-    preference.kinds = join_csv([kind for kind in payload.kinds if kind in ALERT_KINDS])
-    preference.categories = join_csv(payload.categories)
-    preference.departments = join_csv(payload.departments)
-    preference.government_levels = join_csv(payload.government_levels)
-    preference.process_groups = join_csv(payload.process_groups)
-    preference.keywords = join_csv([term[:60] for term in payload.keywords])
-    preference.min_amount = payload.min_amount
-    preference.min_priority = payload.min_priority
+    draft = _draft_preference(payload, user.id)
+    for field in ("kinds", "categories", "departments", "government_levels", "process_groups", "keywords", "min_amount", "min_priority"):
+        setattr(preference, field, getattr(draft, field))
     if preference.id is None:
         db.add(preference)
     if payload.historico_digest is not None:
-        db.get(User, user.id).historico_digest = payload.historico_digest
+        user.historico_digest = payload.historico_digest  # same request session as get_current_user
     db.commit()
-    return _preference_dict(preference, db.get(User, user.id))
+    return _preference_dict(preference, user)
+
+
+def _draft_preference(payload: AlertPreferenceIn, user_id: int) -> HistAlertPreference:
+    return HistAlertPreference(
+        user_id=user_id,
+        kinds=join_csv([kind for kind in payload.kinds if kind in ALERT_KINDS]),
+        categories=join_csv(payload.categories),
+        departments=join_csv(payload.departments),
+        government_levels=join_csv(payload.government_levels),
+        process_groups=join_csv(payload.process_groups),
+        keywords=join_csv([term[:60] for term in payload.keywords]),
+        min_amount=payload.min_amount,
+        min_priority=payload.min_priority,
+    )
+
+
+@router.post("/alerts/preview")
+def preview_alert_preferences(payload: AlertPreferenceIn, user: User = Depends(module_user), db: Session = Depends(get_db)):
+    """Live count for the "Configurar mis alertas" panel, before saving."""
+    conditions = [HistAlert.is_active.is_(True), HistAlert.status != "descartada", *preference_conditions(_draft_preference(payload, user.id))]
+    counts = dict(db.execute(select(HistAlert.priority, func.count()).where(*conditions).group_by(HistAlert.priority)).all())
+    return {"total": sum(counts.values()), "counts": {p: counts.get(p, 0) for p in PRIORITY_LABELS}}
 
 
 @router.get("/alerts/list")
