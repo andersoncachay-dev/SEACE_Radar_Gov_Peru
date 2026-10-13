@@ -67,11 +67,13 @@ def entities_file() -> SourceFile:
 
 
 def catalogue(today: date, first_year: int = FIRST_YEAR) -> list[SourceFile]:
-    """Every file a full refresh needs, smallest datasets first so a failure
-    on the heavy monthly orders still leaves contracts/PAC up to date."""
+    """Every file a full refresh needs, in load order: entities, then per year
+    awards before their direct-contracting causal and contracts (contracts
+    join to awards), then PAC, then the heavy monthly orders last so a
+    failure there still leaves contracts/PAC up to date."""
     files: list[SourceFile] = [entities_file()]
     for year in range(first_year, today.year + 1):
-        files += [yearly_file("contratos", year), yearly_file("directa", year), yearly_file("adjudicaciones", year)]
+        files += [yearly_file("adjudicaciones", year), yearly_file("directa", year), yearly_file("contratos", year)]
     files.append(yearly_file("pac", today.year))
     for year in range(first_year, today.year + 1):
         last_month = today.month if year == today.year else 12

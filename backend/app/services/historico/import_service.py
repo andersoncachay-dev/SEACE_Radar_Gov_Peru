@@ -101,7 +101,6 @@ def import_files(
     ordered = sorted(files, key=lambda item: (DATASET_ORDER[item[0].dataset], item[0].year or 0, item[0].month or 0))
     _update_run(db, run, status="running", started_at=datetime.utcnow(), progress=1, message="Procesando archivos",
                 files_json=json.dumps([source.filename for source, _ in ordered]))
-    counts: dict[str, int] = defaultdict(int)
     try:
         classifier = load_classifier(db)
         for index, (source, path) in enumerate(ordered, start=1):
@@ -109,24 +108,43 @@ def import_files(
             _update_run(db, run, progress=int(5 + 80 * (index - 1) / max(1, len(ordered))), message=message)
             if progress:
                 progress(run.progress, message)
-            counts[source.dataset] += _load_file(db, run, classifier, source, path)
-        _update_run(db, run, progress=88, message="Calculando vencimientos, recurrentes y PAC")
-        derived = rebuild_derived(db, today)
-        counts.update(derived)
-        from .alerts_service import evaluate_alerts
-
-        counts["alertas"] = evaluate_alerts(db, today, import_run_id=run.id)
-        _update_run(
-            db, run, status="completed", finished_at=datetime.utcnow(), progress=100,
-            data_cut_date=date(today.year, today.month, 1) - timedelta(days=1),
-            counts_json=json.dumps(dict(counts)), message="Actualización completada",
-        )
+            load_file(db, run, source, path, classifier)
+        finish_import(db, run, today)
     except Exception as exc:  # recorded on the run; callers decide on fallback
-        db.rollback()
-        logger.exception("Histórico Perú import %s failed", run.id)
-        _update_run(db, run, status="failed", finished_at=datetime.utcnow(), error=f"{type(exc).__name__}: {exc}",
-                    counts_json=json.dumps(dict(counts)), message="La actualización falló")
+        fail_run(db, run, exc)
     return run
+
+
+def load_file(db: Session, run: HistImportRun, source: conosce.SourceFile, path: Path, classifier: Classifier | None = None) -> int:
+    """Load one file into the base tables and add its row count to the run.
+    Derived views are left for finish_import, so a run can stream files in
+    (PC script uploads) while keeping a single file on disk at a time."""
+    loaded = _load_file(db, run, classifier or load_classifier(db), source, path)
+    counts = json.loads(run.counts_json or "{}")
+    counts[source.dataset] = counts.get(source.dataset, 0) + loaded
+    _update_run(db, run, counts_json=json.dumps(counts))
+    return loaded
+
+
+def finish_import(db: Session, run: HistImportRun, today: date) -> HistImportRun:
+    from .alerts_service import evaluate_alerts
+
+    _update_run(db, run, status="running", progress=88, message="Calculando vencimientos, recurrentes y PAC")
+    counts = json.loads(run.counts_json or "{}")
+    counts.update(rebuild_derived(db, today))
+    counts["alertas"] = evaluate_alerts(db, today, import_run_id=run.id)
+    _update_run(
+        db, run, status="completed", finished_at=datetime.utcnow(), progress=100,
+        data_cut_date=date(today.year, today.month, 1) - timedelta(days=1),
+        counts_json=json.dumps(counts), message="Actualización completada",
+    )
+    return run
+
+
+def fail_run(db: Session, run: HistImportRun, exc: Exception) -> None:
+    db.rollback()
+    logger.exception("Histórico Perú import %s failed", run.id)
+    _update_run(db, run, status="failed", finished_at=datetime.utcnow(), error=f"{type(exc).__name__}: {exc}", message="La actualización falló")
 
 
 def download_and_import(
@@ -138,30 +156,37 @@ def download_and_import(
     proxies: dict | None = None,
     progress: ProgressFn | None = None,
 ) -> HistImportRun:
-    """Full refresh straight from CONOSCE. Files are downloaded and processed
-    one at a time and deleted afterwards so disk use stays at one file."""
+    """Full refresh straight from CONOSCE. Each file is downloaded, loaded and
+    deleted before the next one (catalogue() is already in load order), so
+    disk use stays at one ~70 MB file instead of the ~3 GB catalogue."""
     today = today or lima_today()
     sources = conosce.catalogue(today)
-    _update_run(db, run, status="running", started_at=datetime.utcnow(), progress=1, message="Descargando desde CONOSCE")
-    downloaded: list[tuple[conosce.SourceFile, Path]] = []
+    _update_run(db, run, status="running", started_at=datetime.utcnow(), progress=1, message="Descargando desde CONOSCE",
+                files_json=json.dumps([source.filename for source in sources]))
     missing: list[str] = []
     try:
+        classifier = load_classifier(db)
         for index, source in enumerate(sources, start=1):
-            _update_run(db, run, progress=int(1 + 40 * index / len(sources)), message=f"Descargando {source.filename} ({index}/{len(sources)})")
+            message = f"Descargando y procesando {source.filename} ({index}/{len(sources)})"
+            _update_run(db, run, progress=int(1 + 86 * (index - 1) / len(sources)), message=message)
+            if progress:
+                progress(run.progress, message)
             try:
-                downloaded.append((source, conosce.download(source, work_dir, proxies=proxies)))
+                path = conosce.download(source, work_dir, proxies=proxies)
             except FileNotFoundError:
                 missing.append(source.filename)  # e.g. a month OECE has not published yet
+                continue
+            try:
+                load_file(db, run, source, path, classifier)
+            finally:
+                path.unlink(missing_ok=True)
+        if missing:
+            counts = json.loads(run.counts_json or "{}")
+            counts["archivos_no_publicados"] = missing
+            _update_run(db, run, counts_json=json.dumps(counts))
+        finish_import(db, run, today)
     except Exception as exc:
-        _update_run(db, run, status="failed", finished_at=datetime.utcnow(), error=f"{type(exc).__name__}: {exc}", message="No se pudo descargar desde CONOSCE")
-        return run
-    run = import_files(db, run, downloaded, today=today, progress=progress)
-    if missing:
-        counts = json.loads(run.counts_json or "{}")
-        counts["archivos_no_publicados"] = missing
-        _update_run(db, run, counts_json=json.dumps(counts))
-    for _, path in downloaded:
-        path.unlink(missing_ok=True)
+        fail_run(db, run, exc)
     return run
 
 

@@ -1,0 +1,420 @@
+from __future__ import annotations
+
+import json
+import logging
+import queue
+import shutil
+import tempfile
+import threading
+from datetime import date
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from ..database import SessionLocal, get_db
+from ..dependencies import require_admin, require_module
+from ..models import HistAlert, HistImportRun, HistKeyword, User
+from ..services.historico import conosce, import_service, notify, orchestration, query_service
+from ..services.historico.alerts_service import PRIORITY_LABELS
+
+router = APIRouter(prefix="/historico", tags=["historico"])
+logger = logging.getLogger(__name__)
+module_user = require_module("historico_peru")
+UPLOAD_ROOT = Path(tempfile.gettempdir()) / "historico_uploads"
+LIST_KINDS = ("contrataciones", "vencimientos", "recurrentes", "pac")
+
+
+def _today() -> date:
+    return orchestration.lima_now().date()
+
+
+def _filters(
+    years: list[int] = Query(default=[]),
+    months: list[int] = Query(default=[]),
+    departments: list[str] = Query(default=[]),
+    categories: list[str] = Query(default=[]),
+    process_groups: list[str] = Query(default=[]),
+    government_levels: list[str] = Query(default=[]),
+    buckets: list[str] = Query(default=[]),
+    patterns: list[str] = Query(default=[]),
+    situations: list[str] = Query(default=[]),
+    datasets: list[str] = Query(default=[]),
+    q: str = "",
+    relevance: str = "ok",
+    real_date_only: bool = False,
+    hide_renewed: bool = False,
+) -> query_service.Filters:
+    return query_service.Filters(
+        years=years, months=months, departments=departments, categories=categories, process_groups=process_groups,
+        government_levels=government_levels, buckets=buckets, patterns=patterns, situations=situations, datasets=datasets,
+        q=q, relevance=relevance, real_date_only=real_date_only, hide_renewed=hide_renewed,
+    )
+
+
+def _check_kind(kind: str) -> None:
+    if kind not in LIST_KINDS:
+        raise HTTPException(status_code=404, detail="Vista no encontrada")
+
+
+# --- read ----------------------------------------------------------------------------
+
+
+@router.get("/status")
+def get_status(_: User = Depends(module_user), db: Session = Depends(get_db)):
+    return orchestration.status(db)
+
+
+@router.get("/filters")
+def get_filters(_: User = Depends(module_user), db: Session = Depends(get_db)):
+    return query_service.filter_options(db)
+
+
+@router.get("/summary")
+def get_summary(filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
+    return query_service.summary(db, filters, _today())
+
+
+# --- alerts --------------------------------------------------------------------------
+
+
+class AlertUpdate(BaseModel):
+    status: str | None = Field(default=None, pattern="^(nueva|vista|en_gestion|descartada)$")
+    assignee_id: int | None = None
+
+
+def _alert_dict(alert: HistAlert) -> dict:
+    return {
+        "id": alert.id, "kind": alert.kind, "priority": alert.priority, "priority_label": PRIORITY_LABELS.get(alert.priority, alert.priority),
+        "score": alert.score, "title": alert.title, "detail": alert.detail, "entity_name": alert.entity_name, "department": alert.department,
+        "amount": alert.amount, "due_date": alert.due_date.isoformat() if alert.due_date else None, "status": alert.status,
+        "assignee_id": alert.assignee_id, "expiring_id": alert.expiring_id, "recurring_id": alert.recurring_id, "pac_item_id": alert.pac_item_id,
+        "created_at": alert.created_at.isoformat(), "is_active": alert.is_active,
+    }
+
+
+@router.get("/alerts/list")
+def list_alerts(
+    kinds: list[str] = Query(default=[]),
+    priorities: list[str] = Query(default=[]),
+    statuses: list[str] = Query(default=[]),
+    departments: list[str] = Query(default=[]),
+    q: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    _: User = Depends(module_user),
+    db: Session = Depends(get_db),
+):
+    where = [HistAlert.is_active.is_(True)]
+    if kinds:
+        where.append(HistAlert.kind.in_(kinds))
+    if priorities:
+        where.append(HistAlert.priority.in_(priorities))
+    where.append(HistAlert.status.in_(statuses) if statuses else HistAlert.status != "descartada")
+    if departments:
+        where.append(HistAlert.department.in_(departments))
+    if q.strip():
+        where.append(HistAlert.title.ilike(f"%{q.strip()}%") | HistAlert.entity_name.ilike(f"%{q.strip()}%"))
+    size = min(max(page_size, 1), query_service.MAX_PAGE_SIZE)
+    total = db.scalar(select(func.count()).select_from(HistAlert).where(*where))
+    rows = db.scalars(select(HistAlert).where(*where).order_by(HistAlert.priority, HistAlert.score.desc()).offset((max(page, 1) - 1) * size).limit(size)).all()
+    counts = dict(db.execute(
+        select(HistAlert.priority, func.count()).where(HistAlert.is_active.is_(True), HistAlert.status != "descartada").group_by(HistAlert.priority)
+    ).all())
+    return {"items": [_alert_dict(row) for row in rows], "total": total, "page": max(page, 1), "page_size": size,
+            "counts": {p: counts.get(p, 0) for p in PRIORITY_LABELS}}
+
+
+@router.patch("/alerts/{alert_id}")
+def update_alert(alert_id: int, payload: AlertUpdate, _: User = Depends(module_user), db: Session = Depends(get_db)):
+    alert = db.get(HistAlert, alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerta no encontrada")
+    if payload.status:
+        alert.status = payload.status
+        alert.dismissed_due_date = alert.due_date if payload.status == "descartada" else None
+    if "assignee_id" in payload.model_fields_set:
+        alert.assignee_id = payload.assignee_id
+    db.commit()
+    return _alert_dict(alert)
+
+
+# --- administration ---------------------------------------------------------------
+
+
+class KeywordIn(BaseModel):
+    keyword: str = Field(min_length=2, max_length=120)
+    category: str = Field(default="Internet (sin especificar)", max_length=80)
+    kind: str = Field(default="include", pattern="^(include|review|exclude)$")
+    priority: int = Field(default=90, ge=1, le=999)
+    is_active: bool = True
+
+
+def _keyword_dict(item: HistKeyword) -> dict:
+    return {"id": item.id, "keyword": item.keyword, "category": item.category, "kind": item.kind, "priority": item.priority, "is_active": item.is_active}
+
+
+@router.get("/admin/keywords")
+def list_keywords(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    import_service.ensure_default_keywords(db)
+    return [_keyword_dict(item) for item in db.scalars(select(HistKeyword).order_by(HistKeyword.priority, HistKeyword.keyword)).all()]
+
+
+@router.post("/admin/keywords", status_code=201)
+def create_keyword(payload: KeywordIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    keyword = payload.keyword.strip().lower()
+    if db.scalar(select(HistKeyword).where(func.lower(HistKeyword.keyword) == keyword)):
+        raise HTTPException(status_code=409, detail="La palabra clave ya existe")
+    item = HistKeyword(keyword=keyword, category=payload.category.strip(), kind=payload.kind, priority=payload.priority, is_active=payload.is_active)
+    db.add(item)
+    db.commit()
+    return _keyword_dict(item)
+
+
+@router.put("/admin/keywords/{keyword_id}")
+def update_keyword(keyword_id: int, payload: KeywordIn, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(HistKeyword, keyword_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Palabra clave no encontrada")
+    item.keyword, item.category, item.kind = payload.keyword.strip().lower(), payload.category.strip(), payload.kind
+    item.priority, item.is_active = payload.priority, payload.is_active
+    db.commit()
+    return _keyword_dict(item)
+
+
+@router.delete("/admin/keywords/{keyword_id}", status_code=204)
+def delete_keyword(keyword_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(HistKeyword, keyword_id)
+    if item:
+        db.delete(item)
+        db.commit()
+    return Response(status_code=204)
+
+
+def _run_dict(run: HistImportRun) -> dict:
+    return {
+        "id": run.id, "origin": run.origin, "status": run.status, "progress": run.progress, "message": run.message, "error": run.error,
+        "files": json.loads(run.files_json or "[]"), "counts": json.loads(run.counts_json or "{}"),
+        "data_cut_date": run.data_cut_date.isoformat() if run.data_cut_date else None,
+        "created_at": run.created_at.isoformat(), "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+    }
+
+
+class SettingsIn(BaseModel):
+    refresh_day: int = Field(ge=1, le=28)
+
+
+@router.get("/admin/imports")
+def list_imports(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    runs = db.scalars(select(HistImportRun).order_by(HistImportRun.created_at.desc()).limit(30)).all()
+    return {"status": orchestration.status(db), "runs": [_run_dict(run) for run in runs]}
+
+
+@router.put("/admin/settings")
+def update_settings(payload: SettingsIn, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    orchestration.set_setting(db, orchestration.KEY_REFRESH_DAY, str(payload.refresh_day), user.id)
+    return orchestration.status(db)
+
+
+@router.post("/admin/refresh")
+def request_refresh(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Ask the hourly govradar-historico-peru job to run a full refresh."""
+    orchestration.request_refresh(db, user.id)
+    return orchestration.status(db)
+
+
+@router.post("/admin/imports", status_code=201)
+def create_upload_run(origin: str = "manual_upload", user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    if origin not in ("manual_upload", "pc_script"):
+        raise HTTPException(status_code=400, detail="Origen no válido")
+    if orchestration.running_import(db):
+        raise HTTPException(status_code=409, detail="Ya hay una actualización en curso")
+    run = import_service.create_run(db, origin, user.id)
+    run.status, run.message = "receiving", "Esperando archivos"
+    db.commit()
+    (UPLOAD_ROOT / str(run.id)).mkdir(parents=True, exist_ok=True)
+    return _run_dict(run)
+
+
+@router.post("/admin/imports/{run_id}/files")
+def upload_file(run_id: int, file: UploadFile = File(...), _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    run = db.get(HistImportRun, run_id)
+    if not run or run.status != "receiving":
+        raise HTTPException(status_code=409, detail="La carga no admite más archivos")
+    source = conosce.identify_file(file.filename or "")
+    if source is None:
+        raise HTTPException(status_code=400, detail=f"No se reconoce el archivo {file.filename}: usa los nombres originales de CONOSCE")
+    folder = UPLOAD_ROOT / str(run_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / source.filename
+    with target.open("wb") as handle:
+        shutil.copyfileobj(file.file, handle, length=1 << 20)
+    files = json.loads(run.files_json or "[]")
+    if source.filename not in files:
+        files.append(source.filename)
+    run.files_json = json.dumps(files)
+    db.commit()
+    if run.origin == "pc_script":
+        # The PC script sends the whole ~3 GB catalogue, in load order; load
+        # each file as it lands so only one sits on the API's ephemeral disk.
+        _enqueue(_load_uploaded, run_id, target)
+    return {"filename": source.filename, "dataset": source.dataset, "year": source.year, "month": source.month}
+
+
+# One worker drains a FIFO queue: uploads must load in arrival order (awards
+# before contracts) and never run concurrently with each other.
+_work_queue: "queue.Queue[tuple]" = queue.Queue()
+_worker_started = threading.Lock()
+_worker: threading.Thread | None = None
+
+
+def _enqueue(func, *args) -> None:
+    global _worker
+    with _worker_started:
+        if _worker is None or not _worker.is_alive():
+            _worker = threading.Thread(target=_drain_queue, daemon=True, name="historico-imports")
+            _worker.start()
+    _work_queue.put((func, args))
+
+
+def _drain_queue() -> None:
+    while True:
+        func, args = _work_queue.get()
+        try:
+            func(*args)
+        except Exception:  # tasks record their own failure on the run; keep the worker alive
+            logger.exception("Histórico Perú background task %s failed", getattr(func, "__name__", func))
+        finally:
+            _work_queue.task_done()
+
+
+def _load_uploaded(run_id: int, path: Path) -> None:
+    db = SessionLocal()
+    try:
+        run = db.get(HistImportRun, run_id)
+        if run is None or run.status not in ("receiving", "running"):
+            return
+        source = conosce.identify_file(path.name)
+        run.message = f"Procesando {path.name}"
+        db.commit()
+        try:
+            import_service.load_file(db, run, source, path)
+        except Exception as exc:
+            import_service.fail_run(db, run, exc)
+    finally:
+        path.unlink(missing_ok=True)
+        db.close()
+
+
+def _finish_uploaded(run_id: int) -> None:
+    db = SessionLocal()
+    try:
+        run = db.get(HistImportRun, run_id)
+        if run is None or run.status == "failed":
+            return
+        folder = UPLOAD_ROOT / str(run_id)
+        if run.origin == "pc_script":
+            import_service.finish_import(db, run, _today())  # files already loaded one by one
+        else:
+            files = [(conosce.identify_file(path.name), path) for path in sorted(folder.glob("*"))]
+            import_service.import_files(db, run, [(source, path) for source, path in files if source], today=_today())
+        if run.status == "completed" and run.origin == "pc_script":
+            orchestration.record_job_result(db, run)
+    except Exception as exc:
+        import_service.fail_run(db, run, exc)
+    finally:
+        shutil.rmtree(UPLOAD_ROOT / str(run_id), ignore_errors=True)
+        db.close()
+
+
+@router.post("/admin/imports/{run_id}/process")
+def process_upload(run_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    run = db.get(HistImportRun, run_id)
+    if not run or run.status != "receiving":
+        raise HTTPException(status_code=409, detail="La carga ya fue procesada")
+    if not json.loads(run.files_json or "[]"):
+        raise HTTPException(status_code=400, detail="Sube al menos un archivo")
+    run.status, run.message = "queued", "En cola"
+    db.commit()
+    _enqueue(_finish_uploaded, run_id)
+    return _run_dict(run)
+
+
+@router.get("/admin/imports/{run_id}")
+def get_import(run_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    run = db.get(HistImportRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Carga no encontrada")
+    return _run_dict(run)
+
+
+class FallbackFailure(BaseModel):
+    reason: str = Field(default="el script de la PC no pudo completar la carga", max_length=500)
+
+
+@router.post("/admin/fallback-failed")
+def report_fallback_failure(payload: FallbackFailure, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Called by the PC script when it also fails: ask admins for a manual upload."""
+    sent = 0
+    if orchestration.manual_notice_due(db, pc_failed=True):
+        sent = notify.send_manual_upload_notice(db, payload.reason)
+        orchestration.mark_manual_notice_sent(db)
+    return {"notified": sent}
+
+
+# --- generic list routes: registered last so /{kind}/{id} never shadows
+# the static /alerts/... and /admin/... paths above ---------------------------
+
+
+@router.get("/{kind}/export.xlsx")
+def export(kind: str, sort: str | None = None, filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
+    _check_kind(kind)
+    content = query_service.export_xlsx(db, kind, filters, sort)
+    filename = f"Historico Peru - {kind} {_today():%Y-%m-%d}.xlsx"
+    return Response(
+        content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{kind}/buckets")
+def get_buckets(kind: str, filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
+    if kind not in ("vencimientos", "recurrentes"):
+        raise HTTPException(status_code=404, detail="Vista no encontrada")
+    return query_service.bucket_counts(db, kind, filters)
+
+
+@router.get("/{kind}/{record_id}")
+def get_detail(kind: str, record_id: int, _: User = Depends(module_user), db: Session = Depends(get_db)):
+    _check_kind(kind)
+    found = query_service.detail(db, kind, record_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    return found
+
+
+@router.get("/{kind}")
+def get_list(
+    kind: str,
+    page: int = 1,
+    page_size: int = 50,
+    sort: str | None = None,
+    filters: query_service.Filters = Depends(_filters),
+    _: User = Depends(module_user),
+    db: Session = Depends(get_db),
+):
+    _check_kind(kind)
+    lister = {
+        "contrataciones": query_service.list_contractings,
+        "vencimientos": query_service.list_expiring,
+        "recurrentes": query_service.list_recurring,
+        "pac": query_service.list_pac,
+    }[kind]
+    kwargs = {"page": page, "page_size": page_size}
+    if sort:
+        kwargs["sort"] = sort
+    return lister(db, filters, **kwargs)
