@@ -6,7 +6,7 @@ import io
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import and_, distinct, func, or_, select
+from sqlalchemy import case, distinct, func, or_, select
 from sqlalchemy.orm import Session
 
 from ...models import HistContract, HistContracting, HistExpiring, HistPacItem, HistRecurring
@@ -33,6 +33,7 @@ class Filters:
     real_date_only: bool = False
     hide_renewed: bool = False
     datasets: list[str] = field(default_factory=list)
+    min_amount: float = 0
 
 
 def _like(term: str) -> str:
@@ -57,6 +58,8 @@ def _contracting_conditions(filters: Filters, model=HistContracting) -> list:
         conditions.append(model.government_level.in_(filters.government_levels))
     if filters.datasets:
         conditions.append(model.dataset.in_(filters.datasets))
+    if filters.min_amount:
+        conditions.append(model.amount >= filters.min_amount)
     if filters.q.strip():
         term = _like(filters.q)
         conditions.append(or_(
@@ -338,6 +341,30 @@ def _pac_conditions(filters: Filters) -> list:
         term = _like(filters.q)
         conditions.append(or_(HistPacItem.entity_name.ilike(term), HistPacItem.item_description.ilike(term), HistPacItem.process_description.ilike(term)))
     return conditions
+
+
+def pac_summary(db: Session, filters: Filters) -> dict:
+    """PAC dashboard: totals, items per planned month, process type,
+    department and situation, all under the same filters as the list."""
+    where = _pac_conditions(filters)
+
+    def grouped(column, order_by_count: bool = True):
+        query = select(column, func.count()).where(*where).group_by(column)
+        query = query.order_by(func.count().desc() if order_by_count else column)
+        return [{"key": key, "count": count} for key, count in db.execute(query).all()]
+
+    totals = db.execute(
+        select(func.count(), func.count(distinct(HistPacItem.entity_ruc)), func.coalesce(func.sum(case((HistPacItem.already_awarded.is_(True), 1), else_=0)), 0)).where(*where)
+    ).one()
+    open_items = db.scalar(select(func.count()).select_from(HistPacItem).where(*where, HistPacItem.situation.like("Por convocar%")))
+    return {
+        "totals": {"items": totals[0], "entities": totals[1], "already_awarded": int(totals[2] or 0), "to_call": open_items},
+        "by_month": grouped(HistPacItem.planned_month, order_by_count=False),
+        "by_process_group": grouped(HistPacItem.process_group),
+        "by_department": grouped(HistPacItem.department),
+        "by_situation": grouped(HistPacItem.situation),
+        "by_category": grouped(HistPacItem.category),
+    }
 
 
 def _pac_dict(row: HistPacItem) -> dict:

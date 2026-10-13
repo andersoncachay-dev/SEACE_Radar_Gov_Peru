@@ -155,7 +155,13 @@ class PriorityTests(unittest.TestCase):
 
     def test_recurring_priorities(self) -> None:
         self.assertEqual(recurring_priority(10, PATTERN_MONTHLY), "P2")
+        self.assertEqual(recurring_priority(60, PATTERN_REPEATED), "P4")
         self.assertEqual(recurring_priority(-10, PATTERN_MONTHLY), "P3")
+        self.assertIsNone(recurring_priority(-10, PATTERN_REPEATED))  # overdue only matters for monthly buyers
+        self.assertIsNone(recurring_priority(10, PATTERN_MONTHLY, 4_000))  # below the S/ 10,000 / 12 m floor
+        # Long overdue: the entity likely changed supplier; not actionable.
+        self.assertIsNone(recurring_priority(-90, PATTERN_MONTHLY))
+        self.assertIsNone(recurring_priority(120, PATTERN_MONTHLY))
         self.assertIsNone(recurring_priority(10, PATTERN_SINGLE))
 
     def test_pac_situation(self) -> None:

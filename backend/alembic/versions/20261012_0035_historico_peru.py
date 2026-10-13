@@ -227,6 +227,9 @@ def upgrade() -> None:
         _str("department", 80),
         _float("amount"),
         sa.Column("due_date", sa.Date(), nullable=True, index=True),
+        _str("category", 80, index=True),
+        _str("process_group", 60),
+        _str("government_level", 40),
         sa.Column("status", sa.String(length=20), nullable=False, server_default="nueva", index=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true(), index=True),
         sa.Column("assignee_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
@@ -237,9 +240,25 @@ def upgrade() -> None:
         sa.UniqueConstraint("kind", "ref_key", name="uq_hist_alert_ref"),
     )
 
+    op.create_table(
+        "hist_alert_preferences",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True),
+        _str("kinds", 80),
+        _text("categories"),
+        _text("departments"),
+        _str("government_levels", 200),
+        _text("process_groups"),
+        _text("keywords"),
+        _float("min_amount"),
+        sa.Column("min_priority", sa.String(length=4), nullable=False, server_default="P4"),
+        *_timestamps(),
+    )
+
 
 def downgrade() -> None:
     for table in (
+        "hist_alert_preferences",
         "hist_alerts",
         "hist_pac_items",
         "hist_recurrings",

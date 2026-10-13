@@ -53,7 +53,9 @@ def _order(number, desc, amount, issued, entity_ruc="20100000002", supplier="206
             "Comprometida", kind, amount, "Soles", supplier, "WIFI ANDINO EIRL", issued, issued, issued, issued]
 
 
-class HistoricoImportTests(unittest.TestCase):
+class HistoricoFixture(unittest.TestCase):
+    """Shared in-memory DB and CONOSCE-shaped xlsx builders (no tests)."""
+
     def setUp(self) -> None:
         engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
         Base.metadata.create_all(engine)
@@ -91,7 +93,7 @@ class HistoricoImportTests(unittest.TestCase):
                  "20500000009", "20500000009", "SI", "https://prodapp2.seace.gob.pe/x", 1, 45900, 45900, 45910, 46300, 46320],
             ]),
             self._xlsx("CONOSCE_ORDENESCOMPRASEPTIEMBRE2026_0.xlsx", ORDER_HEADERS, [
-                _order(1, "SERVICIO DE INTERNET MES DE SETIEMBRE", 3000.0, "05/09/2026"),
+                _order(1, "SERVICIO DE INTERNET MES DE SETIEMBRE", 12000.0, "05/09/2026"),
                 _order(2, "UTILES DE ESCRITORIO", 900.0, "05/09/2026"),
                 _order(3, "SERVICIO DE INTERNET", 3000.0, "06/09/2026", kind="Derivadas de procedimiento de selección"),
             ]),
@@ -103,6 +105,8 @@ class HistoricoImportTests(unittest.TestCase):
             ]),
         ]
 
+
+class HistoricoImportTests(HistoricoFixture):
     def test_full_pipeline(self) -> None:
         run = self._import(self._fixture_files())
         self.assertEqual(run.status, "completed", run.error)
@@ -195,6 +199,42 @@ class HistoricoImportTests(unittest.TestCase):
         self.db.commit()
         orchestration.record_job_result(self.db, run)
         self.assertFalse(orchestration.needs_fallback(self.db))
+
+
+class AlertPreferenceTests(HistoricoFixture):
+    def test_satellite_only_preference(self) -> None:
+        from backend.app.models import HistAlertPreference
+        from backend.app.services.historico.alerts_service import matches_preference, preference_conditions
+
+        self._import(self._fixture_files())
+        preference = HistAlertPreference(user_id=1, categories="Satelital (otros)", min_priority="P4")
+        self.db.add(preference)
+        self.db.commit()
+        alerts = self.db.scalars(select(HistAlert).where(HistAlert.is_active.is_(True))).all()
+        mine = [alert for alert in alerts if matches_preference(alert, preference)]
+        self.assertTrue(mine)
+        self.assertTrue(all(alert.category == "Satelital (otros)" for alert in mine))
+        in_sql = self.db.scalars(select(HistAlert).where(HistAlert.is_active.is_(True), *preference_conditions(preference))).all()
+        self.assertEqual({a.id for a in in_sql}, {a.id for a in mine})
+
+    def test_min_priority_amount_and_keywords(self) -> None:
+        from backend.app.models import HistAlertPreference
+        from backend.app.services.historico.alerts_service import matches_preference
+
+        self._import(self._fixture_files())
+        alerts = self.db.scalars(select(HistAlert).where(HistAlert.is_active.is_(True))).all()
+        only_critical = HistAlertPreference(user_id=1, min_priority="P1")
+        self.assertTrue(all(alert.priority == "P1" for alert in alerts if matches_preference(alert, only_critical)))
+        big = HistAlertPreference(user_id=1, min_amount=500000)
+        self.assertTrue(all(alert.amount >= 500000 or alert.kind == "pac" for alert in alerts if matches_preference(alert, big)))
+        keyword = HistAlertPreference(user_id=1, keywords="satelital")
+        self.assertEqual({alert.ref_key for alert in alerts if matches_preference(alert, keyword)}, {"9002-1"})
+
+    def test_pac_summary(self) -> None:
+        self._import(self._fixture_files())
+        summary = query_service.pac_summary(self.db, query_service.Filters(years=[2026]))
+        self.assertEqual(summary["totals"], {"items": 1, "entities": 1, "already_awarded": 0, "to_call": 1})
+        self.assertEqual(summary["by_month"], [{"key": 11, "count": 1}])
 
 
 class ModuleAccessTests(unittest.TestCase):

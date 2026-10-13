@@ -605,9 +605,31 @@ class HistAlert(TimestampMixin, Base):
     department: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     due_date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)
+    # Copied from the source row so per-user preferences filter in SQL.
+    category: Mapped[str] = mapped_column(String(80), default="", index=True, nullable=False)
+    process_group: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    government_level: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="nueva", index=True, nullable=False)  # nueva | vista | en_gestion | descartada
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True, nullable=False)
     assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     dismissed_due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     first_seen_import_id: Mapped[int | None] = mapped_column(ForeignKey("hist_import_runs.id", ondelete="SET NULL"), nullable=True)
     last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class HistAlertPreference(TimestampMixin, Base):
+    """What one user wants to be alerted about ("Mis alertas" and their
+    weekly digest). Multi-value fields are "|"-separated; empty = all."""
+
+    __tablename__ = "hist_alert_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    kinds: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    categories: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    departments: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    government_levels: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    process_groups: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    keywords: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    min_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    min_priority: Mapped[str] = mapped_column(String(4), default="P4", nullable=False)

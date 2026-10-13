@@ -16,9 +16,16 @@ from sqlalchemy.orm import Session
 
 from ..database import SessionLocal, get_db
 from ..dependencies import require_admin, require_module
-from ..models import HistAlert, HistImportRun, HistKeyword, User
+from ..models import HistAlert, HistAlertPreference, HistImportRun, HistKeyword, User
 from ..services.historico import conosce, import_service, notify, orchestration, query_service
-from ..services.historico.alerts_service import PRIORITY_LABELS
+from ..services.historico.alerts_service import (
+    ALERT_KINDS,
+    PRIORITY_LABELS,
+    get_preference,
+    join_csv,
+    preference_conditions,
+    split_csv,
+)
 
 router = APIRouter(prefix="/historico", tags=["historico"])
 logger = logging.getLogger(__name__)
@@ -46,11 +53,12 @@ def _filters(
     relevance: str = "ok",
     real_date_only: bool = False,
     hide_renewed: bool = False,
+    min_amount: float = 0,
 ) -> query_service.Filters:
     return query_service.Filters(
         years=years, months=months, departments=departments, categories=categories, process_groups=process_groups,
         government_levels=government_levels, buckets=buckets, patterns=patterns, situations=situations, datasets=datasets,
-        q=q, relevance=relevance, real_date_only=real_date_only, hide_renewed=hide_renewed,
+        q=q, relevance=relevance, real_date_only=real_date_only, hide_renewed=hide_renewed, min_amount=min_amount,
     )
 
 
@@ -72,6 +80,11 @@ def get_filters(_: User = Depends(module_user), db: Session = Depends(get_db)):
     return query_service.filter_options(db)
 
 
+@router.get("/pac-summary")
+def get_pac_summary(filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
+    return query_service.pac_summary(db, filters)
+
+
 @router.get("/summary")
 def get_summary(filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
     return query_service.summary(db, filters, _today())
@@ -90,9 +103,61 @@ def _alert_dict(alert: HistAlert) -> dict:
         "id": alert.id, "kind": alert.kind, "priority": alert.priority, "priority_label": PRIORITY_LABELS.get(alert.priority, alert.priority),
         "score": alert.score, "title": alert.title, "detail": alert.detail, "entity_name": alert.entity_name, "department": alert.department,
         "amount": alert.amount, "due_date": alert.due_date.isoformat() if alert.due_date else None, "status": alert.status,
+        "category": alert.category, "process_group": alert.process_group, "government_level": alert.government_level,
         "assignee_id": alert.assignee_id, "expiring_id": alert.expiring_id, "recurring_id": alert.recurring_id, "pac_item_id": alert.pac_item_id,
         "created_at": alert.created_at.isoformat(), "is_active": alert.is_active,
     }
+
+
+class AlertPreferenceIn(BaseModel):
+    kinds: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    departments: list[str] = Field(default_factory=list)
+    government_levels: list[str] = Field(default_factory=list)
+    process_groups: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    min_amount: float = Field(default=0, ge=0)
+    min_priority: str = Field(default="P4", pattern="^P[1-4]$")
+    historico_digest: bool | None = None
+
+
+def _preference_dict(preference: HistAlertPreference | None, user: User) -> dict:
+    return {
+        "configured": preference is not None,
+        "kinds": split_csv(preference.kinds) if preference else [],
+        "categories": split_csv(preference.categories) if preference else [],
+        "departments": split_csv(preference.departments) if preference else [],
+        "government_levels": split_csv(preference.government_levels) if preference else [],
+        "process_groups": split_csv(preference.process_groups) if preference else [],
+        "keywords": split_csv(preference.keywords) if preference else [],
+        "min_amount": preference.min_amount if preference else 0,
+        "min_priority": preference.min_priority if preference else "P4",
+        "historico_digest": user.historico_digest,
+    }
+
+
+@router.get("/alerts/preferences")
+def get_alert_preferences(user: User = Depends(module_user), db: Session = Depends(get_db)):
+    return _preference_dict(get_preference(db, user.id), user)
+
+
+@router.put("/alerts/preferences")
+def save_alert_preferences(payload: AlertPreferenceIn, user: User = Depends(module_user), db: Session = Depends(get_db)):
+    preference = get_preference(db, user.id) or HistAlertPreference(user_id=user.id)
+    preference.kinds = join_csv([kind for kind in payload.kinds if kind in ALERT_KINDS])
+    preference.categories = join_csv(payload.categories)
+    preference.departments = join_csv(payload.departments)
+    preference.government_levels = join_csv(payload.government_levels)
+    preference.process_groups = join_csv(payload.process_groups)
+    preference.keywords = join_csv([term[:60] for term in payload.keywords])
+    preference.min_amount = payload.min_amount
+    preference.min_priority = payload.min_priority
+    if preference.id is None:
+        db.add(preference)
+    if payload.historico_digest is not None:
+        db.get(User, user.id).historico_digest = payload.historico_digest
+    db.commit()
+    return _preference_dict(preference, db.get(User, user.id))
 
 
 @router.get("/alerts/list")
@@ -101,13 +166,19 @@ def list_alerts(
     priorities: list[str] = Query(default=[]),
     statuses: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
+    categories: list[str] = Query(default=[]),
     q: str = "",
+    mine: bool = False,
     page: int = 1,
     page_size: int = 50,
-    _: User = Depends(module_user),
+    user: User = Depends(module_user),
     db: Session = Depends(get_db),
 ):
-    where = [HistAlert.is_active.is_(True)]
+    """mine=true narrows to the user's saved alert preferences ("Mis alertas")."""
+    scope = [HistAlert.is_active.is_(True), *(preference_conditions(get_preference(db, user.id)) if mine else [])]
+    where = list(scope)
+    if categories:
+        where.append(HistAlert.category.in_(categories))
     if kinds:
         where.append(HistAlert.kind.in_(kinds))
     if priorities:
@@ -121,7 +192,7 @@ def list_alerts(
     total = db.scalar(select(func.count()).select_from(HistAlert).where(*where))
     rows = db.scalars(select(HistAlert).where(*where).order_by(HistAlert.priority, HistAlert.score.desc()).offset((max(page, 1) - 1) * size).limit(size)).all()
     counts = dict(db.execute(
-        select(HistAlert.priority, func.count()).where(HistAlert.is_active.is_(True), HistAlert.status != "descartada").group_by(HistAlert.priority)
+        select(HistAlert.priority, func.count()).where(*scope, HistAlert.status != "descartada").group_by(HistAlert.priority)
     ).all())
     return {"items": [_alert_dict(row) for row in rows], "total": total, "page": max(page, 1), "page_size": size,
             "counts": {p: counts.get(p, 0) for p in PRIORITY_LABELS}}

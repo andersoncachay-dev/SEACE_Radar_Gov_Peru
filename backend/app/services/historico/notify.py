@@ -13,7 +13,7 @@ from ...models import HistAlert, HistImportRun, User
 from ...module_access import has_module_access
 from ..notification_service import _branded_email_html, _send_email
 from . import conosce
-from .alerts_service import PRIORITY_LABELS
+from .alerts_service import PRIORITY_LABELS, get_preference, matches_preference
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,14 @@ def _money(value: float) -> str:
     return f"S/ {value:,.0f}".replace(",", " ")
 
 
-def build_digest(db: Session, today: date) -> tuple[str, str, str] | None:
+def build_digest(db: Session, today: date, user: User | None = None) -> tuple[str, str, str] | None:
+    """Weekly digest; with a user, only the alerts matching their preferences."""
     week_ago = today - timedelta(days=7)
-    active = db.scalars(select(HistAlert).where(HistAlert.is_active.is_(True), HistAlert.status != "descartada")).all()
+    preference = get_preference(db, user.id) if user else None
+    active = [
+        alert for alert in db.scalars(select(HistAlert).where(HistAlert.is_active.is_(True), HistAlert.status != "descartada")).all()
+        if matches_preference(alert, preference)
+    ]
     urgent = sorted((a for a in active if a.priority in ("P1", "P2")), key=lambda a: (a.priority, -a.score))
     new_this_week = [a for a in active if a.created_at.date() >= week_ago]
     expiring_90 = [a for a in active if a.kind == "vencimiento" and a.due_date and (a.due_date - today).days <= 90]
@@ -63,12 +68,12 @@ def build_digest(db: Session, today: date) -> tuple[str, str, str] | None:
 
 
 def send_digest(db: Session, today: date) -> int:
-    content = build_digest(db, today)
-    if content is None:
-        return 0
-    subject, text, body_html = content
     sent = 0
     for user in digest_recipients(db):
+        content = build_digest(db, today, user)
+        if content is None:
+            continue
+        subject, text, body_html = content
         try:
             _send_email(user.email, text, subject, body_html)
             sent += 1
