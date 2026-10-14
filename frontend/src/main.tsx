@@ -1,7 +1,9 @@
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api, Alert, AlertRule, APP_MODULES, AppModule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, parseModuleAccess, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
+import "./ui/tokens.css";
 import "./styles.css";
+import { applyTenantBrand, DEFAULT_BRAND } from "./ui/brand";
 import { Country, CountryFlagIcon, LegalDialog, LegalDocumentsMap, LegalView, countryFlagUrls, userInitials } from "./shared";
 
 const Home = lazy(() => import("./pages/HomePage"));
@@ -779,5 +781,8 @@ function Root() {
     />
   );
 }
+
+// Default brand until the tenant brand is loaded from app_settings.
+applyTenantBrand(DEFAULT_BRAND);
 
 createRoot(document.getElementById("root")!).render(<Root />);
