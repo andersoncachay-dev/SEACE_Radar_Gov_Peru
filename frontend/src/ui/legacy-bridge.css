@@ -7,7 +7,7 @@ body { font-family: var(--font-sans); color: var(--ink); background: var(--page-
 label { color: var(--label); font-weight: var(--weight-semibold); font-size: var(--text-table); }
 
 /* ---------- Form controls ---------- */
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"])),
 select,
 textarea {
   min-height: var(--control-h);
@@ -20,7 +20,7 @@ textarea {
   transition: border-color var(--motion), box-shadow var(--motion);
 }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
-input:not([type="checkbox"]):not([type="radio"]):focus,
+input:where(:not([type="checkbox"], [type="radio"])):focus,
 select:focus,
 textarea:focus {
   outline: none;
@@ -163,7 +163,7 @@ td { color: var(--ink); }
 /* ---------- Touch targets on phone ---------- */
 @media (max-width: 639px) {
   .primary, .ghost, .danger-button { min-height: var(--control-h-touch); }
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), select, textarea {
+  input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"])), select, textarea {
     min-height: var(--control-h-touch);
     font-size: var(--text-section); /* 16px: evita el zoom de iOS al enfocar */
   }

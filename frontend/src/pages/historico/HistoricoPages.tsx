@@ -10,6 +10,7 @@ import {
   HistoricoPriority,
   HistoricoStatus,
 } from "../../api";
+import { Icon } from "../../ui";
 import { DetailDrawer, FilterBar, HBars, monthName, Pager, PriorityBadge, priorityTone, Runway, SearchAndAmount } from "./HistoricoUI";
 import { downloadExport, money, moneyShort, shortDate, titleCase, toggleValue, useHistoricoList, useHistoricoMeta, useLatest } from "./useHistorico";
 
@@ -143,16 +144,16 @@ export function HistoricoResumen({ token, onGo }: PageProps & { onGo: (page: "Co
         exporting={exporter.busy}
         result={totals ? `${num(totals.count)} contrataciones con estos filtros` : loading ? "Calculando…" : undefined}
       />
-      <section className="hist-kpis" aria-label="Totales" aria-busy={loading}>
-        <div className="hist-kpi"><span>Monto contratado</span><strong>{moneyShort(totals?.amount ?? 0)}</strong><small>{filters.years?.length ? [...filters.years].sort().join(", ") : "Todo el periodo"}</small></div>
-        <div className="hist-kpi"><span>Contrataciones</span><strong>{num(totals?.count ?? 0)}</strong><small>ticket promedio {moneyShort(totals?.count ? totals.amount / totals.count : 0)}</small></div>
-        <div className="hist-kpi"><span>Entidades</span><strong>{num(totals?.entities ?? 0)}</strong><small>con compras del rubro</small></div>
-        <div className="hist-kpi"><span>Proveedores</span><strong>{num(totals?.suppliers ?? 0)}</strong><small>con al menos una venta</small></div>
+      <section className="ui-kpi-grid ui-kpi-grid-4" aria-label="Totales" aria-busy={loading}>
+        <div className="ui-card ui-kpi"><span className="ui-kpi-label">Monto contratado</span><span className="ui-kpi-value">{moneyShort(totals?.amount ?? 0)}</span><span className="ui-kpi-hint">{filters.years?.length ? [...filters.years].sort().join(", ") : "Todo el periodo"}</span></div>
+        <div className="ui-card ui-kpi"><span className="ui-kpi-label">Contrataciones</span><span className="ui-kpi-value">{num(totals?.count ?? 0)}</span><span className="ui-kpi-hint">ticket promedio {moneyShort(totals?.count ? totals.amount / totals.count : 0)}</span></div>
+        <div className="ui-card ui-kpi"><span className="ui-kpi-label">Entidades</span><span className="ui-kpi-value">{num(totals?.entities ?? 0)}</span><span className="ui-kpi-hint">con compras del rubro</span></div>
+        <div className="ui-card ui-kpi"><span className="ui-kpi-label">Proveedores</span><span className="ui-kpi-value">{num(totals?.suppliers ?? 0)}</span><span className="ui-kpi-hint">con al menos una venta</span></div>
       </section>
       <Panel
         title="Pista de vencimientos"
         subtitle="Contratos > 8 UIT que terminan en los próximos 12 meses, con los mismos filtros (salvo años)."
-        action={<button className="hist-btn" type="button" onClick={() => onGo("Contratos por Vencer")}>Ver contratos por vencer</button>}
+        action={<button className="ui-btn ui-btn-secondary" type="button" onClick={() => onGo("Contratos por Vencer")}>Ver contratos por vencer</button>}
       >
         <Runway items={data?.runway ?? []} onOpen={setOpenId} compact />
       </Panel>
@@ -420,7 +421,7 @@ function RecurringPurchases({ token }: PageProps) {
         buckets={(buckets.data ?? []).filter((b) => b.key !== "> 1 año")}
         active={bucket}
         onSelect={setBucket}
-        tones={(k) => (k.startsWith("Atrasada") ? "var(--hist-p4)" : k === "≤ 30 días" ? "var(--hist-p2)" : "var(--hist-p3)")}
+        tones={(k) => (k.startsWith("Atrasada") ? "var(--urg-p4-ink)" : k === "≤ 30 días" ? "var(--urg-p2-ink)" : "var(--urg-p3-ink)")}
         suffix=" en 12 m"
       />
       <Panel
@@ -495,11 +496,11 @@ export function HistoricoPac({ token }: PageProps) {
         exporting={exporter.busy}
         result={totals ? `${num(totals.items)} ítems del PAC` : undefined}
       />
-      <section className="hist-kpis" aria-label="PAC" aria-busy={summary.loading}>
-        <div className="hist-kpi"><span>Ítems programados</span><strong>{num(totals?.items ?? 0)}</strong><small>Plan Anual de Contrataciones</small></div>
-        <div className="hist-kpi"><span>Por convocar</span><strong style={{ color: "var(--hist-p2)" }}>{num(totals?.to_call ?? 0)}</strong><small>mes previsto ≥ {monthName(nowMonth).toLowerCase()}</small></div>
-        <div className="hist-kpi"><span>Entidades</span><strong>{num(totals?.entities ?? 0)}</strong><small>con ítems del rubro</small></div>
-        <div className="hist-kpi"><span>Ya adjudicaron en el año</span><strong>{num(totals?.already_awarded ?? 0)}</strong><small>indicativo</small></div>
+      <section className="ui-kpi-grid ui-kpi-grid-4" aria-label="PAC" aria-busy={summary.loading}>
+        <div className="ui-card ui-kpi"><span className="ui-kpi-label">Ítems programados</span><span className="ui-kpi-value">{num(totals?.items ?? 0)}</span><span className="ui-kpi-hint">Plan Anual de Contrataciones</span></div>
+        <div className="ui-card ui-kpi"><span className="ui-kpi-label">Por convocar</span><span className="ui-kpi-value" style={{ color: "var(--urg-p2-ink)" }}>{num(totals?.to_call ?? 0)}</span><span className="ui-kpi-hint">mes previsto ≥ {monthName(nowMonth).toLowerCase()}</span></div>
+        <div className="ui-card ui-kpi"><span className="ui-kpi-label">Entidades</span><span className="ui-kpi-value">{num(totals?.entities ?? 0)}</span><span className="ui-kpi-hint">con ítems del rubro</span></div>
+        <div className="ui-card ui-kpi"><span className="ui-kpi-label">Ya adjudicaron en el año</span><span className="ui-kpi-value">{num(totals?.already_awarded ?? 0)}</span><span className="ui-kpi-hint">indicativo</span></div>
       </section>
       <div className="hist-two">
         <Panel title="Mes previsto de convocatoria" subtitle="Resaltados el mes actual y el siguiente: lo que conviene preparar ya.">
@@ -527,7 +528,7 @@ export function HistoricoPac({ token }: PageProps) {
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
-                    <td className="hist-strong" style={{ color: row.situation.startsWith("Por convocar") ? "var(--hist-p2)" : undefined }}>{monthName(row.planned_month)}</td>
+                    <td className="hist-strong" style={{ color: row.situation.startsWith("Por convocar") ? "var(--urg-p2-ink)" : undefined }}>{monthName(row.planned_month)}</td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{titleCase(row.department)} · {row.situation}</span></td>
                     <td>{row.process_type}</td>
                     <td className="hist-col-opt"><span className="hist-sub">{row.item_description || row.process_description}</span></td>
@@ -539,7 +540,7 @@ export function HistoricoPac({ token }: PageProps) {
           </div>
           <div className="hist-cards">
             {rows.map((row) => (
-              <button key={row.id} type="button" className="hist-card" style={{ "--tone": row.situation.startsWith("Por convocar") ? "var(--hist-p2)" : "var(--line)" } as React.CSSProperties} onClick={() => setOpenId(row.id)}>
+              <button key={row.id} type="button" className="hist-card" style={{ "--tone": row.situation.startsWith("Por convocar") ? "var(--urg-p2-ink)" : "var(--line)" } as React.CSSProperties} onClick={() => setOpenId(row.id)}>
                 <span className="hist-row"><span className="hist-strong">{monthName(row.planned_month)}</span><span className="hist-tag">{row.process_type}</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-sub">{row.item_description || row.process_description}</span>
@@ -607,7 +608,7 @@ export function HistoricoAlertas({ token }: PageProps) {
           <button type="button" role="tab" aria-selected={scope === "all"} onClick={() => setScope("all")}>Todas las alertas</button>
           <button type="button" role="tab" aria-selected={scope === "mine"} onClick={() => setScope("mine")}>Mis alertas</button>
         </div>
-        <button className="hist-btn" type="button" onClick={() => setConfigOpen(true)}>⚙ Configurar mis alertas</button>
+        <button className="ui-btn ui-btn-secondary" type="button" onClick={() => setConfigOpen(true)}><Icon name="settings" size={16} />Configurar mis alertas</button>
       </div>
       {scope === "mine" ? (
         <div className="hist-banner hist-banner-info">
@@ -639,7 +640,7 @@ export function HistoricoAlertas({ token }: PageProps) {
               <select className="hist-select" aria-label={`Estado de ${alert.title}`} value={alert.status} onChange={(event) => changeStatus(alert, event.target.value as HistoricoAlertStatus)}>
                 {STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
-              <button className="hist-btn" type="button" onClick={() => openDetail(alert)}>Detalle</button>
+              <button className="ui-btn ui-btn-secondary" type="button" onClick={() => openDetail(alert)}>Detalle</button>
             </div>
           </article>
         )) : <p className="hist-empty">{alerts.loading ? "Cargando alertas…" : scope === "mine" ? "No hay alertas con tu configuración. Amplía categorías o baja la prioridad mínima." : "No hay alertas activas."}</p>}
@@ -727,7 +728,7 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
   const group = (field: "kinds" | "categories" | "departments" | "government_levels" | "process_groups", values: Array<[string, string]>) => (
     <div className="hist-opts">
       {values.map(([value, label]) => (
-        <button key={value} type="button" className="hist-opt" aria-pressed={draft[field].includes(value)} onClick={() => toggle(field, value)}>{label}</button>
+        <button key={value} type="button" className="ui-fchip" aria-pressed={draft[field].includes(value)} onClick={() => toggle(field, value)}>{label}</button>
       ))}
     </div>
   );
@@ -741,16 +742,16 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
             <h2 id="hist-config-title">Configurar mis alertas</h2>
             <span className="hist-sub">Elige qué te interesa. Un grupo sin selección incluye todo.</span>
           </div>
-          <button className="hist-btn hist-btn-ghost" type="button" onClick={onClose} aria-label="Cerrar">✕</button>
+          <button className="ui-btn ui-btn-ghost ui-btn-icon-only" type="button" onClick={onClose} aria-label="Cerrar"><Icon name="close" size={18} /></button>
         </header>
         <div className="hist-drawer-body hist-config">
           <fieldset>
             <legend>Atajos</legend>
             <div className="hist-opts">
-              <button className="hist-btn" type="button" onClick={() => setDraft({ ...draft, categories: satellite })}>Solo satelital y Starlink</button>
-              <button className="hist-btn" type="button" onClick={() => setDraft({ ...draft, kinds: ["vencimiento"], min_amount: 500000 })}>Contratos ≥ S/ 500 mil</button>
-              <button className="hist-btn" type="button" onClick={() => setDraft({ ...draft, min_priority: "P2" })}>Solo críticas y altas</button>
-              <button className="hist-btn hist-btn-ghost" type="button" onClick={() => setDraft({ ...EMPTY_PREFERENCE, historico_digest: draft.historico_digest })}>Ver todo</button>
+              <button className="ui-btn ui-btn-secondary" type="button" onClick={() => setDraft({ ...draft, categories: satellite })}>Solo satelital y Starlink</button>
+              <button className="ui-btn ui-btn-secondary" type="button" onClick={() => setDraft({ ...draft, kinds: ["vencimiento"], min_amount: 500000 })}>Contratos ≥ S/ 500 mil</button>
+              <button className="ui-btn ui-btn-secondary" type="button" onClick={() => setDraft({ ...draft, min_priority: "P2" })}>Solo críticas y altas</button>
+              <button className="ui-btn ui-btn-ghost" type="button" onClick={() => setDraft({ ...EMPTY_PREFERENCE, historico_digest: draft.historico_digest })}>Ver todo</button>
             </div>
           </fieldset>
           <fieldset><legend>Tipo de alerta</legend>{group("kinds", [["vencimiento", "Contratos por vencer"], ["recurrente", "Compras recurrentes"], ["pac", "PAC por convocar"]])}</fieldset>
@@ -779,7 +780,7 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
             <legend>Monto mínimo</legend>
             <div className="hist-opts">
               {[[0, "Cualquiera"], [50000, "≥ S/ 50 mil"], [100000, "≥ S/ 100 mil"], [500000, "≥ S/ 500 mil"], [1000000, "≥ S/ 1 M"]].map(([value, label]) => (
-                <button key={value} type="button" className="hist-opt" aria-pressed={draft.min_amount === value} onClick={() => setDraft({ ...draft, min_amount: Number(value) })}>{label}</button>
+                <button key={value} type="button" className="ui-fchip" aria-pressed={draft.min_amount === value} onClick={() => setDraft({ ...draft, min_amount: Number(value) })}>{label}</button>
               ))}
             </div>
           </fieldset>
@@ -787,7 +788,7 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
             <legend>Prioridad mínima</legend>
             <div className="hist-opts">
               {PRIORITIES.map((p) => (
-                <button key={p} type="button" className="hist-opt" aria-pressed={draft.min_priority === p} onClick={() => setDraft({ ...draft, min_priority: p })}>
+                <button key={p} type="button" className="ui-fchip" aria-pressed={draft.min_priority === p} onClick={() => setDraft({ ...draft, min_priority: p })}>
                   {p === "P4" ? "Todas" : p === "P1" ? "Solo críticas" : `${({ P2: "Alta", P3: "Media" } as const)[p]} o mayor`}
                 </button>
               ))}
@@ -802,8 +803,8 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
           {error ? <div className="notice danger" role="alert">{error}</div> : null}
         </div>
         <footer>
-          <button className="hist-btn hist-btn-ghost" type="button" onClick={onClose}>Cancelar</button>
-          <button className="hist-btn hist-btn-primary" type="button" onClick={save} disabled={saving}>{saving ? "Guardando…" : "Guardar mis alertas"}</button>
+          <button className="ui-btn ui-btn-ghost" type="button" onClick={onClose}>Cancelar</button>
+          <button className="ui-btn ui-btn-primary" type="button" onClick={save} disabled={saving}>{saving ? "Guardando…" : "Guardar mis alertas"}</button>
         </footer>
       </aside>
     </div>
