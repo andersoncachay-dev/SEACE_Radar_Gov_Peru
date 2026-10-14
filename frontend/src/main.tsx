@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { api, Alert, AlertRule, APP_MODULES, AppModule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, parseModuleAccess, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
 import "./ui/tokens.css";
 import "./styles.css";
+import "./ui/ui.css";
 import { applyTenantBrand, DEFAULT_BRAND } from "./ui/brand";
 import { Country, CountryFlagIcon, LegalDialog, LegalDocumentsMap, LegalView, countryFlagUrls, userInitials } from "./shared";
 
@@ -19,6 +20,7 @@ const HistoricoContrataciones = lazy(() => import("./pages/historico/HistoricoPa
 const HistoricoVencimientos = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoVencimientos })));
 const HistoricoPac = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoPac })));
 const HistoricoAlertas = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoAlertas })));
+const UiPreview = lazy(() => import("./ui/UiPreview"));
 const OpportunityTrackingArgentina = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingArgentina })));
 
 type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Procesos COMPR.AR Argentina" | "Publicaciones COMPR.AR Argentina" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Histórico Procesos Eliminados AR" | "Alertas" | "Seguimiento de Oportunidades Peru" | "Seguimiento de Oportunidades Chile" | "Seguimiento de Oportunidades Argentina" | "Usuarios" | "Sistema" | HistoricoPage;
@@ -748,8 +750,15 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   );
 }
 
+// Internal component sheet (docs/design/mockups/Componentes.dc.html). Dev
+// server only, or builds made with VITE_UI_PREVIEW=true; never in production.
+const UI_PREVIEW_ENABLED = import.meta.env.DEV || import.meta.env.VITE_UI_PREVIEW === "true";
+
 function Root() {
   const [token, setToken] = useState(localStorage.getItem("rodar_token") || "");
+  if (UI_PREVIEW_ENABLED && window.location.pathname.replace(/\/$/, "") === "/ui-preview") {
+    return <Suspense fallback={null}><UiPreview /></Suspense>;
+  }
   const resetToken = new URLSearchParams(window.location.search).get("reset_token") || "";
   useEffect(() => {
     setUnauthorizedHandler(() => {
