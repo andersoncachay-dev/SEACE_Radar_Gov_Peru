@@ -383,3 +383,17 @@ select.ui-input { appearance: none; padding-right: 36px; cursor: pointer; }
   .ui-brand-swatch, .ui-brand-picker { width: var(--control-h-touch); height: var(--control-h-touch); }
   .ui-brand-actions .ui-btn { flex: 1; height: var(--control-h-touch); }
 }
+
+/* ---------- Favorito (estrella) ---------- */
+.ui-fav {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: var(--control-h-sm); height: var(--control-h-sm); min-height: 0; padding: 0;
+  border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--muted); cursor: pointer;
+  transition: color var(--motion), background var(--motion);
+}
+.ui-fav:hover { background: var(--surface-2); color: var(--signal-amber-dot); }
+.ui-fav:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-ring); }
+.ui-fav[aria-pressed="true"] { color: var(--signal-amber-dot); }
+.ui-fav[aria-pressed="true"] svg { fill: currentColor; }
+.ui-fav-sm { width: 28px; height: 28px; }
+@media (max-width: 639px) { .ui-fav, .ui-fav-sm { width: var(--control-h-touch); height: var(--control-h-touch); } }

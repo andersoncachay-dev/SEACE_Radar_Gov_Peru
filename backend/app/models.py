@@ -633,3 +633,18 @@ class HistAlertPreference(TimestampMixin, Base):
     keywords: Mapped[str] = mapped_column(Text, default="", nullable=False)
     min_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     min_priority: Mapped[str] = mapped_column(String(4), default="P4", nullable=False)
+
+
+class UserFavorite(TimestampMixin, Base):
+    """A process or contract a user starred. ``ref_key`` is the stable natural
+    key of the record (see services/favorite_service.py), never a Histórico row
+    id: those tables are rebuilt on every monthly import."""
+
+    __tablename__ = "user_favorites"
+    __table_args__ = (UniqueConstraint("user_id", "kind", "ref_key", name="uq_user_favorites_user_kind_ref"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    ref_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    label: Mapped[str] = mapped_column(String(300), default="", nullable=False)

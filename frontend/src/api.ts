@@ -270,6 +270,15 @@ export type LegalDocumentRecord = {
   updated_at: string;
 };
 
+export type FavoriteKind = "opportunity" | "hist_contratacion" | "hist_recurrente" | "hist_pac";
+
+export type FavoriteRecord = {
+  kind: FavoriteKind;
+  ref_key: string;
+  label: string;
+  created_at: string;
+};
+
 export type TenantBrandRecord = {
   name: string;
   logoUrl: string;
@@ -517,6 +526,15 @@ export async function confirmPasswordReset(token: string, password: string) {
 export const api = {
   appSettings: () => request<AppSettingsRecord>("/app-settings", ""),
   tenantBrand: () => request<TenantBrandRecord>("/app-settings/brand", ""),
+  favorites: (token: string) => request<FavoriteRecord[]>("/favorites", token, { cache: "no-store" }),
+  addFavorite: (token: string, favorite: { kind: FavoriteKind; ref_key: string; label: string }) =>
+    request<FavoriteRecord>("/favorites", token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(favorite),
+    }),
+  removeFavorite: (token: string, kind: FavoriteKind, refKey: string) =>
+    request<void>(`/favorites?${new URLSearchParams({ kind, ref_key: refKey })}`, token, { method: "DELETE" }),
   updateTenantBrand: (token: string, brand: { name: string; logoUrl: string; primary: string }) =>
     request<TenantBrandRecord>("/app-settings/brand", token, {
       method: "PUT",
@@ -880,6 +898,7 @@ export type HistoricoFilters = {
   real_date_only?: boolean;
   hide_renewed?: boolean;
   min_amount?: number;
+  favorites_only?: boolean;
 };
 
 export type HistoricoAlertPreference = {
@@ -958,6 +977,7 @@ export type HistoricoSummary = {
 };
 
 export type HistoricoContracting = {
+  fav_key: string;
   id: number;
   dataset: "orden" | "adjudicacion";
   year: number;
@@ -999,6 +1019,7 @@ export type HistoricoExpiring = HistoricoContracting & {
 };
 
 export type HistoricoRecurring = {
+  fav_key: string;
   id: number;
   entity_ruc: string;
   entity_name: string;
@@ -1022,6 +1043,7 @@ export type HistoricoRecurring = {
 };
 
 export type HistoricoPacItem = {
+  fav_key: string;
   id: number;
   year: number;
   entity_ruc: string;

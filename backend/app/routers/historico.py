@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from ..database import SessionLocal, get_db
 from ..dependencies import require_admin, require_module
 from ..models import HistAlert, HistAlertPreference, HistImportRun, HistKeyword, User
+from ..services.favorite_service import favorite_keys
 from ..services.historico import conosce, import_service, notify, orchestration, query_service
 from ..services.historico.alerts_service import (
     ALERT_KINDS,
@@ -54,11 +55,15 @@ def _filters(
     real_date_only: bool = False,
     hide_renewed: bool = False,
     min_amount: float = 0,
+    favorites_only: bool = False,
+    user: User = Depends(module_user),
+    db: Session = Depends(get_db),
 ) -> query_service.Filters:
     return query_service.Filters(
         years=years, months=months, departments=departments, categories=categories, process_groups=process_groups,
         government_levels=government_levels, buckets=buckets, patterns=patterns, situations=situations, datasets=datasets,
         q=q, relevance=relevance, real_date_only=real_date_only, hide_renewed=hide_renewed, min_amount=min_amount,
+        favorite_keys=favorite_keys(db, user.id) if favorites_only else None,
     )
 
 

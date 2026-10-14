@@ -16,6 +16,7 @@ import {
   TrackingStageTemplate,
 } from "../api";
 import { Icon } from "../ui";
+import { readStored, writeStored } from "../favorites";
 import { ConfirmModal, Empty, formatDate, useDismissableMenu } from "../shared";
 import { deadlineCountdownText, formatDeadlineCountdown, OpportunityDetailModal } from "./OpportunitiesPage";
 
@@ -595,8 +596,11 @@ function TrackingWorkspace({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [tracking, setTracking] = useState<OpportunityTrackingRecord | null>(null);
   const [selectedPhaseId, setSelectedPhaseId] = useState<number | null>(null);
-  const [search, setSearch] = useState("");
-  const [mineOnly, setMineOnly] = useState(false);
+  const trackingStorageKey = `govradar.radar.tracking.${country}`;
+  const [search, setSearch] = useState(() => readStored(`${trackingStorageKey}.search`, ""));
+  const [mineOnly, setMineOnly] = useState(() => readStored(`${trackingStorageKey}.mineOnly`, false));
+  useEffect(() => writeStored(`${trackingStorageKey}.search`, search), [trackingStorageKey, search]);
+  useEffect(() => writeStored(`${trackingStorageKey}.mineOnly`, mineOnly), [trackingStorageKey, mineOnly]);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [busy, setBusy] = useState(false);

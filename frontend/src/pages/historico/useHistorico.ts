@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readStored, writeStored } from "../../favorites";
 import {
   historicoApi,
   HistoricoDetail,
@@ -12,6 +13,14 @@ import {
 
 /** Data for Histórico Perú is monthly, so it is fetched per view on demand
  * (no 60 s polling like the live radar) and cached for the session. */
+
+/** useState that survives page and module switches (and reloads) via
+ * localStorage, so a filter set up once is still there when the user returns. */
+export function useStoredState<T>(key: string, initial: T) {
+  const [value, setValue] = useState<T>(() => readStored(`govradar.hist.${key}`, initial));
+  useEffect(() => writeStored(`govradar.hist.${key}`, value), [key, value]);
+  return [value, setValue] as const;
+}
 
 let optionsCache: HistoricoFilterOptions | null = null;
 let statusCache: HistoricoStatus | null = null;

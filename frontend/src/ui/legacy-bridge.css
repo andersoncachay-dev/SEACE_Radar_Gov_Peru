@@ -206,3 +206,13 @@ svg [tabindex]:focus-visible { outline: none; stroke: var(--ink-strong); stroke-
   }
   .text-action { display: inline-flex; align-items: center; padding: 0 var(--space-2); }
 }
+
+/* ---------- Favoritos en el Radar ---------- */
+.opp-priority-cell { display: inline-flex; align-items: center; gap: var(--space-1); }
+.commercial-filter.favorites span { display: inline-flex; align-items: center; gap: 6px; }
+.commercial-filter.favorites .ui-icon { color: var(--signal-amber-dot); }
+.commercial-filter.favorites.active { background: var(--signal-amber-bg); border-color: var(--signal-amber-border); color: var(--signal-amber-ink); }
+.commercial-filter.favorites.active .ui-icon { fill: currentColor; }
+.opp-phone-card { position: relative; }
+.opp-phone-card > .ui-fav { position: absolute; top: var(--space-1); right: var(--space-1); z-index: 1; }
+.opp-phone-card-open .ui-mcard-top { padding-right: 44px; }

@@ -10,6 +10,7 @@ from .routers import (
     app_settings,
     auth,
     documents,
+    favorites,
     historico,
     legal_documents,
     opportunities,
@@ -68,6 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(opportunity_tracking.router)
     app.include_router(opportunity_reviews.router)
     app.include_router(historico.router)
+    app.include_router(favorites.router)
 
     @app.get("/")
     def root():

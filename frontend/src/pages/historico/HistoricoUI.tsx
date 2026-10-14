@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { HistoricoFilterOptions, HistoricoFilters, HistoricoKind, HistoricoPriority, HistoricoRunwayItem } from "../../api";
-import { Chip, Icon } from "../../ui";
+import { Chip, FavoriteButton, Icon } from "../../ui";
+import { FavoriteKind } from "../../api";
+import { useFavorites } from "../../favorites";
 import { useHistoricoDetail, money, moneyShort, shortDate, titleCase } from "./useHistorico";
 
 export const PRIORITY_LABEL: Record<HistoricoPriority, string> = { P1: "Crítica", P2: "Alta", P3: "Media", P4: "Baja" };
@@ -18,6 +20,35 @@ export function PriorityBadge({ priority }: { priority: HistoricoPriority | null
 
 export const priorityTone = (priority: string | null | undefined) =>
   priority === "P1" ? "var(--urg-p1-ink)" : priority === "P2" ? "var(--urg-p2-ink)" : priority === "P3" ? "var(--urg-p3-ink)" : "var(--urg-p4-ink)";
+
+/* ---------- favorites ---------- */
+
+/** "Por vencer" rows star the underlying award, so it also shows in Historial. */
+export const FAV_KIND: Record<HistoricoKind, FavoriteKind> = {
+  contrataciones: "hist_contratacion",
+  vencimientos: "hist_contratacion",
+  recurrentes: "hist_recurrente",
+  pac: "hist_pac",
+};
+
+export function HistFav({ token, kind, row, size = "sm" }: {
+  token: string;
+  kind: HistoricoKind;
+  row: { fav_key?: string; entity_name?: string; nomenclature?: string; supplier_name?: string; item_description?: string };
+  size?: "sm" | "md";
+}) {
+  const favorites = useFavorites(token);
+  if (!row.fav_key) return null;
+  const label = [titleCase(row.entity_name ?? ""), row.nomenclature || row.supplier_name || row.item_description || ""].filter(Boolean).join(" · ");
+  return (
+    <FavoriteButton
+      size={size}
+      active={favorites.isFavorite(FAV_KIND[kind], row.fav_key)}
+      onToggle={() => void favorites.toggle(FAV_KIND[kind], row.fav_key!, label)}
+      label={label}
+    />
+  );
+}
 
 /* ---------- multi-select filter bar ---------- */
 
@@ -66,6 +97,7 @@ export function FilterBar({
   onExport,
   exporting,
   result,
+  favorites = false,
 }: {
   dims: FilterDim[];
   options: HistoricoFilterOptions | null;
@@ -75,6 +107,8 @@ export function FilterBar({
   onExport?: () => void;
   exporting?: boolean;
   result?: string;
+  /** Show the "Favoritos" toggle (filters.favorites_only). */
+  favorites?: boolean;
 }) {
   const [open, setOpen] = useState<FilterDim | null>(null);
   const [search, setSearch] = useState("");
@@ -94,16 +128,18 @@ export function FilterBar({
     return selected(filters, dim).map((value) => ({ dim, value, label: `${DIM_LABEL[dim]}: ${labels.get(value) ?? value}` }));
   });
   if (filters.q) chips.push({ dim: "q" as FilterDim, value: filters.q, label: `Texto: ${filters.q}` });
+  if (filters.favorites_only) chips.push({ dim: "favorites_only" as FilterDim, value: "1", label: "Solo favoritos" });
   if (filters.min_amount) chips.push({ dim: "min_amount" as FilterDim, value: String(filters.min_amount), label: `Monto ≥ ${moneyShort(filters.min_amount)}` });
 
   function remove(dim: string, value: string) {
     if (dim === "q") onChange({ ...filters, q: "" });
     else if (dim === "min_amount") onChange({ ...filters, min_amount: 0 });
+    else if (dim === "favorites_only") onChange({ ...filters, favorites_only: false });
     else onChange(withDim(filters, dim as FilterDim, selected(filters, dim as FilterDim).filter((item) => item !== value)));
   }
 
   function clearAll() {
-    const next: HistoricoFilters = { ...filters, q: "", min_amount: 0 };
+    const next: HistoricoFilters = { ...filters, q: "", min_amount: 0, favorites_only: false };
     dims.forEach((dim) => { (next as Record<string, unknown>)[dim] = []; });
     onChange(next);
   }
@@ -155,6 +191,16 @@ export function FilterBar({
           );
         })}
         {extra}
+        {favorites ? (
+          <button
+            type="button"
+            className="ui-fchip hist-fav-toggle"
+            aria-pressed={Boolean(filters.favorites_only)}
+            onClick={() => onChange({ ...filters, favorites_only: !filters.favorites_only })}
+          >
+            <Icon name="star" size={16} />Favoritos
+          </button>
+        ) : null}
         <span className="hist-spacer" />
         {onExport ? (
           <button className="ui-btn ui-btn-secondary" type="button" onClick={onExport} disabled={exporting}>
@@ -362,7 +408,10 @@ export function DetailDrawer({ token, kind, id, onClose }: { token: string; kind
             <h2 id="hist-drawer-title">{detail ? titleCase(record.entity_name) : "Cargando…"}</h2>
             <span className="hist-sub">{record.nomenclature || record.supplier_name || record.process_type || ""}</span>
           </div>
-          <button ref={closeRef} className="ui-btn ui-btn-ghost ui-btn-icon-only" type="button" onClick={onClose} aria-label="Cerrar detalle"><Icon name="close" size={18} /></button>
+          <div className="hist-drawer-actions">
+            {detail ? <HistFav token={token} kind={kind} row={record} size="md" /> : null}
+            <button ref={closeRef} className="ui-btn ui-btn-ghost ui-btn-icon-only" type="button" onClick={onClose} aria-label="Cerrar detalle"><Icon name="close" size={18} /></button>
+          </div>
         </header>
         <div className="hist-drawer-body">
           {error ? <div className="notice danger" role="alert">{error}</div> : null}

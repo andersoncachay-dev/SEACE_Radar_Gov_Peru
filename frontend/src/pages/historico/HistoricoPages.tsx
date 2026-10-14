@@ -11,8 +11,8 @@ import {
   HistoricoStatus,
 } from "../../api";
 import { Icon } from "../../ui";
-import { DetailDrawer, FilterBar, HBars, monthName, Pager, PriorityBadge, priorityTone, Runway, SearchAndAmount } from "./HistoricoUI";
-import { downloadExport, money, moneyShort, shortDate, titleCase, toggleValue, useHistoricoList, useHistoricoMeta, useLatest } from "./useHistorico";
+import { DetailDrawer, FilterBar, HBars, HistFav, monthName, Pager, PriorityBadge, priorityTone, Runway, SearchAndAmount } from "./HistoricoUI";
+import { downloadExport, money, moneyShort, shortDate, titleCase, toggleValue, useHistoricoList, useHistoricoMeta, useLatest, useStoredState } from "./useHistorico";
 
 type PageProps = { token: string };
 
@@ -123,7 +123,7 @@ const SUMMARY_DIMS = ["years", "government_levels", "process_groups", "categorie
 
 export function HistoricoResumen({ token, onGo }: PageProps & { onGo: (page: "Contratos por Vencer") => void }) {
   const { options, status, error } = useHistoricoMeta(token);
-  const [filters, setFilters] = useState<HistoricoFilters>({});
+  const [filters, setFilters] = useStoredState<HistoricoFilters>("resumen.filters", {});
   const [openId, setOpenId] = useState<number | null>(null);
   const key = JSON.stringify(filters);
   const { data, loading, error: loadError } = useLatest(() => historicoApi.summary(token, filters), [token, key]);
@@ -197,8 +197,8 @@ export function HistoricoResumen({ token, onGo }: PageProps & { onGo: (page: "Co
 
 export function HistoricoContrataciones({ token }: PageProps) {
   const { options, status, error } = useHistoricoMeta(token);
-  const [filters, setFilters] = useState<HistoricoFilters>({});
-  const [sort, setSort] = useState("date_desc");
+  const [filters, setFilters] = useStoredState<HistoricoFilters>("contrataciones.filters", {});
+  const [sort, setSort] = useStoredState("contrataciones.sort", "date_desc");
   const [openId, setOpenId] = useState<number | null>(null);
   const list = useHistoricoList(token, "contrataciones", filters, sort);
   const exporter = useExport(token);
@@ -212,6 +212,7 @@ export function HistoricoContrataciones({ token }: PageProps) {
         onChange={setFilters}
         extra={<SearchAndAmount filters={filters} onChange={setFilters} placeholder="Busca entidad, proveedor, RUC o nomenclatura" />}
         onExport={() => exporter.run("contrataciones", filters, sort)}
+        favorites
         exporting={exporter.busy}
         result={list.data ? `${num(list.data.total)} contrataciones · ${moneyShort(list.data.amount)}` : undefined}
       />
@@ -229,10 +230,11 @@ export function HistoricoContrataciones({ token }: PageProps) {
         {rows.length ? <>
           <div className="hist-table-wrap">
             <table className="hist-table">
-              <thead><tr><th>Fecha</th><th>Tipo</th><th>Entidad · descripción</th><th className="hist-col-opt">Proveedor</th><th className="hist-col-opt">Categoría</th><th className="hist-money">Monto</th></tr></thead>
+              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Fecha</th><th>Tipo</th><th>Entidad · descripción</th><th className="hist-col-opt">Proveedor</th><th className="hist-col-opt">Categoría</th><th className="hist-money">Monto</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
+                    <td className="hist-fav-col"><HistFav token={token} kind="contrataciones" row={row} /></td>
                     <td className="hist-num">{shortDate(row.date)}</td>
                     <td>{row.process_group}</td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{row.description}</span></td>
@@ -246,11 +248,14 @@ export function HistoricoContrataciones({ token }: PageProps) {
           </div>
           <div className="hist-cards">
             {rows.map((row) => (
-              <button key={row.id} type="button" className="hist-card" onClick={() => setOpenId(row.id)}>
+              <div className="hist-card-item" key={row.id}>
+              <button type="button" className="hist-card" onClick={() => setOpenId(row.id)}>
                 <span className="hist-row"><span className="hist-tag">{row.process_group}</span><span className="hist-strong hist-num">{moneyShort(row.amount)}</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-sub">{shortDate(row.date)} · {row.description}</span>
               </button>
+              <HistFav token={token} kind="contrataciones" row={row} />
+              </div>
             ))}
           </div>
           <Pager page={list.page} pageSize={list.pageSize} total={list.data?.total ?? 0} onPage={list.setPage} />
@@ -297,7 +302,7 @@ function BucketStrip({ buckets, active, onSelect, tones, suffix = "" }: {
 }
 
 export function HistoricoVencimientos({ token }: PageProps) {
-  const [tab, setTab] = useState<"contratos" | "recurrentes">("contratos");
+  const [tab, setTab] = useStoredState<"contratos" | "recurrentes">("vencimientos.tab", "contratos");
   return (
     <div className="hist-module">
       <div className="hist-tabs" role="tablist" aria-label="Tipo de vencimiento">
@@ -311,9 +316,9 @@ export function HistoricoVencimientos({ token }: PageProps) {
 
 function ExpiringContracts({ token }: PageProps) {
   const { options, status, error } = useHistoricoMeta(token);
-  const [filters, setFilters] = useState<HistoricoFilters>({});
-  const [bucket, setBucket] = useState<string | null>(null);
-  const [sort, setSort] = useState("days_asc");
+  const [filters, setFilters] = useStoredState<HistoricoFilters>("vencimientos.filters", {});
+  const [bucket, setBucket] = useStoredState<string | null>("vencimientos.bucket", null);
+  const [sort, setSort] = useStoredState("vencimientos.sort", "days_asc");
   const [openId, setOpenId] = useState<number | null>(null);
   const key = JSON.stringify(filters);
   // Without a selected window the list shows what is still running; expired
@@ -340,6 +345,7 @@ function ExpiringContracts({ token }: PageProps) {
         onChange={setFilters}
         extra={toggles}
         onExport={() => exporter.run("vencimientos", listFilters, sort)}
+        favorites
         exporting={exporter.busy}
         result={buckets.data ? `${num(buckets.data.reduce((s, b) => s + b.count, 0))} contratos con estos filtros` : undefined}
       />
@@ -361,10 +367,11 @@ function ExpiringContracts({ token }: PageProps) {
         {rows.length ? <>
           <div className="hist-table-wrap">
             <table className="hist-table">
-              <thead><tr><th>Prioridad</th><th>Días</th><th>Fin de vigencia</th><th>Entidad · proceso</th><th className="hist-col-opt">Proveedor actual</th><th className="hist-money">Monto</th></tr></thead>
+              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Prioridad</th><th>Días</th><th>Fin de vigencia</th><th>Entidad · proceso</th><th className="hist-col-opt">Proveedor actual</th><th className="hist-money">Monto</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
+                    <td className="hist-fav-col"><HistFav token={token} kind="vencimientos" row={row} /></td>
                     <td><PriorityBadge priority={row.priority} /></td>
                     <td className="hist-days" style={{ color: priorityTone(row.priority) }}>{row.days_to_end}</td>
                     <td className="hist-num">{shortDate(row.end_date)}<span className="hist-sub"><span className={`hist-tag ${row.is_real_date ? "real" : ""}`}>{row.is_real_date ? "Fecha real" : "Estimada"}</span>{row.possibly_renewed ? <span className="hist-tag">Posible renovado</span> : null}</span></td>
@@ -378,11 +385,14 @@ function ExpiringContracts({ token }: PageProps) {
           </div>
           <div className="hist-cards">
             {rows.map((row) => (
-              <button key={row.id} type="button" className="hist-card" style={{ "--tone": priorityTone(row.priority) } as React.CSSProperties} onClick={() => setOpenId(row.id)}>
+              <div className="hist-card-item" key={row.id}>
+              <button type="button" className="hist-card" style={{ "--tone": priorityTone(row.priority) } as React.CSSProperties} onClick={() => setOpenId(row.id)}>
                 <span className="hist-row"><PriorityBadge priority={row.priority} /><span className="hist-days" style={{ color: priorityTone(row.priority) }}>{row.days_to_end} días</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-row"><span className="hist-sub">{titleCase(row.supplier_name)}</span><span className="hist-strong hist-num">{moneyShort(row.amount)}</span></span>
               </button>
+              <HistFav token={token} kind="vencimientos" row={row} />
+              </div>
             ))}
           </div>
           <Pager page={list.page} pageSize={list.pageSize} total={list.data?.total ?? 0} onPage={list.setPage} />
@@ -395,9 +405,9 @@ function ExpiringContracts({ token }: PageProps) {
 
 function RecurringPurchases({ token }: PageProps) {
   const { options, status, error } = useHistoricoMeta(token);
-  const [filters, setFilters] = useState<HistoricoFilters>({});
-  const [bucket, setBucket] = useState<string | null>(null);
-  const [sort, setSort] = useState("days_asc");
+  const [filters, setFilters] = useStoredState<HistoricoFilters>("recurrentes.filters", {});
+  const [bucket, setBucket] = useStoredState<string | null>("recurrentes.bucket", null);
+  const [sort, setSort] = useStoredState("recurrentes.sort", "days_asc");
   const [openId, setOpenId] = useState<number | null>(null);
   const key = JSON.stringify(filters);
   const listFilters = useMemo(() => ({ ...filters, buckets: bucket ? [bucket] : [] }), [key, bucket]);
@@ -414,6 +424,7 @@ function RecurringPurchases({ token }: PageProps) {
         onChange={setFilters}
         extra={<SearchAndAmount filters={filters} onChange={setFilters} placeholder="Busca entidad o proveedor" />}
         onExport={() => exporter.run("recurrentes", listFilters, sort)}
+        favorites
         exporting={exporter.busy}
         result={list.data ? `${num(list.data.total)} pares entidad–proveedor` : undefined}
       />
@@ -437,10 +448,11 @@ function RecurringPurchases({ token }: PageProps) {
         {rows.length ? <>
           <div className="hist-table-wrap">
             <table className="hist-table">
-              <thead><tr><th>Próxima compra</th><th>Patrón</th><th>Entidad</th><th className="hist-col-opt">Proveedor actual</th><th>Órdenes 12m</th><th className="hist-money">Monto 12m</th></tr></thead>
+              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Próxima compra</th><th>Patrón</th><th>Entidad</th><th className="hist-col-opt">Proveedor actual</th><th>Órdenes 12m</th><th className="hist-money">Monto 12m</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
+                    <td className="hist-fav-col"><HistFav token={token} kind="recurrentes" row={row} /></td>
                     <td className="hist-num"><span className="hist-strong">{shortDate(row.next_purchase_date)}</span><span className="hist-sub">{row.days_to_next < 0 ? `atrasada ${-row.days_to_next} días` : `en ${row.days_to_next} días`}</span></td>
                     <td>{row.pattern}</td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{titleCase(row.department)}</span></td>
@@ -454,11 +466,14 @@ function RecurringPurchases({ token }: PageProps) {
           </div>
           <div className="hist-cards">
             {rows.map((row) => (
-              <button key={row.id} type="button" className="hist-card" onClick={() => setOpenId(row.id)}>
+              <div className="hist-card-item" key={row.id}>
+              <button type="button" className="hist-card" onClick={() => setOpenId(row.id)}>
                 <span className="hist-row"><span className="hist-strong">{shortDate(row.next_purchase_date)}</span><span className="hist-tag">{row.pattern}</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-row"><span className="hist-sub">{titleCase(row.supplier_name)}</span><span className="hist-strong hist-num">{moneyShort(row.amount_12m_supplier)}</span></span>
               </button>
+              <HistFav token={token} kind="recurrentes" row={row} />
+              </div>
             ))}
           </div>
           <Pager page={list.page} pageSize={list.pageSize} total={list.data?.total ?? 0} onPage={list.setPage} />
@@ -473,7 +488,7 @@ function RecurringPurchases({ token }: PageProps) {
 
 export function HistoricoPac({ token }: PageProps) {
   const { options, status, error } = useHistoricoMeta(token);
-  const [filters, setFilters] = useState<HistoricoFilters>({});
+  const [filters, setFilters] = useStoredState<HistoricoFilters>("pac.filters", {});
   const [openId, setOpenId] = useState<number | null>(null);
   const key = JSON.stringify(filters);
   const summary = useLatest(() => historicoApi.pacSummary(token, filters), [token, key]);
@@ -493,6 +508,7 @@ export function HistoricoPac({ token }: PageProps) {
         onChange={setFilters}
         extra={<SearchAndAmount filters={filters} onChange={setFilters} placeholder="Busca entidad o descripción" amount={false} />}
         onExport={() => exporter.run("pac", filters)}
+        favorites
         exporting={exporter.busy}
         result={totals ? `${num(totals.items)} ítems del PAC` : undefined}
       />
@@ -524,10 +540,11 @@ export function HistoricoPac({ token }: PageProps) {
         {rows.length ? <>
           <div className="hist-table-wrap">
             <table className="hist-table">
-              <thead><tr><th>Mes previsto</th><th>Entidad</th><th>Tipo de proceso</th><th className="hist-col-opt">Descripción</th><th>Ya adjudicó</th></tr></thead>
+              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Mes previsto</th><th>Entidad</th><th>Tipo de proceso</th><th className="hist-col-opt">Descripción</th><th>Ya adjudicó</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
+                    <td className="hist-fav-col"><HistFav token={token} kind="pac" row={row} /></td>
                     <td className="hist-strong" style={{ color: row.situation.startsWith("Por convocar") ? "var(--urg-p2-ink)" : undefined }}>{monthName(row.planned_month)}</td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{titleCase(row.department)} · {row.situation}</span></td>
                     <td>{row.process_type}</td>
@@ -540,11 +557,14 @@ export function HistoricoPac({ token }: PageProps) {
           </div>
           <div className="hist-cards">
             {rows.map((row) => (
-              <button key={row.id} type="button" className="hist-card" style={{ "--tone": row.situation.startsWith("Por convocar") ? "var(--urg-p2-ink)" : "var(--line)" } as React.CSSProperties} onClick={() => setOpenId(row.id)}>
+              <div className="hist-card-item" key={row.id}>
+              <button type="button" className="hist-card" style={{ "--tone": row.situation.startsWith("Por convocar") ? "var(--urg-p2-ink)" : "var(--line)" } as React.CSSProperties} onClick={() => setOpenId(row.id)}>
                 <span className="hist-row"><span className="hist-strong">{monthName(row.planned_month)}</span><span className="hist-tag">{row.process_type}</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-sub">{row.item_description || row.process_description}</span>
               </button>
+              <HistFav token={token} kind="pac" row={row} />
+              </div>
             ))}
           </div>
           <Pager page={list.page} pageSize={list.pageSize} total={list.data?.total ?? 0} onPage={list.setPage} />
@@ -569,8 +589,8 @@ const STATUS_OPTIONS: Array<[HistoricoAlertStatus, string]> = [["nueva", "Nueva"
 
 export function HistoricoAlertas({ token }: PageProps) {
   const { options, status, error } = useHistoricoMeta(token);
-  const [scope, setScope] = useState<"all" | "mine">("all");
-  const [priority, setPriority] = useState<HistoricoPriority | null>(null);
+  const [scope, setScope] = useStoredState<"all" | "mine">("alertas.scope", "all");
+  const [priority, setPriority] = useStoredState<HistoricoPriority | null>("alertas.priority", null);
   const [page, setPage] = useState(1);
   const [configOpen, setConfigOpen] = useState(false);
   const [detail, setDetail] = useState<{ kind: HistoricoKind; id: number } | null>(null);

@@ -55,6 +55,29 @@ export function Chip({ tone, label, title }: { tone: ChipTone; label: React.Reac
 
 /* ---------- FilterChip ---------- */
 
+/** Star toggle for a process/contract. Stops propagation so it works inside clickable rows. */
+export function FavoriteButton({ active, onToggle, label, size = "md" }: {
+  active: boolean;
+  onToggle: () => void;
+  label: string;
+  size?: "sm" | "md";
+}) {
+  const action = active ? "Quitar de favoritos" : "Marcar como favorito";
+  return (
+    <button
+      type="button"
+      className={`ui-fav ${size === "sm" ? "ui-fav-sm" : ""}`}
+      aria-pressed={active}
+      aria-label={`${action}: ${label}`}
+      title={action}
+      onClick={(event) => { event.stopPropagation(); onToggle(); }}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <Icon name="star" size={size === "sm" ? 16 : 18} />
+    </button>
+  );
+}
+
 export function FilterChip({
   active = false,
   count,

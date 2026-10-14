@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, ApiError, DocumentRecord, Opportunity, Run } from "../api";
-import { Chip, Icon } from "../ui";
+import { Chip, FavoriteButton, Icon } from "../ui";
+import { readStored, useFavorites, writeStored } from "../favorites";
 import { CommercialClass, ConfirmModal, Country, Empty, HighlightedText, RunProgress, addKeyword, commercialSignal, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, normalizedSearchTerm, parseDate, presentationDeadline, sourceBelongsToCountry, uniqueKeywords, useDismissableMenu, useRadarKeywords } from "../shared";
 
 export function documentTypeLabel(doc: DocumentRecord): string {
@@ -2204,6 +2205,13 @@ export function ArchivedProcesses({
   );
 }
 
+type StoredTableState = {
+  resetKey: string;
+  commercialFilter: CommercialClass | null;
+  columnFilters: TableColumnFilters;
+  dateSort: DateSortState | null;
+};
+
 export function OpportunityTable({
   rows,
   country,
@@ -2233,11 +2241,30 @@ export function OpportunityTable({
   onTargetConsumed?: () => void;
   onGoHome?: (country: Country) => void;
 }) {
-  const [commercialFilter, setCommercialFilter] = useState<CommercialClass | null>(null);
-  const [columnFilters, setColumnFilters] = useState<TableColumnFilters>(emptyTableColumnFilters);
-  const [dateSort, setDateSort] = useState<DateSortState | null>(
-    actionMode === "archive" ? { column: "publication", direction: "desc" } : null,
+  // Table filters survive page/module switches: they are stored with the
+  // resetKey of the search they belong to and restored only for that search,
+  // so starting a new search still clears them as before.
+  const tableStorageKey = `govradar.radar.table.${country}.${actionMode}`;
+  const favoritesStorageKey = `govradar.radar.favorites.${country}.${actionMode}`;
+  const [restoredTable] = useState(() => {
+    const stored = readStored<StoredTableState | null>(tableStorageKey, null);
+    return stored && stored.resetKey === resetKey ? stored : null;
+  });
+  const appliedResetKey = useRef<string | null>(restoredTable ? resetKey : null);
+  const [commercialFilter, setCommercialFilter] = useState<CommercialClass | null>(restoredTable?.commercialFilter ?? null);
+  const [columnFilters, setColumnFilters] = useState<TableColumnFilters>(
+    restoredTable ? { ...emptyTableColumnFilters, ...restoredTable.columnFilters } : emptyTableColumnFilters,
   );
+  const [dateSort, setDateSort] = useState<DateSortState | null>(
+    restoredTable ? restoredTable.dateSort : actionMode === "archive" ? { column: "publication", direction: "desc" } : null,
+  );
+  const [favoritesOnly, setFavoritesOnly] = useState(() => readStored(favoritesStorageKey, false));
+  const favorites = useFavorites(token);
+  useEffect(
+    () => writeStored(tableStorageKey, { resetKey, commercialFilter, columnFilters, dateSort } satisfies StoredTableState),
+    [tableStorageKey, resetKey, commercialFilter, columnFilters, dateSort],
+  );
+  useEffect(() => writeStored(favoritesStorageKey, favoritesOnly), [favoritesStorageKey, favoritesOnly]);
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [activeRowId, setActiveRowId] = useState<number | null>(null);
@@ -2281,6 +2308,8 @@ export function OpportunityTable({
     setActionError("");
     setUnavailableProposalIds(new Set());
     setManualProposalUpdates(new Map());
+    if (appliedResetKey.current === resetKey) return;
+    appliedResetKey.current = resetKey;
     setColumnFilters(emptyTableColumnFilters);
     setDateSort(actionMode === "archive" ? { column: "publication", direction: "desc" } : null);
   }, [resetKey, actionMode]);
@@ -2310,6 +2339,7 @@ export function OpportunityTable({
     const processNeedle = normalizedSearchTerm(columnFilters.process);
     const descriptionNeedle = normalizedSearchTerm(columnFilters.description);
     return rowsWithSignals.filter(({ item, signal }) => {
+      if (favoritesOnly && !favorites.keys.has(`opportunity::${item.id}`)) return false;
       if (commercialFilter && signal.className !== commercialFilter) return false;
       if (columnFilters.priority && item.priority.toUpperCase() !== columnFilters.priority) return false;
       if (entityNeedle && !normalizedSearchTerm(item.entity).includes(entityNeedle)) return false;
@@ -2324,7 +2354,11 @@ export function OpportunityTable({
       if (columnFilters.amountReserved) return !Number.isFinite(item.amount) || item.amount <= 0;
       return !(columnFilters.amountMin || columnFilters.amountMax) || numericMatch(item.amount, columnFilters.amountMin, columnFilters.amountMax);
     });
-  }, [rowsWithSignals, commercialFilter, columnFilters, countdownNow, trackedOpportunityIds]);
+  }, [rowsWithSignals, commercialFilter, columnFilters, countdownNow, trackedOpportunityIds, favoritesOnly, favorites.keys]);
+  const favoriteCount = useMemo(
+    () => rowsWithSignals.filter(({ item }) => favorites.keys.has(`opportunity::${item.id}`)).length,
+    [rowsWithSignals, favorites.keys],
+  );
 
   const sortedRows = useMemo(() => {
     if (!dateSort && actionMode === "restore") {
@@ -2443,6 +2477,15 @@ export function OpportunityTable({
               <b>{counts[filter.className]}</b>
             </button>
           ))}
+          <button
+            type="button"
+            className={`commercial-filter favorites ${favoritesOnly ? "active" : ""}`}
+            aria-pressed={favoritesOnly}
+            onClick={() => setFavoritesOnly((current) => !current)}
+          >
+            <span><Icon name="star" size={16} />Favoritos</span>
+            <b>{favoriteCount}</b>
+          </button>
         </div>
         <div className="table-action-buttons">
           {onGoHome ? (
@@ -2529,6 +2572,8 @@ export function OpportunityTable({
                 signal={signal}
                 country={country}
                 key={item.id}
+                isFavorite={favorites.keys.has(`opportunity::${item.id}`)}
+                onToggleFavorite={() => void favorites.toggle("opportunity", String(item.id), `${item.nomenclature} · ${item.entity}`)}
                 onOpenDocuments={setSelectedOpportunity}
                 onRemove={confirmRemove}
                 actionMode={actionMode}
@@ -2556,6 +2601,11 @@ export function OpportunityTable({
       <div className="ui-mcards opp-phone-cards" aria-label="Oportunidades">
         {sortedRows.slice(0, 100).map(({ item, signal }) => (
           <article className="ui-mcard opp-phone-card" key={item.id}>
+            <FavoriteButton
+              active={favorites.keys.has(`opportunity::${item.id}`)}
+              onToggle={() => void favorites.toggle("opportunity", String(item.id), `${item.nomenclature} · ${item.entity}`)}
+              label={item.nomenclature || item.entity}
+            />
             <button type="button" className="opp-phone-card-open" onClick={() => setSelectedOpportunity(item)}>
               <span className="ui-mcard-top">
                 <Chip tone={`signal-${signal.className}` as "signal-green"} label={signal.label} />
@@ -2960,6 +3010,8 @@ export function OpportunityRow({
   onSendToTracking,
   onLeaveInReview,
   onOpenReviewHistory,
+  isFavorite = false,
+  onToggleFavorite,
 }: {
   item: Opportunity;
   signal: ReturnType<typeof commercialSignal>;
@@ -2982,6 +3034,8 @@ export function OpportunityRow({
   onSendToTracking?: (item: Opportunity) => Promise<void>;
   onLeaveInReview?: (item: Opportunity, comment: string) => Promise<void>;
   onOpenReviewHistory?: (item: Opportunity) => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
 }) {
   const proposalDeadline = presentationDeadline(item);
   const displayPublicationDate = item.publication_date || item.opening_date;
@@ -2993,7 +3047,12 @@ export function OpportunityRow({
   const isNewOpportunity = isOpportunityNew(item);
   return (
     <tr id={`opportunity-row-${item.id}`} className={`${isActive ? "row-active" : ""} ${isTracked ? "row-tracked" : ""}`} onClick={onActivate}>
-      <td><span className={`priority p${item.priority}`}>{item.priority}</span></td>
+      <td>
+        <span className="opp-priority-cell">
+          {onToggleFavorite ? <FavoriteButton size="sm" active={isFavorite} onToggle={onToggleFavorite} label={item.nomenclature || item.entity} /> : null}
+          <span className={`priority p${item.priority}`}>{item.priority}</span>
+        </span>
+      </td>
       {actionMode === "restore" ? (
         <td>
           {onUpdateArchiveReason ? (

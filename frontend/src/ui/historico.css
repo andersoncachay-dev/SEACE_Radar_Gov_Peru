@@ -211,3 +211,12 @@
 @media (max-width: 1023px) {
   .hist-msel > button, .hist-module .hist-search, .hist-module .hist-select { min-height: var(--control-h-touch); }
 }
+
+/* Favoritos */
+.hist-module .hist-table .hist-fav-col { width: 40px; padding-left: var(--space-1); padding-right: 0; }
+.hist-card-item { position: relative; }
+.hist-card-item .hist-card { padding-right: 52px; }
+.hist-card-item > .ui-fav { position: absolute; top: var(--space-1); right: var(--space-1); }
+.hist-drawer-actions { display: flex; align-items: center; gap: var(--space-1); flex: none; }
+.hist-fav-toggle .ui-icon { color: var(--signal-amber-dot); }
+.hist-fav-toggle[aria-pressed="true"] .ui-icon { fill: currentColor; }

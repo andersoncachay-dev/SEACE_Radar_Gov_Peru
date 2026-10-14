@@ -6,7 +6,7 @@ import io
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import case, distinct, func, or_, select
+from sqlalchemy import String, case, cast, distinct, func, or_, select
 from sqlalchemy.orm import Session
 
 from ...models import HistContract, HistContracting, HistExpiring, HistPacItem, HistRecurring
@@ -34,6 +34,9 @@ class Filters:
     hide_renewed: bool = False
     datasets: list[str] = field(default_factory=list)
     min_amount: float = 0
+    # None = no favorites filter; otherwise the user's keys per favorite kind
+    # (services/favorite_service.py), set by the router for "Solo favoritos".
+    favorite_keys: dict[str, list[str]] | None = None
 
 
 def _like(term: str) -> str:
@@ -60,6 +63,8 @@ def _contracting_conditions(filters: Filters, model=HistContracting) -> list:
         conditions.append(model.dataset.in_(filters.datasets))
     if filters.min_amount:
         conditions.append(model.amount >= filters.min_amount)
+    if filters.favorite_keys is not None:
+        conditions.append(model.source_key.in_(filters.favorite_keys.get("hist_contratacion", [])))
     if filters.q.strip():
         term = _like(filters.q)
         conditions.append(or_(
@@ -195,6 +200,7 @@ def _contracting_dict(row: HistContracting) -> dict:
         "reference_amount": row.reference_amount, "supplier_ruc": row.supplier_ruc, "supplier_name": row.supplier_name,
         "status": row.status, "direct_cause": row.direct_cause, "object_type": row.object_type,
         "government_level": row.government_level, "relevance": row.relevance,
+        "fav_key": row.source_key,
     }
 
 
@@ -274,6 +280,16 @@ def list_expiring(db: Session, filters: Filters, page: int = 1, page_size: int =
     return {"items": [_expiring_dict(*row) for row in rows], "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
 
 
+def recurring_fav_key():
+    """SQL form of the hist_recurrente favorite key (same as its alert ref_key)."""
+    return HistRecurring.entity_ruc + "|" + HistRecurring.supplier_ruc
+
+
+def pac_fav_key():
+    """SQL form of the hist_pac favorite key (same as its alert ref_key)."""
+    return cast(HistPacItem.year, String) + "|" + HistPacItem.entity_code + "|" + HistPacItem.reference_number + "|" + HistPacItem.item_number
+
+
 def _recurring_conditions(filters: Filters) -> list:
     conditions = []
     if filters.departments:
@@ -288,6 +304,8 @@ def _recurring_conditions(filters: Filters) -> list:
         conditions.append(HistRecurring.pattern.in_(filters.patterns))
     if filters.min_amount:
         conditions.append(HistRecurring.amount_12m_supplier >= filters.min_amount)
+    if filters.favorite_keys is not None:
+        conditions.append(recurring_fav_key().in_(filters.favorite_keys.get("hist_recurrente", [])))
     if filters.q.strip():
         term = _like(filters.q)
         conditions.append(or_(HistRecurring.entity_name.ilike(term), HistRecurring.supplier_name.ilike(term), HistRecurring.last_order_description.ilike(term)))
@@ -304,6 +322,7 @@ def _recurring_dict(row: HistRecurring) -> dict:
         "last_order_amount": row.last_order_amount, "last_order_description": row.last_order_description,
         "pattern": row.pattern, "next_purchase_date": row.next_purchase_date.isoformat() if row.next_purchase_date else None,
         "days_to_next": row.days_to_next, "bucket": row.bucket,
+        "fav_key": f"{row.entity_ruc}|{row.supplier_ruc}",
     }
 
 
@@ -339,6 +358,8 @@ def _pac_conditions(filters: Filters) -> list:
         conditions.append(HistPacItem.government_level.in_(filters.government_levels))
     if filters.situations:
         conditions.append(HistPacItem.situation.in_(filters.situations))
+    if filters.favorite_keys is not None:
+        conditions.append(pac_fav_key().in_(filters.favorite_keys.get("hist_pac", [])))
     if filters.q.strip():
         term = _like(filters.q)
         conditions.append(or_(HistPacItem.entity_name.ilike(term), HistPacItem.item_description.ilike(term), HistPacItem.process_description.ilike(term)))
@@ -379,6 +400,7 @@ def _pac_dict(row: HistPacItem) -> dict:
         "province": row.province, "district": row.district, "planned_month": row.planned_month,
         "published_at": row.published_at.isoformat() if row.published_at else None,
         "situation": row.situation, "already_awarded": row.already_awarded,
+        "fav_key": f"{row.year}|{row.entity_code}|{row.reference_number}|{row.item_number}",
     }
 
 
