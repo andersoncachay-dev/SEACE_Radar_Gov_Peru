@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +16,8 @@ from ..schemas import (
     AppSettingsUpdate,
     SchedulerIntervalOut,
     SchedulerIntervalUpdate,
+    TenantBrandIn,
+    TenantBrandOut,
     ScoringConfigOut,
     ScoringConfigUpdate,
     TrackingDateRefreshStatusOut,
@@ -24,6 +29,26 @@ router = APIRouter(prefix="/app-settings", tags=["app settings"])
 
 VERSION_KEY = "version_label"
 DEFAULT_VERSION_LABEL = "Versión 1.0 (Beta)"
+
+BRAND_KEY = "tenant_brand"
+DEFAULT_BRAND = {"name": "RODAR Consulting", "logoUrl": "/assets/Rodarfondoblanco.png", "primary": "#185bc1"}
+# Logos are stored inline as raster data URLs (no SVG: it can carry script) or
+# point at a bundled /assets file. ~300 KB of base64 keeps the row small.
+_LOGO_DATA_URL = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
+_LOGO_ASSET = re.compile(r"^/assets/[A-Za-z0-9._-]+\.(png|jpe?g|webp|svg)$")
+MAX_LOGO_CHARS = 400_000
+
+
+def _brand_out(item: AppSetting | None) -> TenantBrandOut:
+    brand = dict(DEFAULT_BRAND)
+    if item:
+        try:
+            stored = json.loads(item.value)
+            if isinstance(stored, dict):
+                brand.update({key: stored[key] for key in DEFAULT_BRAND if isinstance(stored.get(key), str)})
+        except ValueError:
+            pass
+    return TenantBrandOut(**brand, updated_at=item.updated_at if item else None)
 
 
 def _settings_out(item: AppSetting | None) -> AppSettingsOut:
@@ -58,6 +83,33 @@ def update_app_settings(
     db.commit()
     db.refresh(item)
     return _settings_out(item)
+
+
+@router.get("/brand", response_model=TenantBrandOut)
+def get_tenant_brand(db: Session = Depends(get_db)):
+    return _brand_out(db.scalar(select(AppSetting).where(AppSetting.key == BRAND_KEY)))
+
+
+@router.put("/brand", response_model=TenantBrandOut)
+def update_tenant_brand(
+    payload: TenantBrandIn,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    logo = payload.logoUrl.strip()
+    if len(logo) > MAX_LOGO_CHARS or not (_LOGO_DATA_URL.match(logo) or _LOGO_ASSET.match(logo)):
+        raise HTTPException(status_code=422, detail="El logo debe ser una imagen PNG, JPG o WebP de hasta 300 KB")
+    value = json.dumps({"name": payload.name.strip(), "logoUrl": logo, "primary": payload.primary.lower()})
+    item = db.scalar(select(AppSetting).where(AppSetting.key == BRAND_KEY))
+    if item:
+        item.value = value
+        item.updated_by_id = current_user.id
+    else:
+        item = AppSetting(key=BRAND_KEY, value=value, updated_by_id=current_user.id)
+        db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _brand_out(item)
 
 
 @router.get("/scheduler/{country}", response_model=SchedulerIntervalOut)

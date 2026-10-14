@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
+import { BrandSettings } from "../ui/BrandSettings";
+import type { TenantBrand } from "../ui/brand";
 import { api, CountryCode, LegalDocumentRecord, RadarKeyword, Run, SchedulerIntervalConfig, TrackingDateRefreshStatus } from "../api";
 import { HistoricoAdmin } from "./historico/HistoricoAdmin";
 import { ConfidentialityContent, Country, Empty, LegalDialog, LegalDocumentsMap, LegalView, LockIcon, formatDate, updateIntervalLabel, useRadarKeywords } from "../shared";
@@ -310,6 +312,8 @@ export function System({
   onSearchKeyword,
   versionLabel,
   onVersionUpdated,
+  brand,
+  onBrandUpdated,
 }: {
   token: string;
   runs: Run[];
@@ -321,6 +325,8 @@ export function System({
   onSearchKeyword: (country: Country, keyword: string) => void;
   versionLabel: string;
   onVersionUpdated: (versionLabel: string) => void;
+  brand: TenantBrand;
+  onBrandUpdated: (brand: TenantBrand) => void;
 }) {
   const [versionDraft, setVersionDraft] = useState(versionLabel);
   const [scoringCountry, setScoringCountry] = useState<CountryCode>("peru");
@@ -491,6 +497,7 @@ export function System({
           {scoringNotice ? <div className="notice success" role="status">{scoringNotice}</div> : null}
         </form> : scoringError ? <div className="notice danger" role="alert">{scoringError}</div> : <p>Cargando configuración…</p>}
       </section>
+      <BrandSettings token={token} brand={brand} onBrandUpdated={onBrandUpdated} />
       <section className="panel version-admin-panel" aria-labelledby="version-admin-title">
         <div className="version-admin-heading">
           <div>

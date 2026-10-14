@@ -6,7 +6,7 @@ import "./styles.css";
 import "./ui/ui.css";
 import "./ui/legacy-bridge.css";
 import "./ui/historico.css";
-import { applyTenantBrand, DEFAULT_BRAND } from "./ui/brand";
+import { applyTenantBrand, DEFAULT_BRAND, normalizeBrand, TenantBrand } from "./ui/brand";
 import { Country, LegalDialog, LegalDocumentsMap, LegalView, countryFlagUrls, userInitials } from "./shared";
 import { AppShell as UiAppShell, CountryOption, CountrySelector, IconName, NavSection, PageHeader } from "./ui";
 
@@ -402,7 +402,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   const [legalView, setLegalView] = useState<LegalView | null>(null);
   const [versionLabel, setVersionLabel] = useState("Versión 1.0 (Beta)");
   const [historicoUrgent, setHistoricoUrgent] = useState(0);
-  const brand = DEFAULT_BRAND;
+  const [brand, setBrand] = useState<TenantBrand>(DEFAULT_BRAND);
   const legalDocuments = useLegalDocuments();
   const backend = useBackend(token);
   const userName = currentUser?.full_name || "Cargando usuario…";
@@ -424,6 +424,14 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   }, [currentUser, allowedModules, allowedCountries]);
   const activeModule: AppModule = isHistoricoPage(page) ? "historico_peru" : "radar";
   const isAdmin = currentUser?.role === "admin";
+
+  useEffect(() => {
+    api.tenantBrand()
+      .then((stored) => setBrand(normalizeBrand(stored)))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => applyTenantBrand(brand), [brand]);
 
   useEffect(() => {
     api.appSettings()
@@ -602,6 +610,8 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
             onSearchKeyword={openKeywordSearch}
             versionLabel={versionLabel}
             onVersionUpdated={setVersionLabel}
+            brand={brand}
+            onBrandUpdated={setBrand}
           />
         ) : null}
         </Suspense>
