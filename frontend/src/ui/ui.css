@@ -93,7 +93,7 @@ button.ui-kpi:hover { border-color: var(--brand); }
 button.ui-kpi:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-ring); }
 .ui-kpi[aria-pressed="true"] { border-color: var(--brand); background: var(--brand-soft); }
 .ui-kpi-label { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-table); font-weight: var(--weight-semibold); color: var(--muted); }
-.ui-kpi-value { font-size: var(--text-kpi); font-weight: var(--weight-black); letter-spacing: -0.02em; color: var(--ink-strong); font-variant-numeric: tabular-nums; line-height: 1.15; }
+.ui-kpi-value { white-space: nowrap; font-size: var(--text-kpi); font-weight: var(--weight-black); letter-spacing: -0.02em; color: var(--ink-strong); font-variant-numeric: tabular-nums; line-height: 1.15; }
 .ui-kpi-hint { font-size: var(--text-caption); color: var(--muted); }
 .ui-kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3); }
 .ui-kpi-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -196,7 +196,7 @@ select.ui-input { appearance: none; padding-right: 36px; cursor: pointer; }
 .ui-seg-light button { height: 36px; padding: 0 var(--space-4); font-size: var(--text-body); color: var(--signal-pending-ink); }
 .ui-seg-light button[aria-pressed="true"] { background: var(--surface); color: var(--shell-bg); box-shadow: var(--shadow-segment); }
 .ui-module-trigger {
-  display: inline-flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 10px 0 var(--space-1);
+  display: inline-flex; align-items: center; gap: 6px; height: var(--control-h-touch); padding: 0 10px 0 var(--space-1);
   border: 0; background: transparent; color: var(--shell-text-strong); cursor: pointer;
   font-family: var(--font-sans); font-size: 17px; font-weight: var(--weight-bold); min-height: 0; width: auto;
 }

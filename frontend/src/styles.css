@@ -1,24 +1,18 @@
+/* Legacy palette. Shared tokens (--ink, --muted, --line, --surface,
+   --surface-2, --danger, --z-*) come from ui/tokens.css; the blues used by the
+   old screens follow the tenant brand. */
 :root {
   color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --ink: #051326;
-  --muted: #51627b;
-  --line: #c8d8ee;
-  --surface: #ffffff;
-  --surface-2: #f3f7fc;
+  font-family: var(--font-sans);
   --blue-950: #061a35;
   --blue-900: #0a2449;
-  --blue-800: #123f86;
-  --blue-700: #185bc1;
-  --blue-600: #2274e8;
-  --blue-100: #e7f1ff;
+  --blue-800: var(--brand-hover);
+  --blue-700: var(--brand);
+  --blue-600: var(--brand);
+  --blue-100: var(--brand-soft);
   --success: #0f8a5f;
   --warning: #a46408;
-  --danger: #b42318;
   --shadow: 0 8px 20px rgba(6, 26, 53, 0.08);
-  --z-sticky: 30;
-  --z-launcher: 80;
-  --z-modal: 1000;
 }
 
 * {
@@ -207,24 +201,6 @@ select:focus-visible {
   68%, 82% { opacity: 1; transform: scale(1); }
 }
 
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #1a5dcc, #3b8bff);
-  color: white;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.brand-mark.compact {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-}
-
 .brand-logo {
   display: block;
   width: min(210px, 78vw);
@@ -334,17 +310,9 @@ select:focus-visible {
 
 .login-card,
 .panel,
-.kpi,
-.topbar {
+.kpi {
   background: var(--surface);
   border: 1px solid var(--line);
-}
-
-.topbar {
-  position: sticky;
-  top: 12px;
-  z-index: 30;
-  backdrop-filter: blur(14px);
 }
 
 .login-card {
@@ -438,15 +406,6 @@ select:focus-visible {
   color: var(--blue-800);
 }
 
-.login-card-legal {
-  margin: -4px 0 0;
-  color: #526780;
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1.4;
-  text-align: left;
-}
-
 .login-acceptance {
   margin: -4px auto 0;
   color: #526780;
@@ -495,7 +454,6 @@ select:focus-visible {
 }
 
 .login-card h2,
-.topbar h1,
 .panel h2,
 .hero-panel h2 {
   margin: 0;
@@ -532,8 +490,7 @@ input::placeholder {
 
 .primary,
 .ghost,
-.module-row button,
-.segmented button {
+.module-row button {
   min-height: 42px;
   border-radius: 10px;
   font-weight: 700;
@@ -556,28 +513,8 @@ input::placeholder {
   padding: 0 14px;
 }
 
-.app-shell {
-  min-height: 100vh;
-}
-
-.launcher-mobile-session,
 .mobile-table-hint {
   display: none;
-}
-
-.nav-icon {
-  width: 19px;
-  height: 19px;
-  flex: 0 0 19px;
-  color: #d9e8ff;
-  opacity: 0.96;
-}
-
-
-.workspace {
-  min-width: 0;
-  padding: 22px;
-  overflow-x: clip;
 }
 
 .legal-footer {
@@ -711,377 +648,11 @@ input::placeholder {
   font-weight: 700;
 }
 
-.topbar {
-  min-height: 76px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  margin-bottom: 18px;
-}
-
-.top-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.launcher-anchor {
-  position: relative;
-  z-index: 2;
-  flex: 0 0 auto;
-}
-
-.menu-toggle {
-  display: grid;
-  gap: 4px;
-  width: 42px;
-  height: 42px;
-  place-content: center;
-  border: 1px solid #bfd1ea;
-  border-radius: 10px;
-  background: white;
-  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
-}
-
-.menu-toggle:hover,
-.menu-toggle.active {
-  border-color: var(--blue-600);
-  background: var(--blue-100);
-}
-
-.menu-toggle:active {
-  transform: scale(0.97);
-}
-
-.menu-toggle span {
-  display: block;
-  width: 18px;
-  height: 2px;
-  border-radius: 999px;
-  background: #123f86;
-}
-
-.launcher-backdrop {
-  display: none;
-}
-
-.launcher-panel {
-  position: absolute;
-  top: calc(100% + 12px);
-  left: 0;
-  width: min(410px, calc(100vw - 44px));
-  max-height: min(680px, calc(100vh - 104px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 2px solid var(--blue-900);
-  border-radius: 14px;
-  background: linear-gradient(145deg, #f9fcff 0%, #edf5ff 48%, #dceaff 100%);
-  box-shadow: 0 18px 48px rgba(4, 25, 55, 0.24);
-  color: var(--ink);
-  transform-origin: top left;
-  transition: opacity 180ms ease, transform 180ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1));
-}
-
 @starting-style {
   .launcher-panel {
     opacity: 0;
     transform: translateY(-6px) scale(0.98);
   }
-}
-
-.launcher-header {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  background: linear-gradient(120deg, var(--blue-950), var(--blue-900));
-  color: #ffffff;
-}
-
-.launcher-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.launcher-brand img {
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  padding: 3px;
-  border-radius: 9px;
-  background: #ffffff;
-  object-fit: contain;
-}
-
-.launcher-brand div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.launcher-brand span {
-  color: #bcd7ff;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.launcher-brand strong {
-  overflow: hidden;
-  font-size: 0.94rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.launcher-close {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  place-items: center;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-  font-size: 1.45rem;
-  line-height: 1;
-  transition: background 150ms ease, transform 150ms ease;
-}
-
-.launcher-close:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.launcher-close:active {
-  transform: scale(0.96);
-}
-
-.launcher-intro {
-  flex: 0 0 auto;
-  display: grid;
-  gap: 3px;
-  padding: 14px 16px 12px;
-  border-bottom: 1px solid rgba(153, 184, 224, 0.58);
-  background: rgba(255, 255, 255, 0.38);
-}
-
-.launcher-intro strong {
-  color: var(--blue-950);
-  font-size: 0.95rem;
-}
-
-.launcher-intro span {
-  color: #526780;
-  font-size: 0.78rem;
-  line-height: 1.4;
-}
-
-.launcher-nav {
-  display: grid;
-  min-height: 0;
-  flex: 1 1 auto;
-  gap: 14px;
-  overflow-y: auto;
-  padding: 14px 10px;
-  scrollbar-color: rgba(24, 91, 193, 0.58) transparent;
-  scrollbar-width: thin;
-}
-
-.launcher-nav::-webkit-scrollbar {
-  width: 6px;
-}
-
-.launcher-nav::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.launcher-nav::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(34, 116, 232, 0.72), rgba(18, 63, 134, 0.62));
-}
-
-.launcher-nav::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
-}
-
-.launcher-group {
-  display: grid;
-  gap: 5px;
-}
-
-.launcher-group-toggle {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: 10px;
-  background: linear-gradient(90deg, rgba(24, 91, 193, 0.14), rgba(24, 91, 193, 0.05));
-  color: var(--blue-950);
-  font-size: 0.92rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-}
-
-.launcher-group-toggle:hover {
-  background: linear-gradient(90deg, rgba(24, 91, 193, 0.22), rgba(24, 91, 193, 0.1));
-}
-
-.launcher-group-chevron {
-  display: inline-block;
-  transition: transform 0.15s ease;
-  color: var(--blue-700);
-}
-
-.launcher-group-chevron.open {
-  transform: rotate(180deg);
-}
-
-.launcher-group > div {
-  display: grid;
-  gap: 3px;
-  padding: 6px 4px 2px;
-  background: #f3f7fc;
-  border-radius: 10px;
-}
-
-.launcher-nav-item {
-  display: flex;
-  width: 100%;
-  min-height: 56px;
-  align-items: center;
-  gap: 11px;
-  padding: 7px 8px;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--blue-950);
-  text-align: left;
-  transition: background 150ms ease, transform 150ms ease;
-}
-
-.launcher-nav-item:hover,
-.launcher-nav-item.active {
-  background: rgba(255, 255, 255, 0.82);
-}
-
-.launcher-nav-item:active {
-  transform: scale(0.985);
-}
-
-.launcher-icon-shell {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  place-items: center;
-  border-radius: 10px;
-  background: #e3efff;
-  color: var(--blue-700);
-}
-
-.launcher-icon-shell .nav-icon {
-  width: 20px;
-  height: 20px;
-  color: currentColor;
-}
-
-.launcher-nav-item.active .launcher-icon-shell {
-  background: var(--blue-700);
-  color: #ffffff;
-}
-
-.launcher-item-copy {
-  display: grid;
-  min-width: 0;
-  flex: 1 1 auto;
-  gap: 2px;
-}
-
-.launcher-item-copy strong,
-.launcher-item-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.launcher-item-copy strong {
-  font-size: 0.88rem;
-}
-
-.launcher-item-copy small {
-  color: #60748e;
-  font-size: 0.73rem;
-}
-
-.launcher-current {
-  flex: 0 0 auto;
-  border-radius: 999px;
-  padding: 4px 7px;
-  background: #dceaff;
-  color: var(--blue-800);
-  font-size: 0.66rem;
-  font-weight: 700;
-}
-
-.launcher-footer {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border-top: 1px solid rgba(153, 184, 224, 0.58);
-  background: rgba(245, 249, 255, 0.82);
-  color: #47617f;
-  font-size: 0.76rem;
-}
-
-.launcher-version {
-  color: var(--blue-900);
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.launcher-api-status,
-.launcher-api-status > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.launcher-api-status {
-  margin-left: auto;
-}
-
-.launcher-footer i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 3px rgba(15, 138, 95, 0.13);
-}
-
-.launcher-api-status b {
-  color: #0b684c;
-  font-weight: 700;
-}
-
-.top-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .country-flag-pill {
@@ -1108,50 +679,15 @@ input::placeholder {
   object-fit: cover;
 }
 
-.segmented {
-  display: flex;
-  border: 1px solid #bfd1ea;
-  border-radius: 12px;
-  padding: 3px;
-  background: var(--surface-2);
-}
-
-.segmented button,
 .module-row button {
   padding: 0 14px;
   color: #173b6b;
   background: transparent;
 }
 
-.segmented button.selected,
 .module-row button.selected {
   background: var(--blue-700);
   color: white;
-}
-
-.user-pill {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--blue-100);
-  color: var(--blue-800);
-  font-weight: 700;
-}
-
-.user-identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 46px;
-  padding: 3px 10px 3px 4px;
-  border: 1px solid #bfd1ea;
-  border-radius: 999px;
-  background: #f6fbff;
-  color: #0b2445;
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 .hero-panel {
@@ -2259,15 +1795,6 @@ input::placeholder {
   filter: brightness(0.55);
 }
 
-.amount-pie-lines {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
 .amount-pie-callout {
   position: absolute;
   display: flex;
@@ -2581,22 +2108,6 @@ input::placeholder {
 .chile-ml-status.publicada {
   background: #e3f6ea;
   color: #1c7a43;
-}
-
-.chile-ml-status.cerrada,
-.chile-ml-status.revocada {
-  background: #fbe6e6;
-  color: #b3261e;
-}
-
-.chile-ml-status.adjudicada {
-  background: #e6f0fb;
-  color: #1d5faf;
-}
-
-.chile-ml-status.desierta {
-  background: #f5efe0;
-  color: #8a6d1c;
 }
 
 .chile-ml-contract {
@@ -3411,22 +2922,6 @@ input::placeholder {
   color: white;
 }
 
-.overdue-days {
-  display: inline-flex;
-  max-width: 100%;
-  flex-direction: column;
-  align-items: flex-start;
-  color: #b91c1c;
-  font-weight: 700;
-  line-height: 1.12;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.overdue-days b {
-  font: inherit;
-}
-
 .reserved-amount {
   display: inline-block;
   max-width: 104px;
@@ -3750,24 +3245,6 @@ input::placeholder {
 .execute-radar-button:disabled::before {
   animation: none;
   background: #79529d;
-}
-
-.form-stack {
-  display: grid;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.check {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 44px;
-}
-
-.check input {
-  width: 18px;
-  min-height: 18px;
 }
 
 .notice,
@@ -5403,47 +4880,6 @@ th {
   vertical-align: middle;
 }
 
-.sort-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 22px;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 46px;
-  border-radius: 8px;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  font-weight: inherit;
-}
-
-.sort-header span {
-  display: block;
-  min-width: 0;
-  white-space: normal;
-  overflow-wrap: normal;
-  word-break: normal;
-  line-height: 1.15;
-}
-
-.sort-header b {
-  display: grid;
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: 999px;
-  background: #e5eefb;
-  color: #2a5ea7;
-  font-size: 0.78rem;
-}
-
-.sort-header.active b {
-  background: var(--blue-700);
-  color: white;
-}
-
 .plain-header {
   display: flex;
   align-items: center;
@@ -6049,21 +5485,6 @@ table.has-motivo-column td:nth-child(13) {
   place-items: center;
   min-width: 28px;
   padding: 5px 8px;
-}
-
-.priority.pA {
-  background: #dcecff;
-  color: #0d4fa6;
-}
-
-.priority.pB {
-  background: #eef4ff;
-  color: #315681;
-}
-
-.priority.pC {
-  background: #f4f7fb;
-  color: #607088;
 }
 
 .commercial-signal {
@@ -6979,9 +6400,7 @@ table.has-motivo-column td:nth-child(13) {
     border-radius: 14px;
   }
 
-  .launcher-footer {
-    flex-wrap: wrap;
-  }
+  
 
   .legal-dialog-header,
   .legal-dialog-body {
@@ -7038,14 +6457,8 @@ table.has-motivo-column td:nth-child(13) {
     overflow-x: hidden;
   }
 
-  .app-shell,
-  .workspace {
-    width: 100%;
-    min-width: 0;
-    max-width: 100vw;
-  }
+  
 
-  .workspace,
   .login-shell {
     padding: 12px;
   }
@@ -7092,7 +6505,6 @@ table.has-motivo-column td:nth-child(13) {
     font-size: 2.8rem;
   }
 
-  .topbar,
   .panel-title {
     align-items: stretch;
     flex-direction: column;
@@ -7108,27 +6520,15 @@ table.has-motivo-column td:nth-child(13) {
     white-space: normal;
   }
 
-  .top-actions {
-    align-items: center;
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
+  
 
-  .topbar {
-    border-radius: 12px;
-  }
+  
 
-  .top-title {
-    align-items: flex-start;
-  }
+  
 
-  .segmented {
-    width: 100%;
-  }
+  
 
-  .segmented button {
-    flex: 1;
-  }
+  
 
   .module-row {
     flex-direction: column;
@@ -7563,9 +6963,7 @@ table.has-motivo-column td:nth-child(13) {
 }
 
 @media (max-width: 480px) {
-  .workspace {
-    padding: 10px;
-  }
+  
 
   .radar-filter-section.required {
     padding: 14px;
@@ -7576,14 +6974,9 @@ table.has-motivo-column td:nth-child(13) {
     height: 44px;
   }
 
-  .topbar {
-    gap: 10px;
-  }
+  
 
-  .top-actions .ghost,
-  .top-actions .user-identity {
-    flex: 1 1 100%;
-  }
+  
 
   .kpi-grid {
     grid-template-columns: 1fr;
@@ -7720,153 +7113,47 @@ table.has-motivo-column td:nth-child(13) {
     font-size: 16px;
   }
 
-  .app-shell {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
+  
 
-  .workspace {
-    padding: max(8px, env(safe-area-inset-top, 0px)) 10px calc(18px + env(safe-area-inset-bottom, 0px));
-    overflow-x: visible;
-  }
+  
 
-  .topbar {
-    /* Keep the floating launcher independent from Safari's sticky/backdrop
-       containing block while the header itself scrolls away. */
-    position: static;
-    top: auto;
-    z-index: auto;
-    min-height: 62px;
-    align-items: center;
-    flex-direction: row;
-    gap: 8px;
-    margin-bottom: 12px;
-    padding: 8px 9px 8px 66px;
-    border-radius: 14px;
-    background: #ffffff;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-    -webkit-transform: none;
-    transform: none;
-    filter: none;
-    contain: none;
-    overflow: visible;
-    box-shadow: 0 8px 24px rgba(6, 26, 53, 0.14);
-  }
+  
 
-  .top-title {
-    min-width: 0;
-    flex: 1 1 auto;
-    align-items: center;
-    gap: 0;
-  }
+  
 
-  .top-title > div:last-child {
-    min-width: 0;
-  }
+  
 
-  .top-title .overline {
-    display: none;
-  }
+  
 
-  .topbar h1 {
-    display: -webkit-box;
-    overflow: hidden;
-    font-size: clamp(1.06rem, 5vw, 1.35rem);
-    line-height: 1.08;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
+  
 
-  .launcher-anchor {
-    position: fixed;
-    top: max(8px, env(safe-area-inset-top, 0px));
-    left: 10px;
-    z-index: var(--z-launcher);
-    display: grid;
-    width: 54px;
-    height: 62px;
-    place-items: center;
-    pointer-events: none;
-  }
+  
 
-  .menu-toggle {
-    width: 48px;
-    height: 48px;
-    border-color: #9fbae0;
-    border-radius: 12px;
-    box-shadow: 0 4px 8px rgba(6, 26, 53, 0.16);
-    pointer-events: auto;
-  }
+  
 
-  .menu-toggle span {
-    width: 21px;
-    height: 2px;
-  }
+  
 
-  .launcher-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: calc(var(--z-launcher) - 1);
-    background: rgba(6, 22, 46, 0.4);
-    -webkit-backdrop-filter: blur(4px);
-    backdrop-filter: blur(4px);
-  }
+  
 
-  .launcher-panel {
-    top: 58px;
-    left: 0;
-    width: min(410px, calc(100vw - 20px));
-    /* dvh grows when the browser chrome (address/tab bar) auto-hides, which
-       can make the panel taller than the viewport once the chrome reappears
-       (e.g. on tap), hiding the footer behind it. svh is sized for the
-       chrome-visible case, so the panel never overflows under it; dvh stays
-       as the fallback for browsers without svh support. */
-    max-height: calc(100dvh - max(64px, env(safe-area-inset-top, 0px)) - env(safe-area-inset-bottom, 0px) - 38px);
-    max-height: calc(100svh - max(64px, env(safe-area-inset-top, 0px)) - env(safe-area-inset-bottom, 0px) - 38px);
-    border-radius: 14px;
-    pointer-events: auto;
-  }
+  
 
   /* Tighter spacing than desktop so the whole drawer (groups + footer)
      clears the browser chrome without needing to scroll on most phones. */
-  .launcher-header {
-    padding: 9px 14px;
-  }
+  
 
-  .launcher-intro {
-    padding: 8px 14px 7px;
-  }
+  
 
-  .launcher-nav {
-    gap: 6px;
-    padding: 8px 8px;
-  }
+  
 
-  .launcher-nav-item {
-    min-height: 42px;
-    padding: 5px 8px;
-  }
+  
 
-  .launcher-icon-shell {
-    width: 30px;
-    height: 30px;
-    flex: 0 0 30px;
-  }
+  
 
-  .launcher-footer {
-    padding: 7px 14px;
-  }
+  
 
-  .top-actions {
-    min-width: 0;
-    flex: 0 0 auto;
-    flex-wrap: nowrap;
-    gap: 6px;
-  }
+  
 
-  .country-flag-pill,
-  .user-identity {
+  .country-flag-pill {
     min-width: 44px;
     height: 44px;
     min-height: 44px;
@@ -7882,25 +7169,13 @@ table.has-motivo-column td:nth-child(13) {
     height: 44px;
   }
 
-  .user-identity {
-    max-width: 150px;
-    overflow: hidden;
-  }
+  
 
-  .user-identity > span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  
 
-  .user-pill {
-    width: 36px;
-    height: 36px;
-    flex: 0 0 36px;
-  }
+  
 
-  .top-actions .ghost {
-    min-height: 44px;
-  }
+  
 
   .login-shell {
     width: 100%;
@@ -8383,125 +7658,39 @@ table.has-motivo-column td:nth-child(13) {
 }
 
 @media (max-width: 480px) {
-  .topbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "title flag"
-      "user logout";
-    min-height: 104px;
-    align-items: center;
-    column-gap: 8px;
-    row-gap: 4px;
-    padding-top: 7px;
-    padding-bottom: 7px;
-  }
+  
 
-  .launcher-anchor {
-    /* 104px header + 14px vertical padding context: place the 54px anchor
-       on the exact visual midpoint of the initial bar and keep it there. */
-    top: calc(max(8px, env(safe-area-inset-top, 0px)) + 25px);
-  }
+  
 
-  .top-title {
-    grid-area: title;
-  }
+  
 
-  .topbar h1 {
-    font-size: 1.08rem;
-  }
+  
 
-  .top-actions {
-    display: contents;
-  }
+  
 
-  .top-actions .country-flag-pill {
-    grid-area: flag;
-    justify-self: end;
-  }
+  
 
-  .top-actions .user-identity {
-    grid-area: user;
-    display: inline-flex;
-    width: 100%;
-    max-width: none;
-    min-width: 0;
-    min-height: 44px;
-    height: 44px;
-    padding: 3px 9px 3px 5px;
-    font-size: 0.84rem;
-  }
+  
 
-  .top-actions .user-identity > span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  
 
-  .top-actions > .ghost {
-    grid-area: logout;
-    display: inline-flex;
-    min-width: 56px;
-    min-height: 44px;
-    align-items: center;
-    justify-content: center;
-    padding-inline: 9px;
-    font-size: 0.84rem;
-  }
+  
 
-  .top-actions .user-pill {
-    width: 30px;
-    height: 30px;
-    flex-basis: 30px;
-    font-size: 0.78rem;
-  }
+  
 
-  .launcher-mobile-session {
-    display: flex;
-    grid-column: 1 / -1;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    width: 100%;
-    margin-top: 4px;
-    padding-top: 6px;
-    border-top: 1px solid #c8d8ee;
-  }
+  
 
-  .launcher-mobile-user {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 8px;
-  }
+  
 
-  .launcher-mobile-user > span:last-child {
-    display: grid;
-    min-width: 0;
-  }
+  
 
-  .launcher-mobile-user small,
-  .launcher-mobile-user strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  
 
-  .launcher-mobile-user small {
-    color: #607792;
-    font-size: 0.68rem;
-  }
+  
 
-  .launcher-mobile-user strong {
-    max-width: 175px;
-    color: var(--blue-950);
-    font-size: 0.78rem;
-  }
+  
 
-  .launcher-mobile-session .ghost {
-    min-height: 44px;
-    flex: 0 0 auto;
-  }
+  
 
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -10207,32 +9396,6 @@ table.has-motivo-column td:nth-child(13) {
 }
 
 /* --- v2.0: module switch (launcher) and Histórico Perú admin ------------- */
-.launcher-modules {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(153, 184, 224, 0.58);
-}
-
-.launcher-module {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fff;
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-}
-
-.launcher-module strong { font-size: 0.9rem; }
-.launcher-module small { color: var(--muted); font-size: 0.74rem; line-height: 1.35; }
-.launcher-module:hover { border-color: var(--blue-600); }
-.launcher-module.active { border-color: var(--blue-700); background: var(--blue-100); box-shadow: inset 0 0 0 1px var(--blue-700); }
 
 .digest-toggle {
   display: flex;
@@ -10288,6 +9451,6 @@ table.has-motivo-column td:nth-child(13) {
 }
 
 @media (max-width: 520px) {
-  .launcher-modules { grid-template-columns: minmax(0, 1fr); }
+  
   .historico-keyword-form { grid-template-columns: minmax(0, 1fr); }
 }

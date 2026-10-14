@@ -188,3 +188,21 @@ td { color: var(--ink); }
   .table-scroll-top:has(+ .opp-table-wrap),
   .mobile-table-hint:has(+ .table-scroll-top + .opp-table-wrap) { display: none; }
 }
+
+/* ---------- QA (Fase 5): contraste, foco y objetivos táctiles ---------- */
+.user-main small, .user-access small { color: var(--muted); }
+svg [tabindex]:focus-visible { outline: none; stroke: var(--ink-strong); stroke-width: 2.5px; }
+@media (max-width: 1023px) {
+  .ui-btn { height: var(--control-h-touch); }
+  .ui-btn-icon-only { width: var(--control-h-touch); }
+}
+@media (max-width: 639px) {
+  /* Every tappable control in the page body reaches 44px; tiny inline chip
+     controls (remove-filter ×, popover links) keep their compact size. */
+  .ui-shell-content button:not(.hist-achip button):not(.hist-pop-actions button):not(.hist-clear):not(.ui-mcard button),
+  .ui-shell-content select,
+  .ui-shell-content a.ui-btn {
+    min-height: var(--control-h-touch);
+  }
+  .text-action { display: inline-flex; align-items: center; padding: 0 var(--space-2); }
+}
