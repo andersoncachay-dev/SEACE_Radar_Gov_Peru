@@ -4,6 +4,7 @@ import { api, historicoApi, Alert, AlertRule, APP_MODULES, AppModule, confirmPas
 import "./ui/tokens.css";
 import "./styles.css";
 import "./ui/ui.css";
+import "./ui/legacy-bridge.css";
 import { applyTenantBrand, DEFAULT_BRAND } from "./ui/brand";
 import { Country, LegalDialog, LegalDocumentsMap, LegalView, countryFlagUrls, userInitials } from "./shared";
 import { AppShell as UiAppShell, CountryOption, CountrySelector, IconName, NavSection, PageHeader } from "./ui";

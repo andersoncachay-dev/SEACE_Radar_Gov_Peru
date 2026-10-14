@@ -1,0 +1,190 @@
+/* Legacy bridge — maps the Radar's pre-redesign classes onto tokens.css so the
+   old screens share the unified look until each one is fully on ui components.
+   Loaded after styles.css and ui.css. Every value here comes from a token. */
+
+/* ---------- Base type ---------- */
+body { font-family: var(--font-sans); color: var(--ink); background: var(--page-bg); }
+label { color: var(--label); font-weight: var(--weight-semibold); font-size: var(--text-table); }
+
+/* ---------- Form controls ---------- */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+select,
+textarea {
+  min-height: var(--control-h);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  transition: border-color var(--motion), box-shadow var(--motion);
+}
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+input:not([type="checkbox"]):not([type="radio"]):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
+
+/* ---------- Buttons ---------- */
+.primary,
+.ghost,
+.danger-button {
+  min-height: var(--control-h);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  transition: background var(--motion), border-color var(--motion), box-shadow var(--motion);
+}
+.primary { background: var(--brand); color: var(--on-brand); border: 1px solid transparent; }
+.primary:hover:not(:disabled) { background: var(--brand-hover); }
+.ghost { background: var(--surface); color: var(--secondary-ink); border: 1px solid var(--control-border); }
+.ghost:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--brand); }
+.danger-button { background: var(--danger); color: var(--on-brand); border: 1px solid transparent; }
+.primary:disabled, .ghost:disabled, .danger-button:disabled { opacity: 0.55; cursor: not-allowed; }
+.primary:focus-visible,
+.ghost:focus-visible,
+.danger-button:focus-visible,
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+
+/* Export = secondary button with a download icon (no green Excel block). */
+.export-excel-button.ui-btn { gap: var(--space-2); }
+.export-excel-icon-button.ui-btn { flex: none; }
+
+/* ---------- Cards / panels / KPIs ---------- */
+.panel,
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.panel { padding: var(--space-5); }
+.panel h2, .panel h3, .panel-title h3 {
+  color: var(--ink-strong);
+  font-size: var(--text-section);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0;
+}
+.panel-title span { color: var(--muted); font-weight: var(--weight-medium); font-size: var(--text-table); }
+.kpi { padding: var(--space-4); color: var(--ink); }
+.kpi span, .kpi small { color: var(--muted); font-size: var(--text-caption); font-weight: var(--weight-medium); }
+.kpi strong {
+  font-size: var(--text-kpi);
+  font-weight: var(--weight-black);
+  color: var(--ink-strong);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-action:hover, .kpi-action.active { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.kpi-grid { gap: var(--space-3); }
+@media (max-width: 639px) {
+  .kpi strong { font-size: var(--text-kpi-mobile); }
+  .panel { padding: var(--space-4); }
+}
+
+/* ---------- Notices ---------- */
+.notice, .empty {
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-table);
+  font-weight: var(--weight-medium);
+}
+.notice.info, .empty { background: var(--urg-p3-bg); color: var(--urg-p3-ink); border: 1px solid var(--urg-p3-border); }
+.notice.danger { background: var(--signal-red-bg); color: var(--signal-red-ink); border: 1px solid var(--signal-red-border); }
+.notice.success { background: var(--signal-green-bg); color: var(--signal-green-ink); border: 1px solid var(--signal-green-border); }
+
+/* ---------- Status pills → chip style ---------- */
+.status,
+.priority,
+.home-status-badge,
+.home-record-type-badge {
+  display: inline-flex;
+  align-items: center;
+  height: var(--chip-h);
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--urg-p3-border);
+  background: var(--urg-p3-bg);
+  color: var(--urg-p3-ink);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+.status.completed, .home-status-badge.green, .priority.pA {
+  background: var(--signal-green-bg); border-color: var(--signal-green-border); color: var(--signal-green-ink);
+}
+.status.failed, .home-status-badge.red {
+  background: var(--signal-red-bg); border-color: var(--signal-red-border); color: var(--signal-red-ink);
+}
+.home-status-badge.amber, .priority.pB {
+  background: var(--signal-amber-bg); border-color: var(--signal-amber-border); color: var(--signal-amber-ink);
+}
+.status.queued, .status.cancelled, .priority.pC {
+  background: var(--signal-pending-bg); border-color: var(--signal-pending-border); color: var(--signal-pending-ink);
+}
+
+.commercial-signal { font-size: var(--text-caption); }
+.commercial-signal b { font-weight: var(--weight-semibold); }
+.commercial-signal.green i { background: var(--signal-green-dot); }
+.commercial-signal.amber i { background: var(--signal-amber-dot); }
+.commercial-signal.pending i { background: var(--signal-pending-dot); }
+.commercial-signal.red i { background: var(--signal-red-dot); }
+
+.commercial-filter {
+  min-height: var(--control-h-sm);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--chip-border);
+  background: var(--surface);
+  color: var(--label);
+  font-size: var(--text-table);
+  font-weight: var(--weight-medium);
+}
+.commercial-filter b {
+  min-width: 24px;
+  height: 22px;
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
+}
+
+/* ---------- Tables ---------- */
+th { color: var(--th-ink); font-weight: var(--weight-semibold); }
+td { color: var(--ink); }
+
+/* ---------- Touch targets on phone ---------- */
+@media (max-width: 639px) {
+  .primary, .ghost, .danger-button { min-height: var(--control-h-touch); }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), select, textarea {
+    min-height: var(--control-h-touch);
+    font-size: var(--text-section); /* 16px: evita el zoom de iOS al enfocar */
+  }
+}
+
+/* ---------- Oportunidades: tarjetas en teléfono ---------- */
+.opp-phone-cards { display: none; }
+.opp-phone-card { padding: 0; overflow: hidden; }
+.opp-phone-card-open {
+  display: flex; flex-direction: column; gap: var(--space-2); width: 100%;
+  padding: var(--space-4); background: transparent; border: 0; text-align: left;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.opp-phone-card-open .ui-mcard-desc {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.opp-phone-card-actions { display: flex; justify-content: flex-end; padding: 0 var(--space-4) var(--space-3); }
+@media (max-width: 639px) {
+  .opp-phone-cards { display: flex; }
+  .opp-table-wrap,
+  .opp-phone-cards ~ .table-scroll-top,
+  .table-scroll-top:has(+ .opp-table-wrap),
+  .mobile-table-hint:has(+ .table-scroll-top + .opp-table-wrap) { display: none; }
+}

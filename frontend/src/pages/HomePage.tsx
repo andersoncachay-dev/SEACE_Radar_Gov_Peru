@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, Alert, Opportunity, Run, SchedulerStatus, Stats } from "../api";
 import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, RunProgress, commercialSignal, countryCode, countryFlagUrls, formatDate, formatMoney, formatUtcDate, matchesCompletePhrase, parseDate, runHistoryLabel, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
 import { alertStatusLabel, ChannelSymbol } from "./AlertsPage";
-import { excelLogoUrl, exportOpportunitiesToExcel, isOpportunityNew } from "./OpportunitiesPage";
+import { Icon } from "../ui";
+import { exportOpportunitiesToExcel, isOpportunityNew } from "./OpportunitiesPage";
 
 export type HomeStatusFilter = "all" | "priority-a" | "vigentes" | "cerrados";
 export type YearBreakdownMode = "processes";
@@ -988,7 +989,7 @@ export function Home({
                 </button>
               </div>
               <button
-                className="export-excel-icon-button"
+                className="export-excel-icon-button ui-btn ui-btn-secondary ui-btn-icon-only"
                 type="button"
                 title="Descargar procesos filtrados en Excel"
                 aria-label="Descargar procesos filtrados en Excel"
@@ -1000,7 +1001,7 @@ export function Home({
                   "dashboard",
                 )}
               >
-                <img src={excelLogoUrl} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+                <Icon name="download" size={16} />
               </button>
               <div className="process-sort-control" ref={sortMenuRef}>
                 <button
