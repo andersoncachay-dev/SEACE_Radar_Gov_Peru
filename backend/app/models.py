@@ -6,6 +6,7 @@ from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Intege
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
+from .hist_scope import HistScoped
 
 
 class TimestampMixin:
@@ -393,12 +394,13 @@ class OpportunityReviewComment(TimestampMixin, Base):
     comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
 
-# --- Histórico Perú (CONOSCE open data, refreshed monthly) -----------------
+# --- Histórico (Perú: CONOSCE, Chile: ChileCompra open data) ---------------
 # Only rows matching an active HistKeyword are persisted; derived tables
 # (hist_expirings, hist_recurrings) and hist_alerts are rebuilt on every import.
+# Every table is per country (HistScoped, see hist_scope.py).
 
 
-class HistImportRun(TimestampMixin, Base):
+class HistImportRun(HistScoped, TimestampMixin, Base):
     __tablename__ = "hist_import_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -415,11 +417,12 @@ class HistImportRun(TimestampMixin, Base):
     error: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
 
-class HistKeyword(TimestampMixin, Base):
+class HistKeyword(HistScoped, TimestampMixin, Base):
     __tablename__ = "hist_keywords"
+    __table_args__ = (UniqueConstraint("country", "keyword", name="uq_hist_keyword_country"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    keyword: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    keyword: Mapped[str] = mapped_column(String(120), nullable=False)
     category: Mapped[str] = mapped_column(String(80), default="Internet (sin especificar)", nullable=False)
     # include: matches count as the rubro; review: kept but flagged "revisar";
     # exclude: a match removes the row (known false-positive phrases).
@@ -428,11 +431,12 @@ class HistKeyword(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
-class HistEntity(TimestampMixin, Base):
+class HistEntity(HistScoped, TimestampMixin, Base):
     __tablename__ = "hist_entities"
+    __table_args__ = (UniqueConstraint("country", "ruc", name="uq_hist_entity_country_ruc"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    ruc: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
+    ruc: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
     code: Mapped[str] = mapped_column(String(20), default="", index=True, nullable=False)  # CODCONSUCODE / CODIGOENTIDAD
     name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
     entity_type: Mapped[str] = mapped_column(String(80), default="", nullable=False)
@@ -442,12 +446,12 @@ class HistEntity(TimestampMixin, Base):
     district: Mapped[str] = mapped_column(String(80), default="", nullable=False)
 
 
-class HistContracting(TimestampMixin, Base):
+class HistContracting(HistScoped, TimestampMixin, Base):
     """One purchase order <= 8 UIT, or one awarded item > 8 UIT."""
 
     __tablename__ = "hist_contractings"
     __table_args__ = (
-        UniqueConstraint("dataset", "source_key", name="uq_hist_contracting_source"),
+        UniqueConstraint("country", "dataset", "source_key", name="uq_hist_contracting_source"),
         Index("ix_hist_contracting_period", "year", "month"),
     )
 
@@ -484,12 +488,15 @@ class HistContracting(TimestampMixin, Base):
     import_run_id: Mapped[int | None] = mapped_column(ForeignKey("hist_import_runs.id", ondelete="SET NULL"), nullable=True)
 
 
-class HistContract(TimestampMixin, Base):
+class HistContract(HistScoped, TimestampMixin, Base):
     __tablename__ = "hist_contracts"
-    __table_args__ = (Index("ix_hist_contract_item", "entity_code", "convocatoria_code", "item_number"),)
+    __table_args__ = (
+        Index("ix_hist_contract_item", "entity_code", "convocatoria_code", "item_number"),
+        UniqueConstraint("country", "contract_code", name="uq_hist_contract_country_code"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    contract_code: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    contract_code: Mapped[str] = mapped_column(String(40), nullable=False)
     entity_code: Mapped[str] = mapped_column(String(20), default="", nullable=False)
     convocatoria_code: Mapped[str] = mapped_column(String(30), default="", nullable=False)
     item_number: Mapped[str] = mapped_column(String(20), default="", nullable=False)
@@ -507,7 +514,7 @@ class HistContract(TimestampMixin, Base):
     end_date_updated: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
-class HistExpiring(TimestampMixin, Base):
+class HistExpiring(HistScoped, TimestampMixin, Base):
     """Derived: awarded item > 8 UIT with its (real or estimated) end date."""
 
     __tablename__ = "hist_expirings"
@@ -526,11 +533,11 @@ class HistExpiring(TimestampMixin, Base):
     possibly_renewed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
-class HistRecurring(TimestampMixin, Base):
+class HistRecurring(HistScoped, TimestampMixin, Base):
     """Derived: entity + supplier with <= 8 UIT orders in the last 12 months."""
 
     __tablename__ = "hist_recurrings"
-    __table_args__ = (UniqueConstraint("entity_ruc", "supplier_ruc", name="uq_hist_recurring_pair"),)
+    __table_args__ = (UniqueConstraint("country", "entity_ruc", "supplier_ruc", name="uq_hist_recurring_pair"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     entity_ruc: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -555,9 +562,9 @@ class HistRecurring(TimestampMixin, Base):
     bucket: Mapped[str] = mapped_column(String(30), default="", index=True, nullable=False)
 
 
-class HistPacItem(TimestampMixin, Base):
+class HistPacItem(HistScoped, TimestampMixin, Base):
     __tablename__ = "hist_pac_items"
-    __table_args__ = (UniqueConstraint("year", "entity_code", "reference_number", "item_number", name="uq_hist_pac_item"),)
+    __table_args__ = (UniqueConstraint("country", "year", "entity_code", "reference_number", "item_number", name="uq_hist_pac_item"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     year: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
@@ -587,9 +594,9 @@ class HistPacItem(TimestampMixin, Base):
     relevance: Mapped[str] = mapped_column(String(30), default="ok", nullable=False)
 
 
-class HistAlert(TimestampMixin, Base):
+class HistAlert(HistScoped, TimestampMixin, Base):
     __tablename__ = "hist_alerts"
-    __table_args__ = (UniqueConstraint("kind", "ref_key", name="uq_hist_alert_ref"),)
+    __table_args__ = (UniqueConstraint("country", "kind", "ref_key", name="uq_hist_alert_ref"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     kind: Mapped[str] = mapped_column(String(20), nullable=False)  # vencimiento | recurrente | pac
@@ -617,14 +624,15 @@ class HistAlert(TimestampMixin, Base):
     last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class HistAlertPreference(TimestampMixin, Base):
+class HistAlertPreference(HistScoped, TimestampMixin, Base):
     """What one user wants to be alerted about ("Mis alertas" and their
     weekly digest). Multi-value fields are "|"-separated; empty = all."""
 
     __tablename__ = "hist_alert_preferences"
+    __table_args__ = (UniqueConstraint("country", "user_id", name="uq_hist_alert_pref_country_user"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
     kinds: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     categories: Mapped[str] = mapped_column(Text, default="", nullable=False)
     departments: Mapped[str] = mapped_column(Text, default="", nullable=False)

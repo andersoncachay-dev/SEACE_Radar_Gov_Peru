@@ -1,5 +1,6 @@
-"""Prioritised Histórico Perú alerts: expiring contracts, due recurring
-purchases and PAC items about to be called.
+"""Prioritised Histórico alerts (Perú and Chile, per session country):
+expiring contracts, due recurring purchases and PAC items about to be called.
+Amount thresholds are in soles and scaled by HistCountry.amount_scale.
 
 Alerts are keyed by (kind, ref_key) so a monthly re-import updates the same
 row: its workflow status survives, a dismissal holds until the due date
@@ -18,8 +19,10 @@ from datetime import date, datetime
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from ...hist_scope import current_country
 from ...models import HistAlert, HistAlertPreference, HistContracting, HistExpiring, HistPacItem, HistRecurring
 from .classify import normalize
+from .countries import get_country
 from .derive import PATTERN_MONTHLY, PATTERN_SINGLE
 
 HIGH_AMOUNT = 500_000.0  # soles; lifts 91–180 day expirations to P2
@@ -54,7 +57,7 @@ def _amount_weight(amount: float) -> float:
     return math.log10(max(amount, 0) + 1) * 5
 
 
-def expiring_priority(days: int, amount: float) -> str | None:
+def expiring_priority(days: int, amount: float, scale: float = 1.0) -> str | None:
     if days < 0 or days > 365:
         return None
     if days <= 30:
@@ -62,18 +65,18 @@ def expiring_priority(days: int, amount: float) -> str | None:
     if days <= 90:
         return "P2"
     if days <= 180:
-        return "P2" if amount >= HIGH_AMOUNT else "P3"
+        return "P2" if amount >= HIGH_AMOUNT * scale else "P3"
     return "P4"
 
 
-def recurring_priority(days: int, pattern: str, amount_12m: float = RECURRING_MIN_AMOUNT) -> str | None:
+def recurring_priority(days: int, pattern: str, amount_12m: float = RECURRING_MIN_AMOUNT, scale: float = 1.0) -> str | None:
     """Only genuinely recurring buyers worth a call, and only while actionable.
 
     Calibrated on the 2026-10 data: without the amount floor and the
     monthly-only rule for overdue purchases, ~870 low-value pairs flooded
     the "Media" tray. Long-overdue pairs (the entity changed supplier or
     modality) are not alerted at all."""
-    if pattern == PATTERN_SINGLE or amount_12m < RECURRING_MIN_AMOUNT:
+    if pattern == PATTERN_SINGLE or amount_12m < RECURRING_MIN_AMOUNT * scale:
         return None
     if 0 <= days <= 30:
         return "P2"
@@ -95,13 +98,14 @@ def pac_priority(item: HistPacItem, today: date) -> str | None:
 
 
 def _expiring_candidates(db: Session) -> list[Candidate]:
+    country = get_country(current_country(db))
     rows = db.execute(select(HistExpiring, HistContracting).join(HistContracting, HistContracting.id == HistExpiring.contracting_id)).all()
     candidates = []
     for expiring, award in rows:
-        priority = expiring_priority(expiring.days_to_end, award.amount)
+        priority = expiring_priority(expiring.days_to_end, award.amount, country.amount_scale)
         if not priority:
             continue
-        score = (365 - expiring.days_to_end) / 365 * 60 + _amount_weight(award.amount) + (10 if expiring.is_real_date else 0) - (15 if expiring.possibly_renewed else 0)
+        score = (365 - expiring.days_to_end) / 365 * 60 + _amount_weight(award.amount / country.amount_scale) + (10 if expiring.is_real_date else 0) - (15 if expiring.possibly_renewed else 0)
         renewed = " Posible renovado: la entidad ya adjudicó un proceso posterior similar." if expiring.possibly_renewed else ""
         candidates.append(Candidate(
             kind="vencimiento",
@@ -123,9 +127,10 @@ def _expiring_candidates(db: Session) -> list[Candidate]:
 
 
 def _recurring_candidates(db: Session) -> list[Candidate]:
+    country = get_country(current_country(db))
     candidates = []
     for item in db.scalars(select(HistRecurring)).all():
-        priority = recurring_priority(item.days_to_next, item.pattern, item.amount_12m_supplier)
+        priority = recurring_priority(item.days_to_next, item.pattern, item.amount_12m_supplier, country.amount_scale)
         if not priority:
             continue
         overdue = item.days_to_next < 0
@@ -134,15 +139,15 @@ def _recurring_candidates(db: Session) -> list[Candidate]:
             kind="recurrente",
             ref_key=f"{item.entity_ruc}|{item.supplier_ruc}",
             priority=priority,
-            score=round(urgency + _amount_weight(item.amount_12m_supplier), 2),
+            score=round(urgency + _amount_weight(item.amount_12m_supplier / country.amount_scale), 2),
             title=(f"Compra atrasada {-item.days_to_next} días" if overdue else f"Próxima compra en {item.days_to_next} días") + f" · {item.supplier_name}",
-            detail=f"{item.pattern}: {item.orders_12m} órdenes en 12 meses (S/ {item.amount_12m_supplier:,.0f}). Última: {item.last_order_description[:200]}",
+            detail=f"{item.pattern}: {item.orders_12m} órdenes en 12 meses ({country.money(item.amount_12m_supplier)}). Última: {item.last_order_description[:200]}",
             entity_name=item.entity_name,
             department=item.department,
             amount=item.amount_12m_supplier,
             due_date=item.next_purchase_date,
             category=item.category,
-            process_group="Menores a 8 UIT",
+            process_group=country.small_purchase_group,
             government_level=item.government_level,
             recurring_id=item.id,
         ))

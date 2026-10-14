@@ -9,16 +9,18 @@ import threading
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..database import SessionLocal, get_db
-from ..dependencies import require_admin, require_module
+from ..dependencies import get_current_user, require_admin, user_has_module
+from ..hist_scope import current_country, use_country
 from ..models import HistAlert, HistAlertPreference, HistImportRun, HistKeyword, User
 from ..services.favorite_service import favorite_keys
-from ..services.historico import conosce, import_service, notify, orchestration, query_service
+from ..services.historico import import_service, notify, orchestration, query_service
+from ..services.historico.countries import CHILE, COUNTRIES, get_country
 from ..services.historico.alerts_service import (
     ALERT_KINDS,
     PRIORITY_LABELS,
@@ -28,15 +30,36 @@ from ..services.historico.alerts_service import (
     split_csv,
 )
 
-router = APIRouter(prefix="/historico", tags=["historico"])
+# Mounted twice by main.py: at /historico (Perú) and /historico-chile (Chile),
+# each with scope_dependency(country), which pins the request's DB session to
+# that country (hist_scope) before any endpoint runs.
+router = APIRouter(tags=["historico"])
 logger = logging.getLogger(__name__)
-module_user = require_module("historico_peru")
 UPLOAD_ROOT = Path(tempfile.gettempdir()) / "historico_uploads"
+
+
+def _path_country(request: Request) -> str:
+    path = request.url.path
+    return CHILE.code if path == CHILE.api_prefix or path.startswith(f"{CHILE.api_prefix}/") else "peru"
+
+
+def scope_dependency(country: str):
+    def dependency(db: Session = Depends(get_db)) -> str:
+        use_country(db, country)
+        return country
+
+    return dependency
+
+
+def module_user(request: Request, current_user: User = Depends(get_current_user)) -> User:
+    if not user_has_module(current_user, get_country(_path_country(request)).module):
+        raise HTTPException(status_code=403, detail="Este modulo no esta habilitado para tu perfil")
+    return current_user
 LIST_KINDS = ("contrataciones", "vencimientos", "recurrentes", "pac")
 
 
-def _today() -> date:
-    return orchestration.lima_now().date()
+def _today(db: Session | None = None) -> date:
+    return orchestration.local_now(db).date() if db is not None else orchestration.lima_now().date()
 
 
 def _filters(
@@ -88,7 +111,7 @@ def get_filters(_: User = Depends(module_user), db: Session = Depends(get_db)):
 @router.get("/vencimientos-runway")
 def get_runway(filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
     """Contracts ending in the next 12 months under the page's filters."""
-    return query_service.expiring_runway(db, filters, _today())
+    return query_service.expiring_runway(db, filters, _today(db))
 
 
 @router.get("/pac-summary")
@@ -98,7 +121,7 @@ def get_pac_summary(filters: query_service.Filters = Depends(_filters), _: User 
 
 @router.get("/summary")
 def get_summary(filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
-    return query_service.summary(db, filters, _today())
+    return query_service.summary(db, filters, _today(db))
 
 
 # --- alerts --------------------------------------------------------------------------
@@ -320,7 +343,7 @@ def update_settings(payload: SettingsIn, user: User = Depends(require_admin), db
 
 @router.post("/admin/refresh")
 def request_refresh(user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Ask the hourly govradar-historico-peru job to run a full refresh."""
+    """Ask the hourly govradar-historico-<country> job to run a full refresh."""
     orchestration.request_refresh(db, user.id)
     return orchestration.status(db)
 
@@ -343,14 +366,19 @@ def upload_file(run_id: int, file: UploadFile = File(...), _: User = Depends(req
     run = db.get(HistImportRun, run_id)
     if not run or run.status != "receiving":
         raise HTTPException(status_code=409, detail="La carga no admite más archivos")
-    source = conosce.identify_file(file.filename or "")
-    if source is None:
-        raise HTTPException(status_code=400, detail=f"No se reconoce el archivo {file.filename}: usa los nombres originales de CONOSCE")
+    module = import_service.source_module(db)
     folder = UPLOAD_ROOT / str(run_id)
     folder.mkdir(parents=True, exist_ok=True)
-    target = folder / source.filename
-    with target.open("wb") as handle:
+    incoming = folder / f"incoming-{Path(file.filename or 'archivo').name}"
+    with incoming.open("wb") as handle:
         shutil.copyfileobj(file.file, handle, length=1 << 20)
+    source = module.identify_file(file.filename or "", incoming)
+    if source is None:
+        incoming.unlink(missing_ok=True)
+        label = get_country(current_country(db)).source_label
+        raise HTTPException(status_code=400, detail=f"No se reconoce el archivo {file.filename}: usa los nombres originales de {label}")
+    target = folder / source.filename
+    incoming.replace(target)
     files = json.loads(run.files_json or "[]")
     if source.filename not in files:
         files.append(source.filename)
@@ -359,7 +387,7 @@ def upload_file(run_id: int, file: UploadFile = File(...), _: User = Depends(req
     if run.origin == "pc_script":
         # The PC script sends the whole ~3 GB catalogue, in load order; load
         # each file as it lands so only one sits on the API's ephemeral disk.
-        _enqueue(_load_uploaded, run_id, target)
+        _enqueue(_load_uploaded, current_country(db), run_id, target)
     return {"filename": source.filename, "dataset": source.dataset, "year": source.year, "month": source.month}
 
 
@@ -385,18 +413,18 @@ def _drain_queue() -> None:
         try:
             func(*args)
         except Exception:  # tasks record their own failure on the run; keep the worker alive
-            logger.exception("Histórico Perú background task %s failed", getattr(func, "__name__", func))
+            logger.exception("Histórico background task %s failed", getattr(func, "__name__", func))
         finally:
             _work_queue.task_done()
 
 
-def _load_uploaded(run_id: int, path: Path) -> None:
-    db = SessionLocal()
+def _load_uploaded(country: str, run_id: int, path: Path) -> None:
+    db = use_country(SessionLocal(), country)
     try:
         run = db.get(HistImportRun, run_id)
         if run is None or run.status not in ("receiving", "running"):
             return
-        source = conosce.identify_file(path.name)
+        source = import_service.source_module(db).identify_file(path.name)
         run.message = f"Procesando {path.name}"
         db.commit()
         try:
@@ -408,18 +436,19 @@ def _load_uploaded(run_id: int, path: Path) -> None:
         db.close()
 
 
-def _finish_uploaded(run_id: int) -> None:
-    db = SessionLocal()
+def _finish_uploaded(country: str, run_id: int) -> None:
+    db = use_country(SessionLocal(), country)
     try:
         run = db.get(HistImportRun, run_id)
         if run is None or run.status == "failed":
             return
         folder = UPLOAD_ROOT / str(run_id)
+        module = import_service.source_module(db)
         if run.origin == "pc_script":
-            import_service.finish_import(db, run, _today())  # files already loaded one by one
+            import_service.finish_import(db, run, _today(db))  # files already loaded one by one
         else:
-            files = [(conosce.identify_file(path.name), path) for path in sorted(folder.glob("*"))]
-            import_service.import_files(db, run, [(source, path) for source, path in files if source], today=_today())
+            files = [(module.identify_file(path.name), path) for path in sorted(folder.glob("*"))]
+            import_service.import_files(db, run, [(source, path) for source, path in files if source], today=_today(db))
         if run.status == "completed" and run.origin == "pc_script":
             orchestration.record_job_result(db, run)
     except Exception as exc:
@@ -438,7 +467,7 @@ def process_upload(run_id: int, _: User = Depends(require_admin), db: Session = 
         raise HTTPException(status_code=400, detail="Sube al menos un archivo")
     run.status, run.message = "queued", "En cola"
     db.commit()
-    _enqueue(_finish_uploaded, run_id)
+    _enqueue(_finish_uploaded, current_country(db), run_id)
     return _run_dict(run)
 
 

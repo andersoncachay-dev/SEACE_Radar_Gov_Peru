@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { historicoApi, HistoricoImportRun, HistoricoKeyword, HistoricoStatus } from "../../api";
+import { HistoricoImportRun, HistoricoKeyword, HistoricoStatus } from "../../api";
+import { HIST_COUNTRIES, HistCountryCode } from "./country";
 
 const ORIGIN_LABELS: Record<string, string> = {
   azure_job: "Automática (Azure)",
@@ -21,8 +22,32 @@ function when(value: string | null) {
   return value ? new Date(value).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" }) : "—";
 }
 
-/** Sistema › Histórico Perú: update chain status, manual uploads and keywords. */
-export function HistoricoAdmin({ token }: { token: string }) {
+// What the admin card says per country; the API calls are the same.
+const ADMIN_TEXT: Record<HistCountryCode, { overline: string; title: string; intro: string; failed: string; upload: string; accept: string; badName: string }> = {
+  peru: {
+    overline: "Histórico Perú · datos abiertos OECE",
+    title: "Actualización de contrataciones, vencimientos y PAC",
+    intro: "OECE publica los archivos en los primeros días de cada mes. La carga automática corre en Azure; si falla, lo intenta el script de la PC, y si también falla, los administradores reciben un correo para cargar los archivos aquí.",
+    failed: 'La última actualización automática falló. Si el script de la PC no la completa, sube los archivos de CONOSCE en "Cargar archivos".',
+    upload: "Sube los Excel de CONOSCE con su nombre original (órdenes por mes, adjudicaciones, contratación directa, contratos, PAC, entidades). Solo se reemplazan los periodos que subas.",
+    accept: ".xlsx,.csv",
+    badName: "Ningún archivo se pudo subir. Revisa que conserven el nombre original de CONOSCE.",
+  },
+  chile: {
+    overline: "Histórico Chile · datos abiertos ChileCompra",
+    title: "Actualización de licitaciones, órdenes de compra y vencimientos",
+    intro: "ChileCompra actualiza a diario los archivos mensuales de licitaciones y órdenes de compra. La carga automática corre en Azure una vez al mes (o con \"Actualizar ahora\"); si falla, los administradores reciben un correo para cargar los archivos aquí.",
+    failed: 'La última actualización automática falló. Sube los archivos de ChileCompra en "Cargar archivos".',
+    upload: "Sube los .zip mensuales de datos-abiertos.chilecompra.cl (Descargas) nombrados lic-AAAA-M.zip (licitaciones) u oc-AAAA-M.zip (órdenes de compra). Solo se reemplazan los meses que subas.",
+    accept: ".zip,.csv",
+    badName: "Ningún archivo se pudo subir. Usa nombres lic-AAAA-M.zip u oc-AAAA-M.zip.",
+  },
+};
+
+/** Configuración › Histórico Perú / Chile: update chain status, manual uploads and keywords. */
+export function HistoricoAdmin({ token, country = "peru" }: { token: string; country?: HistCountryCode }) {
+  const historicoApi = HIST_COUNTRIES[country].api;
+  const text = ADMIN_TEXT[country];
   const [status, setStatus] = useState<HistoricoStatus | null>(null);
   const [runs, setRuns] = useState<HistoricoImportRun[]>([]);
   const [keywords, setKeywords] = useState<HistoricoKeyword[]>([]);
@@ -43,8 +68,8 @@ export function HistoricoAdmin({ token }: { token: string }) {
   }
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "No se pudo cargar Histórico Perú"));
-  }, [token]);
+    load().catch((err) => setError(err instanceof Error ? err.message : `No se pudo cargar ${HIST_COUNTRIES[country].label}`));
+  }, [token, country]);
 
   // Poll while an import is in flight so progress shows without reloading.
   const active = runs.find((run) => ["receiving", "queued", "running"].includes(run.status));
@@ -91,7 +116,7 @@ export function HistoricoAdmin({ token }: { token: string }) {
       }
       setUpload({ ...state });
     }
-    if (!state.done.length) throw new Error("Ningún archivo se pudo subir. Revisa que conserven el nombre original de CONOSCE.");
+    if (!state.done.length) throw new Error(text.badName);
     await historicoApi.processUpload(token, created.id);
     setNotice(`${state.done.length} archivo(s) recibidos. El procesamiento sigue en segundo plano; el avance aparece en el historial.`);
     if (fileInput.current) fileInput.current.value = "";
@@ -120,24 +145,24 @@ export function HistoricoAdmin({ token }: { token: string }) {
   });
 
   return (
-    <section className="panel historico-admin-panel" aria-labelledby="historico-admin-title">
+    <section className="panel historico-admin-panel" aria-labelledby={`historico-admin-title-${country}`}>
       <div className="scheduler-admin-heading">
         <div>
-          <p className="overline">Histórico Perú · datos abiertos OECE</p>
-          <h2 id="historico-admin-title">Actualización de contrataciones, vencimientos y PAC</h2>
-          <p>OECE publica los archivos en los primeros días de cada mes. La carga automática corre en Azure; si falla, lo intenta el script de la PC, y si también falla, los administradores reciben un correo para cargar los archivos aquí.</p>
+          <p className="overline">{text.overline}</p>
+          <h2 id={`historico-admin-title-${country}`}>{text.title}</h2>
+          <p>{text.intro}</p>
         </div>
       </div>
 
       {status?.needs_fallback ? (
-        <div className="notice danger" role="alert">La última actualización automática falló. Si el script de la PC no la completa, sube los archivos de CONOSCE en "Cargar archivos".</div>
+        <div className="notice danger" role="alert">{text.failed}</div>
       ) : null}
 
       <div className="historico-admin-grid">
         <article className="historico-admin-card">
           <h3>Estado</h3>
           <dl>
-            <div><dt>Datos vigentes al</dt><dd>{status?.data_cut_date ? new Date(`${status.data_cut_date}T12:00:00`).toLocaleDateString("es-PE") : "Sin importación completada"}</dd></div>
+            <div><dt>Datos vigentes al</dt><dd>{status?.data_cut_date ? new Date(`${status.data_cut_date}T12:00:00`).toLocaleDateString(HIST_COUNTRIES[country].locale) : "Sin importación completada"}</dd></div>
             <div><dt>Última importación completa</dt><dd>{when(status?.latest_completed_at ?? null)}</dd></div>
             <div><dt>Este mes</dt><dd>{status?.completed_this_month ? "Actualizado" : status?.import_due ? "Pendiente: se ejecutará en la próxima hora" : "Programado"}</dd></div>
           </dl>
@@ -149,16 +174,16 @@ export function HistoricoAdmin({ token }: { token: string }) {
         <article className="historico-admin-card">
           <h3>Día de actualización mensual</h3>
           <p>Desde este día, el proceso automático intenta la importación hasta completarla.</p>
-          <label htmlFor="historico-refresh-day">Día del mes
-            <input id="historico-refresh-day" type="number" min={1} max={28} value={refreshDay} onChange={(event) => setRefreshDay(Math.max(1, Math.min(28, Number(event.target.value))))} />
+          <label htmlFor={`historico-refresh-day-${country}`}>Día del mes
+            <input id={`historico-refresh-day-${country}`} type="number" min={1} max={28} value={refreshDay} onChange={(event) => setRefreshDay(Math.max(1, Math.min(28, Number(event.target.value))))} />
           </label>
           <button type="button" onClick={saveRefreshDay} disabled={Boolean(busy) || refreshDay === status?.refresh_day}>{busy === "day" ? "Guardando…" : "Guardar día"}</button>
         </article>
 
         <article className="historico-admin-card">
           <h3>Cargar archivos</h3>
-          <p>Sube los Excel de CONOSCE con su nombre original (órdenes por mes, adjudicaciones, contratación directa, contratos, PAC, entidades). Solo se reemplazan los periodos que subas.</p>
-          <input ref={fileInput} id="historico-upload" type="file" multiple accept=".xlsx,.csv" onChange={(event) => uploadFiles(event.target.files)} disabled={Boolean(busy) || Boolean(active)} />
+          <p>{text.upload}</p>
+          <input ref={fileInput} id={`historico-upload-${country}`} type="file" multiple accept={text.accept} onChange={(event) => uploadFiles(event.target.files)} disabled={Boolean(busy) || Boolean(active)} />
           {upload ? (
             <p className="historico-upload-progress" role="status">
               Carga #{upload.run.id}: {upload.done.length} subido(s){upload.failed.length ? `, ${upload.failed.length} rechazado(s)` : ""}.
@@ -193,7 +218,7 @@ export function HistoricoAdmin({ token }: { token: string }) {
       </div>
 
       <h3 className="historico-admin-subtitle">Palabras clave del rubro</h3>
-      <p className="historico-admin-help">"Incluir" hace que la contratación cuente y asigna la categoría. "A revisar" solo envía a revisión los procesos mayores a 8 UIT. "Excluir" descarta frases que son falsos positivos conocidos. Los cambios se aplican en la próxima actualización.</p>
+      <p className="historico-admin-help">"Incluir" hace que la contratación cuente y asigna la categoría. "A revisar" solo envía a revisión {country === "chile" ? "líneas de licitaciones" : "los procesos mayores a 8 UIT"}. "Excluir" descarta frases que son falsos positivos conocidos.{country === "chile" ? " En Chile además se usa el código ONU del producto: los servicios de Internet entran siempre y los productos ajenos a telecomunicaciones (computadores, audio, herramientas) no entran aunque mencionen la palabra." : ""} Los cambios se aplican en la próxima actualización.</p>
       <form className="historico-keyword-form" onSubmit={saveKeyword}>
         <label htmlFor="historico-keyword">Palabra o frase<input id="historico-keyword" required minLength={2} value={draft.keyword} onChange={(event) => setDraft({ ...draft, keyword: event.target.value })} placeholder="Ej. fibra óptica" /></label>
         <label htmlFor="historico-category">Categoría<input id="historico-category" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label>

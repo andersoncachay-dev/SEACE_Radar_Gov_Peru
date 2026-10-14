@@ -3,7 +3,8 @@ import { HistoricoFilterOptions, HistoricoFilters, HistoricoKind, HistoricoPrior
 import { Chip, FavoriteButton, Icon } from "../../ui";
 import { FavoriteKind } from "../../api";
 import { useFavorites } from "../../favorites";
-import { useHistoricoDetail, money, moneyShort, shortDate, titleCase } from "./useHistorico";
+import { activeHistCountry, useHistCountry } from "./country";
+import { useHistoricoDetail, money, moneyShort, shortDate, titleCase, num } from "./useHistorico";
 
 export const PRIORITY_LABEL: Record<HistoricoPriority, string> = { P1: "Crítica", P2: "Alta", P3: "Media", P4: "Baja" };
 const MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"];
@@ -54,7 +55,7 @@ export function HistFav({ token, kind, row, size = "sm" }: {
 
 export type FilterDim = "years" | "government_levels" | "process_groups" | "categories" | "departments" | "patterns" | "situations" | "months";
 
-const DIM_LABEL: Record<FilterDim, string> = {
+const BASE_DIM_LABEL: Record<FilterDim, string> = {
   years: "Años",
   government_levels: "Nivel de gobierno",
   process_groups: "Tipo de proceso",
@@ -64,6 +65,16 @@ const DIM_LABEL: Record<FilterDim, string> = {
   situations: "Situación",
   months: "Mes previsto",
 };
+
+/** Filter names in the active country's terms (Región / Sector in Chile). */
+const DIM_LABEL = new Proxy(BASE_DIM_LABEL, {
+  get(target, dim: FilterDim) {
+    const country = activeHistCountry();
+    if (dim === "departments") return country.department;
+    if (dim === "government_levels") return country.level;
+    return target[dim];
+  },
+}) as Record<FilterDim, string>;
 
 function dimOptions(dim: FilterDim, options: HistoricoFilterOptions | null): Array<[string, string]> {
   if (!options) return [];
@@ -330,7 +341,7 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
                 onMouseEnter={(event) => {
                   const box = (event.currentTarget.ownerSVGElement?.parentElement as HTMLElement).getBoundingClientRect();
                   const mark = event.currentTarget.getBoundingClientRect();
-                  setTip({ text: `${titleCase(item.entity_name)} · ${moneyShort(item.amount)} · vence ${shortDate(item.end_date)} (${item.is_real_date ? "fecha real" : "estimada"})`, x: Math.min(box.width - 270, Math.max(0, mark.left - box.left - 20)), y: Math.max(0, mark.top - box.top - 52) });
+                  setTip({ text: `${titleCase(item.entity_name)} · ${moneyShort(item.amount)} · vence ${shortDate(item.end_date)} (${item.is_real_date ? activeHistCountry().realDate.toLowerCase() : "estimada"})`, x: Math.min(box.width - 270, Math.max(0, mark.left - box.left - 20)), y: Math.max(0, mark.top - box.top - 52) });
                 }}
               >
                 <line x1={cx} x2={cx} y1={cy} y2={base} stroke={priorityTone(item.priority)} strokeOpacity={0.35} />
@@ -346,7 +357,7 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
         <span><i style={{ background: "var(--urg-p2-ink)" }} />Alta</span>
         <span><i style={{ background: "var(--urg-p3-ink)" }} />Media</span>
         <span><i style={{ background: "var(--urg-p4-ink)" }} />Baja</span>
-        <span>Punto lleno = fecha real del contrato · tamaño = monto · {items.length.toLocaleString("es-PE")} contratos</span>
+        <span>Punto lleno = {activeHistCountry().code === "chile" ? "plazo declarado en la licitación" : "fecha real del contrato"} · tamaño = monto · {items.length.toLocaleString(activeHistCountry().locale)} contratos</span>
       </div>
     </div>
   );
@@ -359,7 +370,7 @@ export function Pager({ page, pageSize, total, onPage }: { page: number; pageSiz
   const from = total ? (page - 1) * pageSize + 1 : 0;
   return (
     <div className="hist-pager">
-      <span className="hist-num">{from.toLocaleString("es-PE")}–{Math.min(total, page * pageSize).toLocaleString("es-PE")} de {total.toLocaleString("es-PE")}</span>
+      <span className="hist-num">{num(from)}–{num(Math.min(total, page * pageSize))} de {num(total)}</span>
       <span className="hist-pager-actions">
         <button className="ui-btn ui-btn-secondary" type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</button>
         <span className="hist-num">Página {page} de {pages}</span>
@@ -376,6 +387,7 @@ function Fact({ label, value, wide = false }: { label: string; value: React.Reac
 }
 
 export function DetailDrawer({ token, kind, id, onClose }: { token: string; kind: HistoricoKind; id: number | null; onClose: () => void }) {
+  const country = useHistCountry();
   const { detail, error } = useHistoricoDetail(token, kind, id);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -402,7 +414,7 @@ export function DetailDrawer({ token, kind, id, onClose }: { token: string; kind
             <span className="hist-tags">
               {record.priority !== undefined ? <PriorityBadge priority={record.priority} /> : null}
               {record.bucket ? <span className="hist-tag">{record.bucket}</span> : null}
-              {record.is_real_date !== undefined ? <span className={`hist-tag ${record.is_real_date ? "real" : ""}`}>{record.is_real_date ? "Fecha real" : "Fecha estimada"}</span> : null}
+              {record.is_real_date !== undefined ? <span className={`hist-tag ${record.is_real_date ? "real" : ""}`}>{record.is_real_date ? country.realDate : "Fecha estimada"}</span> : null}
               {record.possibly_renewed ? <span className="hist-tag">Posible renovado</span> : null}
             </span>
             <h2 id="hist-drawer-title">{detail ? titleCase(record.entity_name) : "Cargando…"}</h2>
@@ -449,17 +461,17 @@ export function DetailDrawer({ token, kind, id, onClose }: { token: string; kind
                 <Fact label="Proveedor" value={titleCase(record.supplier_name)} />
                 <Fact label="Monto adjudicado" value={money(record.amount)} />
                 {record.monthly_amount !== undefined ? <Fact label="Monto mensual aprox." value={money(record.monthly_amount)} /> : null}
-                {record.extras_amount !== undefined ? <Fact label="Adicionales y prórrogas" value={money(record.extras_amount)} /> : null}
+                {record.extras_amount !== undefined && (country.code === "peru" || record.extras_amount > 0) ? <Fact label="Adicionales y prórrogas" value={money(record.extras_amount)} /> : null}
                 <Fact label="Tipo de proceso" value={record.process_group} />
                 <Fact label="Categoría" value={record.category} />
-                <Fact label="Departamento" value={titleCase(record.department)} />
-                <Fact label="Nivel de gobierno" value={record.government_level} />
-                {record.direct_cause ? <Fact label="Causal (contratación directa)" value={record.direct_cause} wide /> : null}
+                <Fact label={country.department} value={titleCase(record.department)} />
+                <Fact label={country.level} value={record.government_level} />
+                {record.direct_cause ? <Fact label={country.code === "chile" ? "Causal (trato directo)" : "Causal (contratación directa)"} value={record.direct_cause} wide /> : null}
                 <Fact label="Descripción" value={record.description} wide />
               </>}
             </dl>
           ) : null}
-          {record.contract_url ? <a className="ui-btn ui-btn-secondary" href={record.contract_url} target="_blank" rel="noopener noreferrer">Ver contrato en SEACE</a> : null}
+          {record.contract_url ? <a className="ui-btn ui-btn-secondary" href={record.contract_url} target="_blank" rel="noopener noreferrer">{country.officialRecordLink}</a> : null}
           {history.length ? (
             <section>
               <h3>Compras del rubro de la entidad por año</h3>

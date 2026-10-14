@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  historicoApi,
   HistoricoAlert,
   HistoricoAlertPreference,
   HistoricoAlertStatus,
@@ -11,21 +10,23 @@ import {
   HistoricoStatus,
 } from "../../api";
 import { Icon } from "../../ui";
+import { useHistCountry } from "./country";
 import { DetailDrawer, FilterBar, HBars, HistFav, monthName, Pager, PriorityBadge, priorityTone, Runway, SearchAndAmount } from "./HistoricoUI";
-import { downloadExport, money, moneyShort, shortDate, titleCase, toggleValue, useHistoricoList, useHistoricoMeta, useLatest, useStoredState } from "./useHistorico";
+import { downloadExport, money, moneyShort, num, shortDate, titleCase, toggleValue, useHistoricoList, useHistoricoMeta, useLatest, useStoredState } from "./useHistorico";
 
 type PageProps = { token: string };
 
 /* ---------- shared frame: data date, empty state, export state ---------- */
 
 function Frame({ status, error, children }: { status: HistoricoStatus | null; error: string; children: React.ReactNode }) {
+  const hist = useHistCountry();
   return (
     <div className="hist-module">
       {error ? <div className="notice danger" role="alert">{error}</div> : null}
       {status && !status.latest_completed_at ? (
         <section className="hist-panel hist-empty-state">
-          <h2>Aún no hay datos de CONOSCE</h2>
-          <p>La primera carga se hace desde Sistema › Histórico Perú (botón "Actualizar ahora" o "Cargar archivos"). Toma unos 40 minutos; luego el módulo se actualiza solo cada mes.</p>
+          <h2>Aún no hay datos de {hist.sourceShort}</h2>
+          <p>{hist.firstLoad}</p>
         </section>
       ) : null}
       {status?.needs_fallback ? (
@@ -65,24 +66,58 @@ function Panel({ title, subtitle, action, children, className = "" }: { title: s
   );
 }
 
-const num = (value: number) => (value || 0).toLocaleString("es-PE");
 
-/* ---------- Peru map (repo SVG, painted by amount) ---------- */
+/* ---------- region map (repo SVGs, painted by amount) ---------- */
+
+// Chile's SVG (simplemaps) names regions by ISO 3166-2 code; the backend
+// stores the canonical names below (services/historico/chile_import.REGIONS).
+const CHILE_REGION_BY_CODE: Record<string, string> = {
+  CLAP: "ARICA Y PARINACOTA", CLTA: "TARAPACÁ", CLAN: "ANTOFAGASTA", CLAT: "ATACAMA", CLCO: "COQUIMBO",
+  CLVS: "VALPARAÍSO", CLRM: "METROPOLITANA DE SANTIAGO", CLLI: "O'HIGGINS", CLML: "MAULE", CLNB: "ÑUBLE",
+  CLBI: "BIOBÍO", CLAR: "LA ARAUCANÍA", CLLR: "LOS RÍOS", CLLL: "LOS LAGOS", CLAI: "AYSÉN", CLMA: "MAGALLANES",
+};
 
 function normalizeDept(id: string) {
   return id.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase();
 }
 
-function PeruMap({ amounts, selected, onToggle }: { amounts: Map<string, number>; selected: string[]; onToggle: (dept: string) => void }) {
+function RegionMap({ amounts, selected, onToggle }: { amounts: Map<string, number>; selected: string[]; onToggle: (dept: string) => void }) {
+  const hist = useHistCountry();
   const [svg, setSvg] = useState("");
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    import("../../assets_mapa/peru-regions.svg?raw").then((module) => setSvg(module.default.replace(/<style>[\s\S]*?<\/style>/, "")));
-  }, []);
+    const load = hist.map === "chile" ? import("../../assets_mapa/chile.svg?raw") : import("../../assets_mapa/peru-regions.svg?raw");
+    load.then((module) => setSvg(module.default.replace(/<style>[\s\S]*?<\/style>/, "")));
+  }, [hist.map]);
   useEffect(() => {
     const root = ref.current;
     if (!root || !svg) return;
     const max = Math.max(...amounts.values(), 1);
+    if (hist.map === "chile") {
+      const map = root.querySelector<SVGSVGElement>("svg");
+      const features = root.querySelector<SVGGElement>("#features");
+      root.querySelectorAll("#points, #label_points").forEach((element) => element.remove());
+      if (map && features && !map.dataset.cropped) {
+        // The source draws Chile as a thin strip of a 1000×1000 canvas: crop to it.
+        const box = features.getBBox();
+        map.setAttribute("viewBox", `${box.x - 4} ${box.y - 4} ${box.width + 8} ${box.height + 8}`);
+        map.removeAttribute("width");
+        map.removeAttribute("height");
+        map.dataset.cropped = "true";
+      }
+      root.querySelectorAll<SVGElement>("#features path[id]").forEach((element) => {
+        const dept = CHILE_REGION_BY_CODE[element.id];
+        if (!dept) return;
+        const value = amounts.get(dept);
+        const t = Math.sqrt((value ?? 0) / max);
+        element.setAttribute("class", `hist-map-region${selected.includes(dept) ? " is-active" : ""}`);
+        element.style.fill = `color-mix(in srgb, var(--blue-700) ${Math.round(10 + 80 * t)}%, var(--surface-2))`;
+        element.dataset.dept = dept;
+        element.setAttribute("tabindex", "0");
+        element.setAttribute("aria-label", `${titleCase(dept)}: ${moneyShort(value ?? 0)}`);
+      });
+      return;
+    }
     root.querySelectorAll<SVGElement>("svg [id]").forEach((element) => {
       if (element.id === "LagoTiticaca") {
         element.setAttribute("class", "hist-map-lake");
@@ -100,7 +135,7 @@ function PeruMap({ amounts, selected, onToggle }: { amounts: Map<string, number>
       element.setAttribute("tabindex", "0");
       element.setAttribute("aria-label", `${titleCase(dept)}: ${moneyShort(value ?? 0)}`);
     });
-  }, [svg, amounts, selected]);
+  }, [svg, amounts, selected, hist.map]);
   function pick(target: EventTarget | null) {
     const dept = (target as Element | null)?.closest<SVGElement>("[data-dept]")?.dataset.dept;
     if (dept) onToggle(dept);
@@ -108,7 +143,7 @@ function PeruMap({ amounts, selected, onToggle }: { amounts: Map<string, number>
   return (
     <div
       ref={ref}
-      className="hist-map"
+      className={`hist-map hist-map-${hist.map}`}
       aria-busy={!svg}
       onClick={(event) => pick(event.target)}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pick(event.target); } }}
@@ -122,11 +157,12 @@ function PeruMap({ amounts, selected, onToggle }: { amounts: Map<string, number>
 const SUMMARY_DIMS = ["years", "government_levels", "process_groups", "categories", "departments"] as const;
 
 export function HistoricoResumen({ token, onGo }: PageProps & { onGo: (page: "Contratos por Vencer") => void }) {
+  const hist = useHistCountry();
   const { options, status, error } = useHistoricoMeta(token);
   const [filters, setFilters] = useStoredState<HistoricoFilters>("resumen.filters", {});
   const [openId, setOpenId] = useState<number | null>(null);
   const key = JSON.stringify(filters);
-  const { data, loading, error: loadError } = useLatest(() => historicoApi.summary(token, filters), [token, key]);
+  const { data, loading, error: loadError } = useLatest(() => hist.api.summary(token, filters), [hist.api, token, key]);
   const exporter = useExport(token);
   const amounts = useMemo(() => new Map((data?.by_department ?? []).map((row) => [row.key, row.amount])), [data]);
   const totals = data?.totals;
@@ -152,15 +188,15 @@ export function HistoricoResumen({ token, onGo }: PageProps & { onGo: (page: "Co
       </section>
       <Panel
         title="Pista de vencimientos"
-        subtitle="Contratos > 8 UIT que terminan en los próximos 12 meses, con los mismos filtros (salvo años)."
+        subtitle={`${hist.contractsWindow} que terminan en los próximos 12 meses, con los mismos filtros (salvo años).`}
         action={<button className="ui-btn ui-btn-secondary" type="button" onClick={() => onGo("Contratos por Vencer")}>Ver contratos por vencer</button>}
       >
         <Runway items={data?.runway ?? []} onOpen={setOpenId} compact />
       </Panel>
       <div className="hist-two">
-        <Panel title="Dónde se compra" subtitle="Haz clic en el mapa o en la lista para filtrar por departamento.">
+        <Panel title="Dónde se compra" subtitle={`Haz clic en el mapa o en la lista para filtrar por ${hist.department.toLowerCase()}.`}>
           <div className="hist-map-box">
-            <PeruMap amounts={amounts} selected={filters.departments ?? []} onToggle={toggleDept} />
+            <RegionMap amounts={amounts} selected={filters.departments ?? []} onToggle={toggleDept} />
             <div className="hist-rank">
               {(data?.by_department ?? []).slice(0, 8).map((row) => (
                 <button key={row.key} type="button" className={(filters.departments ?? []).includes(row.key) ? "is-active" : ""} onClick={() => toggleDept(row.key)}>
@@ -174,7 +210,7 @@ export function HistoricoResumen({ token, onGo }: PageProps & { onGo: (page: "Co
           </div>
         </Panel>
         <div className="hist-stack">
-          <Panel title="Monto por mes" subtitle="El mes en curso es parcial: OECE lo completa en la siguiente publicación.">
+          <Panel title="Monto por mes" subtitle={hist.monthlyLag}>
             <div className="hist-months" role="img" aria-label="Monto por mes">
               {months.map((m, index) => <i key={m.key} className={index === months.length - 1 ? "partial" : ""} style={{ height: `${Math.max(2, (100 * m.amount) / maxMonth)}%` }} title={`${m.key}: ${money(m.amount)}`} />)}
             </div>
@@ -196,6 +232,7 @@ export function HistoricoResumen({ token, onGo }: PageProps & { onGo: (page: "Co
 /* ---------- Historial de contrataciones ---------- */
 
 export function HistoricoContrataciones({ token }: PageProps) {
+  const hist = useHistCountry();
   const { options, status, error } = useHistoricoMeta(token);
   const [filters, setFilters] = useStoredState<HistoricoFilters>("contrataciones.filters", {});
   const [sort, setSort] = useStoredState("contrataciones.sort", "date_desc");
@@ -210,7 +247,7 @@ export function HistoricoContrataciones({ token }: PageProps) {
         options={options}
         filters={filters}
         onChange={setFilters}
-        extra={<SearchAndAmount filters={filters} onChange={setFilters} placeholder="Busca entidad, proveedor, RUC o nomenclatura" />}
+        extra={<SearchAndAmount filters={filters} onChange={setFilters} placeholder={hist.searchPlaceholder} />}
         onExport={() => exporter.run("contrataciones", filters, sort)}
         favorites
         exporting={exporter.busy}
@@ -218,7 +255,7 @@ export function HistoricoContrataciones({ token }: PageProps) {
       />
       <Panel
         title="Historial de contrataciones"
-        subtitle="Órdenes ≤ 8 UIT (fecha de emisión) e ítems adjudicados > 8 UIT (fecha de buena pro)."
+        subtitle={hist.smallPurchases}
         action={
           <select className="hist-select" aria-label="Ordenar" value={sort} onChange={(event) => setSort(event.target.value)}>
             <option value="date_desc">Más recientes primero</option>
@@ -302,12 +339,13 @@ function BucketStrip({ buckets, active, onSelect, tones, suffix = "" }: {
 }
 
 export function HistoricoVencimientos({ token }: PageProps) {
+  const hist = useHistCountry();
   const [tab, setTab] = useStoredState<"contratos" | "recurrentes">("vencimientos.tab", "contratos");
   return (
     <div className="hist-module">
       <div className="hist-tabs" role="tablist" aria-label="Tipo de vencimiento">
-        <button type="button" role="tab" aria-selected={tab === "contratos"} onClick={() => setTab("contratos")}>Contratos &gt; 8 UIT</button>
-        <button type="button" role="tab" aria-selected={tab === "recurrentes"} onClick={() => setTab("recurrentes")}>Compras recurrentes ≤ 8 UIT</button>
+        <button type="button" role="tab" aria-selected={tab === "contratos"} onClick={() => setTab("contratos")}>{hist.contractsTab}</button>
+        <button type="button" role="tab" aria-selected={tab === "recurrentes"} onClick={() => setTab("recurrentes")}>{hist.recurringTab}</button>
       </div>
       {tab === "contratos" ? <ExpiringContracts token={token} /> : <RecurringPurchases token={token} />}
     </div>
@@ -315,6 +353,7 @@ export function HistoricoVencimientos({ token }: PageProps) {
 }
 
 function ExpiringContracts({ token }: PageProps) {
+  const hist = useHistCountry();
   const { options, status, error } = useHistoricoMeta(token);
   const [filters, setFilters] = useStoredState<HistoricoFilters>("vencimientos.filters", {});
   const [bucket, setBucket] = useStoredState<string | null>("vencimientos.bucket", null);
@@ -325,14 +364,14 @@ function ExpiringContracts({ token }: PageProps) {
   // contracts (most of the history) only appear when "Vencido" is picked.
   const listFilters = useMemo(() => ({ ...filters, buckets: bucket ? [bucket] : UPCOMING_BUCKETS }), [key, bucket]);
   const list = useHistoricoList(token, "vencimientos", listFilters, sort);
-  const buckets = useLatest(() => historicoApi.buckets(token, "vencimientos", filters), [token, key]);
-  const runway = useLatest(() => historicoApi.runway(token, filters), [token, key]);
+  const buckets = useLatest(() => hist.api.buckets(token, "vencimientos", filters), [hist.api, token, key]);
+  const runway = useLatest(() => hist.api.runway(token, filters), [hist.api, token, key]);
   const exporter = useExport(token);
   const rows = list.data?.items ?? [];
   const toggles = (
     <>
       <SearchAndAmount filters={filters} onChange={setFilters} placeholder="Busca entidad, proveedor o nomenclatura" />
-      <label className="hist-toggle"><input type="checkbox" checked={Boolean(filters.real_date_only)} onChange={(event) => setFilters({ ...filters, real_date_only: event.target.checked })} /> Solo fecha real</label>
+      <label className="hist-toggle"><input type="checkbox" checked={Boolean(filters.real_date_only)} onChange={(event) => setFilters({ ...filters, real_date_only: event.target.checked })} /> {hist.realDateOnly}</label>
       <label className="hist-toggle"><input type="checkbox" checked={Boolean(filters.hide_renewed)} onChange={(event) => setFilters({ ...filters, hide_renewed: event.target.checked })} /> Ocultar posibles renovados</label>
     </>
   );
@@ -374,7 +413,7 @@ function ExpiringContracts({ token }: PageProps) {
                     <td className="hist-fav-col"><HistFav token={token} kind="vencimientos" row={row} /></td>
                     <td><PriorityBadge priority={row.priority} /></td>
                     <td className="hist-days" style={{ color: priorityTone(row.priority) }}>{row.days_to_end}</td>
-                    <td className="hist-num">{shortDate(row.end_date)}<span className="hist-sub"><span className={`hist-tag ${row.is_real_date ? "real" : ""}`}>{row.is_real_date ? "Fecha real" : "Estimada"}</span>{row.possibly_renewed ? <span className="hist-tag">Posible renovado</span> : null}</span></td>
+                    <td className="hist-num">{shortDate(row.end_date)}<span className="hist-sub"><span className={`hist-tag ${row.is_real_date ? "real" : ""}`}>{row.is_real_date ? hist.realDate : "Estimada"}</span>{row.possibly_renewed ? <span className="hist-tag">Posible renovado</span> : null}</span></td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{row.nomenclature} · {titleCase(row.department)} · {row.category}</span></td>
                     <td className="hist-col-opt">{titleCase(row.supplier_name)}</td>
                     <td className="hist-money hist-strong">{money(row.amount)}</td>
@@ -404,6 +443,7 @@ function ExpiringContracts({ token }: PageProps) {
 }
 
 function RecurringPurchases({ token }: PageProps) {
+  const hist = useHistCountry();
   const { options, status, error } = useHistoricoMeta(token);
   const [filters, setFilters] = useStoredState<HistoricoFilters>("recurrentes.filters", {});
   const [bucket, setBucket] = useStoredState<string | null>("recurrentes.bucket", null);
@@ -412,7 +452,7 @@ function RecurringPurchases({ token }: PageProps) {
   const key = JSON.stringify(filters);
   const listFilters = useMemo(() => ({ ...filters, buckets: bucket ? [bucket] : [] }), [key, bucket]);
   const list = useHistoricoList(token, "recurrentes", listFilters, sort);
-  const buckets = useLatest(() => historicoApi.buckets(token, "recurrentes", filters), [token, key]);
+  const buckets = useLatest(() => hist.api.buckets(token, "recurrentes", filters), [hist.api, token, key]);
   const exporter = useExport(token);
   const rows = list.data?.items ?? [];
   return (
@@ -436,7 +476,7 @@ function RecurringPurchases({ token }: PageProps) {
         suffix=" en 12 m"
       />
       <Panel
-        title="Próximas compras ≤ 8 UIT"
+        title={hist.recurringTitle}
         subtitle="Entidad + proveedor con órdenes en los últimos 12 meses. La próxima compra se estima por la frecuencia de órdenes o el plazo de la descripción."
         action={
           <select className="hist-select" aria-label="Ordenar" value={sort} onChange={(event) => setSort(event.target.value)}>
@@ -487,11 +527,12 @@ function RecurringPurchases({ token }: PageProps) {
 /* ---------- PAC ---------- */
 
 export function HistoricoPac({ token }: PageProps) {
+  const hist = useHistCountry();
   const { options, status, error } = useHistoricoMeta(token);
   const [filters, setFilters] = useStoredState<HistoricoFilters>("pac.filters", {});
   const [openId, setOpenId] = useState<number | null>(null);
   const key = JSON.stringify(filters);
-  const summary = useLatest(() => historicoApi.pacSummary(token, filters), [token, key]);
+  const summary = useLatest(() => hist.api.pacSummary(token, filters), [hist.api, token, key]);
   const list = useHistoricoList(token, "pac", filters, "month_asc");
   const exporter = useExport(token);
   const nowMonth = new Date().getMonth() + 1;
@@ -588,6 +629,7 @@ const KIND_LABEL: Record<HistoricoAlert["kind"], string> = { vencimiento: "Contr
 const STATUS_OPTIONS: Array<[HistoricoAlertStatus, string]> = [["nueva", "Nueva"], ["vista", "Vista"], ["en_gestion", "En gestión"], ["descartada", "Descartar"]];
 
 export function HistoricoAlertas({ token }: PageProps) {
+  const hist = useHistCountry();
   const { options, status, error } = useHistoricoMeta(token);
   const [scope, setScope] = useStoredState<"all" | "mine">("alertas.scope", "all");
   const [priority, setPriority] = useStoredState<HistoricoPriority | null>("alertas.priority", null);
@@ -596,16 +638,16 @@ export function HistoricoAlertas({ token }: PageProps) {
   const [detail, setDetail] = useState<{ kind: HistoricoKind; id: number } | null>(null);
   const [notice, setNotice] = useState("");
   const [version, setVersion] = useState(0);
-  const preference = useLatest(() => historicoApi.alertPreferences(token), [token, version]);
+  const preference = useLatest(() => hist.api.alertPreferences(token), [hist.api, token, version]);
   const alerts = useLatest(
-    () => historicoApi.alerts(token, { mine: scope === "mine", priorities: priority ? [priority] : [], page, page_size: 40 }),
+    () => hist.api.alerts(token, { mine: scope === "mine", priorities: priority ? [priority] : [], page, page_size: 40 }),
     [token, scope, priority, page, version],
   );
   useEffect(() => { setPage(1); }, [scope, priority]);
 
   async function changeStatus(alert: HistoricoAlert, next: HistoricoAlertStatus) {
     try {
-      await historicoApi.updateAlert(token, alert.id, { status: next });
+      await hist.api.updateAlert(token, alert.id, { status: next });
       setNotice(next === "descartada" ? "Alerta descartada. Volverá si cambia su fecha." : "Estado actualizado.");
       setVersion((v) => v + 1);
     } catch (err) {
@@ -704,6 +746,7 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const hist = useHistCountry();
   const [draft, setDraft] = useState<HistoricoAlertPreference>({ ...EMPTY_PREFERENCE, ...(initial ?? {}) });
   const [term, setTerm] = useState("");
   const [preview, setPreview] = useState<{ total: number; counts: Record<HistoricoPriority, number> } | null>(null);
@@ -712,7 +755,7 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
   const draftKey = JSON.stringify(draft);
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      historicoApi.previewAlertPreferences(token, draft).then(setPreview).catch(() => setPreview(null));
+      hist.api.previewAlertPreferences(token, draft).then(setPreview).catch(() => setPreview(null));
     }, 250);
     return () => window.clearTimeout(timer);
   }, [draftKey]);
@@ -735,7 +778,7 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
     setSaving(true);
     setError("");
     try {
-      await historicoApi.saveAlertPreferences(token, draft);
+      await hist.api.saveAlertPreferences(token, draft);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar la configuración");
@@ -769,16 +812,16 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
             <legend>Atajos</legend>
             <div className="hist-opts">
               <button className="ui-btn ui-btn-secondary" type="button" onClick={() => setDraft({ ...draft, categories: satellite })}>Solo satelital y Starlink</button>
-              <button className="ui-btn ui-btn-secondary" type="button" onClick={() => setDraft({ ...draft, kinds: ["vencimiento"], min_amount: 500000 })}>Contratos ≥ S/ 500 mil</button>
+              <button className="ui-btn ui-btn-secondary" type="button" onClick={() => setDraft({ ...draft, kinds: ["vencimiento"], min_amount: hist.highAmount })}>Contratos ≥ {moneyShort(hist.highAmount)}</button>
               <button className="ui-btn ui-btn-secondary" type="button" onClick={() => setDraft({ ...draft, min_priority: "P2" })}>Solo críticas y altas</button>
               <button className="ui-btn ui-btn-ghost" type="button" onClick={() => setDraft({ ...EMPTY_PREFERENCE, historico_digest: draft.historico_digest })}>Ver todo</button>
             </div>
           </fieldset>
-          <fieldset><legend>Tipo de alerta</legend>{group("kinds", [["vencimiento", "Contratos por vencer"], ["recurrente", "Compras recurrentes"], ["pac", "PAC por convocar"]])}</fieldset>
+          <fieldset><legend>Tipo de alerta</legend>{group("kinds", [["vencimiento", "Contratos por vencer"], ["recurrente", "Compras recurrentes"], ...(hist.hasPac ? [["pac", "PAC por convocar"] as [string, string]] : [])])}</fieldset>
           <fieldset><legend>Categorías del rubro</legend>{group("categories", (options?.categories ?? []).map((c) => [c, c]))}</fieldset>
-          <fieldset><legend>Nivel de gobierno</legend>{group("government_levels", (options?.government_levels ?? []).map((c) => [c, c]))}</fieldset>
+          <fieldset><legend>{hist.level}</legend>{group("government_levels", (options?.government_levels ?? []).map((c) => [c, c]))}</fieldset>
           <fieldset><legend>Tipo de proceso</legend>{group("process_groups", (options?.process_groups ?? []).map((c) => [c, c]))}</fieldset>
-          <fieldset><legend>Departamentos</legend>{group("departments", (options?.departments ?? []).map((c) => [c, titleCase(c)]))}</fieldset>
+          <fieldset><legend>{hist.departments}</legend>{group("departments", (options?.departments ?? []).map((c) => [c, titleCase(c)]))}</fieldset>
           <fieldset>
             <legend>Palabras en la descripción</legend>
             <div className="hist-terms">
@@ -799,7 +842,7 @@ function AlertConfig({ token, options, initial, onClose, onSaved }: {
           <fieldset>
             <legend>Monto mínimo</legend>
             <div className="hist-opts">
-              {[[0, "Cualquiera"], [50000, "≥ S/ 50 mil"], [100000, "≥ S/ 100 mil"], [500000, "≥ S/ 500 mil"], [1000000, "≥ S/ 1 M"]].map(([value, label]) => (
+              {hist.amountChoices.map(([value, label]) => (
                 <button key={value} type="button" className="ui-fchip" aria-pressed={draft.min_amount === value} onClick={() => setDraft({ ...draft, min_amount: Number(value) })}>{label}</button>
               ))}
             </div>

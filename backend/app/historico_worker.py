@@ -1,4 +1,6 @@
-"""Entrypoint of the govradar-historico-peru Container Apps Job (hourly cron).
+"""Entrypoint of the govradar-historico-peru / govradar-historico-chile
+Container Apps Jobs (hourly cron). HISTORICO_COUNTRY picks the module
+(default peru).
 
 Most invocations exit immediately; see services/historico/orchestration.py
 for when an import, the daily alert refresh or the weekly digest is due.
@@ -13,21 +15,23 @@ import tempfile
 from pathlib import Path
 
 from .database import SessionLocal
+from .hist_scope import use_country
 from .services.historico import import_service, notify, orchestration
 from .services.historico.alerts_service import refresh_days_and_alerts
 
 
 def main() -> None:
     force = os.getenv("HISTORICO_FORCE", "false").strip().lower() in {"1", "true", "yes"}
-    db = SessionLocal()
-    summary: dict[str, object] = {"country": "peru"}
+    country = os.getenv("HISTORICO_COUNTRY", "peru").strip().lower() or "peru"
+    db = use_country(SessionLocal(), country)
+    summary: dict[str, object] = {"country": country}
     try:
-        now = orchestration.lima_now()
+        now = orchestration.local_now(db)
         today = now.date()
         if force or orchestration.import_is_due(db, now):
             orchestration.clear_refresh_request(db)
             run = import_service.create_run(db, "azure_job")
-            work_dir = Path(tempfile.mkdtemp(prefix="historico-"))
+            work_dir = Path(tempfile.mkdtemp(prefix=f"historico-{country}-"))
             try:
                 run = import_service.download_and_import(db, run, work_dir, today=today)
             finally:

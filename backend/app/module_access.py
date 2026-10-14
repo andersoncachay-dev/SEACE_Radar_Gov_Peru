@@ -2,8 +2,9 @@ from __future__ import annotations
 
 # Product modules a user can be granted, independent of the per-country
 # access_profile: "radar" is the live multi-country radar (Peru/Chile/
-# Argentina pages), "historico_peru" the monthly CONOSCE open-data module.
-VALID_MODULES: tuple[str, ...] = ("radar", "historico_peru")
+# Argentina pages), "historico_peru" / "historico_chile" the open-data history
+# modules (CONOSCE / ChileCompra).
+VALID_MODULES: tuple[str, ...] = ("radar", "historico_peru", "historico_chile")
 DEFAULT_MODULES = "radar"
 
 

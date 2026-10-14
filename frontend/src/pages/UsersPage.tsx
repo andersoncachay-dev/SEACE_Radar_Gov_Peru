@@ -21,6 +21,7 @@ export const emptyUserForm: UserCreatePayload = {
 export const moduleOptions: Array<{ value: AppModule; title: string; description: string }> = [
   { value: "radar", title: "Radar en vivo", description: "Procesos vigentes, oportunidades y seguimiento por país" },
   { value: "historico_peru", title: "Histórico Perú", description: "Contrataciones, contratos por vencer y PAC (datos OECE)" },
+  { value: "historico_chile", title: "Histórico Chile", description: "Licitaciones, órdenes de compra y contratos por vencer (datos ChileCompra)" },
 ];
 
 export const accessProfileOptions: Array<{ value: CountryCode; title: string; description: string; flags: Country[] }> = [
@@ -183,7 +184,7 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
     const next = selectedModules.includes(module) ? selectedModules.filter((value) => value !== module) : [...selectedModules, module];
     if (!next.length) return;
     updateField("module_access", formatModuleAccess(next));
-    if (!next.includes("historico_peru")) updateField("historico_digest", false);
+    if (!next.includes("historico_peru") && !next.includes("historico_chile")) updateField("historico_digest", false);
   }
 
   function toggleCountry(country: CountryCode) {
@@ -251,10 +252,10 @@ export function Users({ token, currentUserId }: { token: string; currentUserId: 
                 </label>
               ))}
             </div>
-            {selectedModules.includes("historico_peru") || form.role === "admin" ? (
+            {selectedModules.includes("historico_peru") || selectedModules.includes("historico_chile") || form.role === "admin" ? (
               <label className="digest-toggle">
                 <input type="checkbox" checked={form.historico_digest} onChange={(event) => updateField("historico_digest", event.target.checked)} />
-                <span>Recibir el resumen semanal de alertas de Histórico Perú (lunes, 8:00)</span>
+                <span>Recibir el resumen semanal de alertas del Histórico (Perú y/o Chile, lunes, 8:00)</span>
               </label>
             ) : null}
           </fieldset>

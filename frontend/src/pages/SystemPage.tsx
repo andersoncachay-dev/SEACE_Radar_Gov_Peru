@@ -460,7 +460,8 @@ export function System({
       <SchedulerScheduleAdmin token={token} />
       <RadarKeywordsAdmin token={token} onOpenLegal={onOpenLegal} onSearchKeyword={onSearchKeyword} />
       <TrackingDateRefreshAdmin token={token} />
-      <HistoricoAdmin token={token} />
+      <HistoricoAdmin token={token} country="peru" />
+      <HistoricoAdmin token={token} country="chile" />
       <section className="panel scoring-admin-panel" aria-labelledby="scoring-admin-title">
         <div className="scoring-admin-heading">
           <div>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readStored, writeStored } from "../../favorites";
+import { activeHistCountry, useHistCountry } from "./country";
 import {
-  historicoApi,
   HistoricoDetail,
   HistoricoFilterOptions,
   HistoricoFilters,
@@ -11,38 +11,41 @@ import {
   HistoricoStatus,
 } from "../../api";
 
-/** Data for Histórico Perú is monthly, so it is fetched per view on demand
- * (no 60 s polling like the live radar) and cached for the session. */
+/** Histórico data is monthly, so it is fetched per view on demand (no 60 s
+ * polling like the live radar) and cached per country for the session. */
 
 /** useState that survives page and module switches (and reloads) via
  * localStorage, so a filter set up once is still there when the user returns. */
 export function useStoredState<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(() => readStored(`govradar.hist.${key}`, initial));
-  useEffect(() => writeStored(`govradar.hist.${key}`, value), [key, value]);
+  const storageKey = `govradar.hist.${useHistCountry().storagePrefix}${key}`;
+  const [value, setValue] = useState<T>(() => readStored(storageKey, initial));
+  useEffect(() => writeStored(storageKey, value), [storageKey, value]);
   return [value, setValue] as const;
 }
 
-let optionsCache: HistoricoFilterOptions | null = null;
-let statusCache: HistoricoStatus | null = null;
+const optionsCache: Partial<Record<string, HistoricoFilterOptions>> = {};
+const statusCache: Partial<Record<string, HistoricoStatus>> = {};
 
 export function useHistoricoMeta(token: string) {
-  const [options, setOptions] = useState<HistoricoFilterOptions | null>(optionsCache);
-  const [status, setStatus] = useState<HistoricoStatus | null>(statusCache);
+  const country = useHistCountry();
+  const [options, setOptions] = useState<HistoricoFilterOptions | null>(optionsCache[country.code] ?? null);
+  const [status, setStatus] = useState<HistoricoStatus | null>(statusCache[country.code] ?? null);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
-    Promise.all([optionsCache ? Promise.resolve(optionsCache) : historicoApi.filters(token), historicoApi.status(token)])
+    const cached = optionsCache[country.code];
+    Promise.all([cached ? Promise.resolve(cached) : country.api.filters(token), country.api.status(token)])
       .then(([nextOptions, nextStatus]) => {
-        optionsCache = nextOptions;
-        statusCache = nextStatus;
+        optionsCache[country.code] = nextOptions;
+        statusCache[country.code] = nextStatus;
         if (active) {
           setOptions(nextOptions);
           setStatus(nextStatus);
         }
       })
-      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "No se pudo cargar Histórico Perú"); });
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : `No se pudo cargar ${country.label}`); });
     return () => { active = false; };
-  }, [token]);
+  }, [token, country]);
   return { options, status, error };
 }
 
@@ -66,17 +69,19 @@ export function useLatest<T>(load: () => Promise<T>, deps: unknown[]) {
 }
 
 export function useHistoricoList<K extends HistoricoKind>(token: string, kind: K, filters: HistoricoFilters, sort: string, pageSize = 50) {
+  const { api } = useHistCountry();
   const [page, setPage] = useState(1);
   const filterKey = JSON.stringify(filters);
   useEffect(() => { setPage(1); }, [filterKey, sort]);
   const result = useLatest<HistoricoPage<HistoricoRowByKind[K]>>(
-    () => historicoApi.list(token, kind, filters, page, pageSize, sort),
-    [token, kind, filterKey, sort, page, pageSize],
+    () => api.list(token, kind, filters, page, pageSize, sort),
+    [api, token, kind, filterKey, sort, page, pageSize],
   );
   return { ...result, page, setPage, pageSize };
 }
 
 export function useHistoricoDetail(token: string, kind: HistoricoKind, id: number | null) {
+  const { api } = useHistCountry();
   const [detail, setDetail] = useState<HistoricoDetail | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -87,16 +92,17 @@ export function useHistoricoDetail(token: string, kind: HistoricoKind, id: numbe
     let active = true;
     setDetail(null);
     setError("");
-    historicoApi.detail(token, kind, id)
+    api.detail(token, kind, id)
       .then((value) => { if (active) setDetail(value); })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : "No se pudo cargar el detalle"); });
     return () => { active = false; };
-  }, [token, kind, id]);
+  }, [api, token, kind, id]);
   return { detail, error };
 }
 
 export async function downloadExport(token: string, kind: HistoricoKind, filters: HistoricoFilters, sort?: string) {
-  const blob = await historicoApi.exportXlsx(token, kind, filters, sort);
+  const country = activeHistCountry();
+  const blob = await country.api.exportXlsx(token, kind, filters, sort);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const stamp = new Date().toISOString().slice(0, 10);
@@ -107,7 +113,7 @@ export async function downloadExport(token: string, kind: HistoricoKind, filters
     pac: "PAC",
   };
   link.href = url;
-  link.download = `Histórico Perú - ${names[kind]} ${stamp}.xlsx`;
+  link.download = `${country.label} - ${names[kind]} ${stamp}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -119,20 +125,27 @@ export function toggleValue<T>(values: T[] | undefined, value: T): T[] {
   return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
 }
 
-export const money = (value: number) => `S/ ${Math.round(value || 0).toLocaleString("es-PE")}`;
+export const money = (value: number) => {
+  const { currency, locale } = activeHistCountry();
+  return `${currency} ${Math.round(value || 0).toLocaleString(locale)}`;
+};
 
 export function moneyShort(value: number) {
-  if (value >= 1e6) return `S/ ${(value / 1e6).toLocaleString("es-PE", { maximumFractionDigits: 1 })} M`;
-  if (value >= 1e3) return `S/ ${Math.round(value / 1e3).toLocaleString("es-PE")} mil`;
+  const { currency, locale } = activeHistCountry();
+  if (value >= 1e6) return `${currency} ${(value / 1e6).toLocaleString(locale, { maximumFractionDigits: value >= 1e8 ? 0 : 1 })} M`;
+  if (value >= 1e3) return `${currency} ${Math.round(value / 1e3).toLocaleString(locale)} mil`;
   return money(value);
 }
 
+/** Integers in the active country's format (12.345 in Chile, 12,345 in Perú). */
+export const num = (value: number) => (value || 0).toLocaleString(activeHistCountry().locale);
+
 export function shortDate(iso: string | null | undefined) {
   if (!iso) return "—";
-  return new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString("es-PE", { day: "2-digit", month: "short", year: "numeric" });
+  return new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString(activeHistCountry().locale, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-/** CONOSCE ships entity and supplier names in capitals; show them in title case. */
+/** CONOSCE and ChileCompra ship names in capitals; show them in title case. */
 export function titleCase(value: string | null | undefined) {
   return String(value || "").toLocaleLowerCase("es").replace(/(^|[\s/(-])(\p{L})/gu, (_, gap: string, letter: string) => gap + letter.toLocaleUpperCase("es"));
 }

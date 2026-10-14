@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, historicoApi, Alert, AlertRule, APP_MODULES, AppModule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, parseModuleAccess, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
+import { api, Alert, AlertRule, APP_MODULES, AppModule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, parseModuleAccess, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
 import "./ui/tokens.css";
 import "./styles.css";
 import "./ui/ui.css";
@@ -24,6 +24,8 @@ const HistoricoVencimientos = lazy(() => import("./pages/historico/HistoricoPage
 const HistoricoPac = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoPac })));
 const HistoricoAlertas = lazy(() => import("./pages/historico/HistoricoPages").then((module) => ({ default: module.HistoricoAlertas })));
 const UiPreview = lazy(() => import("./ui/UiPreview"));
+import { HIST_COUNTRIES, HistCountryCode, HistCountryProvider } from "./pages/historico/country";
+import { readStored, writeStored } from "./favorites";
 const OpportunityTrackingArgentina = lazy(() => import("./pages/OpportunityTrackingPage").then((module) => ({ default: module.OpportunityTrackingArgentina })));
 
 type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades" | "Oportunidades Chile LMP-GC" | "Procesos COMPR.AR Argentina" | "Publicaciones COMPR.AR Argentina" | "Oportunidades OCDS Peru" | "Histórico Procesos Eliminados PE" | "Histórico Procesos Eliminados CL" | "Histórico Procesos Eliminados AR" | "Alertas" | "Seguimiento de Oportunidades Peru" | "Seguimiento de Oportunidades Chile" | "Seguimiento de Oportunidades Argentina" | "Usuarios" | "Sistema" | HistoricoPage;
@@ -31,8 +33,10 @@ type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades
 type HistoricoPage = "Resumen Histórico Perú" | "Historial de Contrataciones" | "Contratos por Vencer" | "PAC Perú" | "Alertas Histórico Perú";
 
 
-// Histórico Perú is a separate product module (monthly CONOSCE open data),
-// gated by User.module_access rather than by the per-country access_profile.
+// Histórico is a separate product module (monthly open data: CONOSCE for Perú,
+// ChileCompra for Chile), gated by User.module_access ("historico_peru",
+// "historico_chile") rather than by the per-country access_profile. The same
+// pages serve both countries through HistCountryProvider; PAC is Perú only.
 const historicoPages: HistoricoPage[] = ["Resumen Histórico Perú", "Historial de Contrataciones", "Contratos por Vencer", "PAC Perú", "Alertas Histórico Perú"];
 const adminPages: Page[] = ["Usuarios", "Sistema"];
 
@@ -377,7 +381,7 @@ function countryOfPage(page: Page): Country | null {
   for (const code of Object.keys(radarNav) as CountryCode[]) {
     if (radarNav[code].some((item) => item.page === page)) return countryOfCode[code];
   }
-  if (page === "Oportunidades" || isHistoricoPage(page)) return "Peru";
+  if (page === "Oportunidades") return "Peru";
   return null;
 }
 
@@ -402,6 +406,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   const [legalView, setLegalView] = useState<LegalView | null>(null);
   const [versionLabel, setVersionLabel] = useState("Versión 1.0 (Beta)");
   const [historicoUrgent, setHistoricoUrgent] = useState(0);
+  const [historicoCountry, setHistoricoCountry] = useState<HistCountryCode>(() => readStored<HistCountryCode>("govradar.hist.country", "peru"));
   const [brand, setBrand] = useState<TenantBrand>(DEFAULT_BRAND);
   const legalDocuments = useLegalDocuments();
   const backend = useBackend(token);
@@ -416,13 +421,28 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
     () => (currentUser ? parseAccessProfile(currentUser.access_profile) : ["peru"]),
     [currentUser],
   );
+  // Histórico countries this user may open; the shell shows them as one
+  // "Histórico" module with a country selector, like the radar.
+  const historicoCountries = useMemo<HistCountryCode[]>(
+    () => (["peru", "chile"] as HistCountryCode[]).filter((code) => allowedModules.includes(HIST_COUNTRIES[code].module)),
+    [allowedModules],
+  );
+  const activeHistCountry: HistCountryCode = historicoCountries.includes(historicoCountry) ? historicoCountry : historicoCountries[0] ?? "peru";
+  const shellModules = useMemo<Array<"radar" | "historico_peru">>(
+    () => [...(allowedModules.includes("radar") ? ["radar" as const] : []), ...(historicoCountries.length ? ["historico_peru" as const] : [])],
+    [allowedModules, historicoCountries],
+  );
   const visibleNav = useMemo(() => {
     const radarPages = allowedModules.includes("radar") ? allowedCountries.flatMap((code) => [...pagesByCountry[code], ...radarNav[code].map((item) => item.page)]) : [];
-    const moduleHistorico = allowedModules.includes("historico_peru") ? historicoPages : [];
+    const moduleHistorico = historicoCountries.length
+      ? historicoPages.filter((item) => item !== "PAC Perú" || HIST_COUNTRIES[activeHistCountry].hasPac)
+      : [];
     const allowed = Array.from(new Set<Page>([...radarPages, ...moduleHistorico]));
     return currentUser?.role === "admin" ? [...allowed, ...adminPages] : allowed;
-  }, [currentUser, allowedModules, allowedCountries]);
+  }, [currentUser, allowedModules, allowedCountries, historicoCountries, activeHistCountry]);
   const activeModule: AppModule = isHistoricoPage(page) ? "historico_peru" : "radar";
+
+  useEffect(() => writeStored("govradar.hist.country", activeHistCountry), [activeHistCountry]);
   const isAdmin = currentUser?.role === "admin";
 
   useEffect(() => {
@@ -450,6 +470,10 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (currentUser && !visibleNav.includes(page)) {
+      if (isHistoricoPage(page) && historicoCountries.length) {
+        setPage("Resumen Histórico Perú");  // e.g. PAC after switching to Chile
+        return;
+      }
       if (!allowedModules.includes("radar")) {
         setPage("Resumen Histórico Perú");
         return;
@@ -457,7 +481,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
       const firstCountry = parseAccessProfile(currentUser.access_profile)[0];
       setPage(firstCountry === "chile" ? "Inicio Chile" : firstCountry === "argentina" ? "Inicio Argentina" : "Inicio Peru");
     }
-  }, [currentUser, page, visibleNav, allowedModules]);
+  }, [currentUser, page, visibleNav, allowedModules, historicoCountries]);
 
   useEffect(() => {
     const pageCountry = countryOfPage(page);
@@ -466,11 +490,11 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     // Badge for the Histórico alerts tab: open critical alerts.
-    if (!currentUser || !allowedModules.includes("historico_peru")) return;
-    historicoApi.alerts(token, { page_size: 1 })
+    if (!currentUser || !historicoCountries.length) return;
+    HIST_COUNTRIES[activeHistCountry].api.alerts(token, { page_size: 1 })
       .then((result) => setHistoricoUrgent(result.counts?.P1 ?? 0))
       .catch(() => setHistoricoUrgent(0));
-  }, [currentUser, allowedModules, token, page === "Alertas Histórico Perú"]);
+  }, [currentUser, historicoCountries, activeHistCountry, token, page === "Alertas Histórico Perú"]);
 
   function changeModule(next: AppModule) {
     if (next === activeModule) return;
@@ -517,7 +541,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
     : null;
   const sections: NavSection[] = activeModule === "historico_peru"
     ? [
-      { label: "Histórico Perú", items: historicoNav.map((item) => ({ id: item.page, label: item.label, shortLabel: item.shortLabel, icon: item.icon, badge: item.page === "Alertas Histórico Perú" ? historicoUrgent : undefined })) },
+      { label: HIST_COUNTRIES[activeHistCountry].label, items: historicoNav.filter((item) => visibleNav.includes(item.page)).map((item) => ({ id: item.page, label: item.label, shortLabel: item.shortLabel, icon: item.icon, badge: item.page === "Alertas Histórico Perú" ? historicoUrgent : undefined })) },
       ...(adminSection ? [{ ...adminSection, items: adminSection.items.filter((item) => item.id === "Sistema") }] : []),
     ]
     : [
@@ -531,18 +555,19 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   const phoneTabs = activeModule === "historico_peru"
     ? ["Resumen Histórico Perú", "Historial de Contrataciones", "Contratos por Vencer", "Alertas Histórico Perú"]
     : [radarNav[countryCode][0].page, radarNav[countryCode][1].page, radarNav[countryCode].find((item) => item.role === "seguimiento")!.page, "Alertas"];
-  const selectableCountries = activeModule === "radar" ? allowedCountries.map((code) => countryOptions[code]) : [countryOptions.peru];
+  const selectableCountries = activeModule === "radar" ? allowedCountries.map((code) => countryOptions[code]) : historicoCountries.map((code) => countryOptions[code]);
+  const changeHistoricoCountry = (next: Country) => setHistoricoCountry(countryCodeOf[next] as HistCountryCode);
   const countrySelector = (compact: boolean) => (
     <CountrySelector
-      value={activeModule === "radar" ? country : "Peru"}
+      value={activeModule === "radar" ? country : countryOfCode[activeHistCountry]}
       options={selectableCountries}
-      onChange={activeModule === "radar" && selectableCountries.length > 1 ? changeCountry : undefined}
+      onChange={selectableCountries.length > 1 ? (activeModule === "radar" ? changeCountry : changeHistoricoCountry) : undefined}
       compact={compact}
       onDark={compact}
     />
   );
   const pageMeta = activeModule === "historico_peru"
-    ? "Datos abiertos OECE · CONOSCE"
+    ? HIST_COUNTRIES[activeHistCountry].source
     : countryOfPage(page)
       ? `${countryOptions[countryCode].label} · ${launcherDescriptions[page]}`
       : launcherDescriptions[page];
@@ -551,7 +576,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
     <UiAppShell
       brand={brand}
       module={activeModule}
-      modules={allowedModules}
+      modules={shellModules}
       onModuleChange={changeModule}
       sections={sections}
       phoneTabs={phoneTabs}
@@ -592,11 +617,15 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
         {currentUser && page === "Seguimiento de Oportunidades Peru" ? <OpportunityTrackingPeru token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
         {currentUser && page === "Seguimiento de Oportunidades Chile" ? <OpportunityTrackingChile token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
         {currentUser && page === "Seguimiento de Oportunidades Argentina" ? <OpportunityTrackingArgentina token={token} isAdmin={currentUser.role === "admin"} currentUserId={currentUser.id} /> : null}
-        {currentUser && page === "Resumen Histórico Perú" ? <HistoricoResumen token={token} onGo={setPage} /> : null}
-        {currentUser && page === "Historial de Contrataciones" ? <HistoricoContrataciones token={token} /> : null}
-        {currentUser && page === "Contratos por Vencer" ? <HistoricoVencimientos token={token} /> : null}
-        {currentUser && page === "PAC Perú" ? <HistoricoPac token={token} /> : null}
-        {currentUser && page === "Alertas Histórico Perú" ? <HistoricoAlertas token={token} /> : null}
+        {currentUser && isHistoricoPage(page) ? (
+          <HistCountryProvider country={activeHistCountry} key={activeHistCountry}>
+            {page === "Resumen Histórico Perú" ? <HistoricoResumen token={token} onGo={setPage} /> : null}
+            {page === "Historial de Contrataciones" ? <HistoricoContrataciones token={token} /> : null}
+            {page === "Contratos por Vencer" ? <HistoricoVencimientos token={token} /> : null}
+            {page === "PAC Perú" && HIST_COUNTRIES[activeHistCountry].hasPac ? <HistoricoPac token={token} /> : null}
+            {page === "Alertas Histórico Perú" ? <HistoricoAlertas token={token} /> : null}
+          </HistCountryProvider>
+        ) : null}
         {page === "Usuarios" && currentUser?.role === "admin" ? <Users token={token} currentUserId={currentUser.id} /> : null}
         {page === "Sistema" ? (
           <System

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
@@ -68,7 +68,9 @@ def create_app() -> FastAPI:
     app.include_router(tracking_templates.router)
     app.include_router(opportunity_tracking.router)
     app.include_router(opportunity_reviews.router)
-    app.include_router(historico.router)
+    # One router, two countries: the scope dependency pins the DB session.
+    app.include_router(historico.router, prefix="/historico", dependencies=[Depends(historico.scope_dependency("peru"))])
+    app.include_router(historico.router, prefix="/historico-chile", dependencies=[Depends(historico.scope_dependency("chile"))])
     app.include_router(favorites.router)
 
     @app.get("/")

@@ -1,4 +1,6 @@
-"""Load CONOSCE files into the hist_* tables and rebuild derived views.
+"""Load CONOSCE (Perú) / ChileCompra (Chile) files into the hist_* tables and
+rebuild derived views. The session's country (hist_scope.use_country) picks
+the source and loaders; everything else is shared.
 
 Every dataset/period in a run *replaces* what was stored for that same
 dataset/period: OECE re-publishes past months with corrections, so merging
@@ -17,6 +19,7 @@ from typing import Callable, Iterable
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
+from ...hist_scope import current_country
 from ...models import (
     HistContract,
     HistContracting,
@@ -27,7 +30,8 @@ from ...models import (
     HistPacItem,
     HistRecurring,
 )
-from . import conosce
+from . import chile_import, chilecompra, conosce
+from .countries import get_country
 from .classify import DEFAULT_KEYWORDS, Classifier, build_rules, government_level, normalize, process_group
 from .derive import (
     ContractDates,
@@ -41,12 +45,21 @@ from .derive import (
 
 logger = logging.getLogger(__name__)
 BATCH = 2000
-DATASET_ORDER = {"entidades": 0, "adjudicaciones": 1, "directa": 2, "contratos": 3, "pac": 4, "ordenes": 5}
+DATASET_ORDER = {"entidades": 0, "adjudicaciones": 1, "licitaciones": 1, "directa": 2, "contratos": 3, "pac": 4, "ordenes": 5}
 ProgressFn = Callable[[int, str], None]
 
 
 def lima_today() -> date:
     return (datetime.utcnow() - timedelta(hours=5)).date()
+
+
+def local_today(db: Session) -> date:
+    return lima_today() if current_country(db) == "peru" else get_country(current_country(db)).today()
+
+
+def source_module(db: Session):
+    """conosce for Perú, chilecompra for Chile (catalogue/download/identify_file)."""
+    return chilecompra if current_country(db) == "chile" else conosce
 
 
 # --- keywords ------------------------------------------------------------------
@@ -97,7 +110,7 @@ def import_files(
     progress: ProgressFn | None = None,
 ) -> HistImportRun:
     """Load already-downloaded files (manual upload / PC script / job)."""
-    today = today or lima_today()
+    today = today or local_today(db)
     ordered = sorted(files, key=lambda item: (DATASET_ORDER[item[0].dataset], item[0].year or 0, item[0].month or 0))
     _update_run(db, run, status="running", started_at=datetime.utcnow(), progress=1, message="Procesando archivos",
                 files_json=json.dumps([source.filename for source, _ in ordered]))
@@ -129,13 +142,14 @@ def load_file(db: Session, run: HistImportRun, source: conosce.SourceFile, path:
 def finish_import(db: Session, run: HistImportRun, today: date) -> HistImportRun:
     from .alerts_service import evaluate_alerts
 
-    _update_run(db, run, status="running", progress=88, message="Calculando vencimientos, recurrentes y PAC")
+    _update_run(db, run, status="running", progress=88, message="Calculando vencimientos, recurrentes y alertas")
     counts = json.loads(run.counts_json or "{}")
     counts.update(rebuild_derived(db, today))
     counts["alertas"] = evaluate_alerts(db, today, import_run_id=run.id)
     _update_run(
         db, run, status="completed", finished_at=datetime.utcnow(), progress=100,
-        data_cut_date=date(today.year, today.month, 1) - timedelta(days=1),
+        # CONOSCE publishes closed months; ChileCompra refreshes daily.
+        data_cut_date=date(today.year, today.month, 1) - timedelta(days=1) if current_country(db) == "peru" else today - timedelta(days=1),
         counts_json=json.dumps(counts), message="Actualización completada",
     )
     return run
@@ -143,7 +157,7 @@ def finish_import(db: Session, run: HistImportRun, today: date) -> HistImportRun
 
 def fail_run(db: Session, run: HistImportRun, exc: Exception) -> None:
     db.rollback()
-    logger.exception("Histórico Perú import %s failed", run.id)
+    logger.exception("%s import %s failed", get_country(current_country(db)).label, run.id)
     _update_run(db, run, status="failed", finished_at=datetime.utcnow(), error=f"{type(exc).__name__}: {exc}", message="La actualización falló")
 
 
@@ -156,12 +170,17 @@ def download_and_import(
     proxies: dict | None = None,
     progress: ProgressFn | None = None,
 ) -> HistImportRun:
-    """Full refresh straight from CONOSCE. Each file is downloaded, loaded and
-    deleted before the next one (catalogue() is already in load order), so
-    disk use stays at one ~70 MB file instead of the ~3 GB catalogue."""
-    today = today or lima_today()
-    sources = conosce.catalogue(today)
-    _update_run(db, run, status="running", started_at=datetime.utcnow(), progress=1, message="Descargando desde CONOSCE",
+    """Full refresh straight from the open-data portal. Each file is
+    downloaded, loaded and deleted before the next one (catalogue() is
+    already in load order), so disk use stays at one file (~70 MB CONOSCE,
+    ~100 MB ChileCompra) instead of the whole catalogue."""
+    today = today or local_today(db)
+    module = source_module(db)
+    if module is chilecompra:
+        sources = chilecompra.catalogue(today, loaded=chile_import.loaded_periods(db))
+    else:
+        sources = conosce.catalogue(today)
+    _update_run(db, run, status="running", started_at=datetime.utcnow(), progress=1, message=f"Descargando desde {get_country(current_country(db)).source_label}",
                 files_json=json.dumps([source.filename for source in sources]))
     missing: list[str] = []
     try:
@@ -172,7 +191,7 @@ def download_and_import(
             if progress:
                 progress(run.progress, message)
             try:
-                path = conosce.download(source, work_dir, proxies=proxies)
+                path = module.download(source, work_dir, proxies=proxies)
             except FileNotFoundError:
                 missing.append(source.filename)  # e.g. a month OECE has not published yet
                 continue
@@ -194,6 +213,9 @@ def download_and_import(
 
 
 def _load_file(db: Session, run: HistImportRun, classifier: Classifier, source: conosce.SourceFile, path: Path) -> int:
+    if current_country(db) == "chile":
+        chile_loader = {"licitaciones": chile_import.load_licitaciones, "ordenes": chile_import.load_ordenes}[source.dataset]
+        return chile_loader(db, run, classifier, source, path, _flush)
     loader = {
         "entidades": _load_entities,
         "adjudicaciones": _load_awards,
@@ -215,9 +237,11 @@ def _flush(db: Session, model, rows: list[dict]) -> None:
                 keys = [row["source_key"] for row in rows if row["dataset"] == dataset]
                 db.execute(delete(HistContracting).where(HistContracting.dataset == dataset, HistContracting.source_key.in_(keys)))
         now = datetime.utcnow()
+        country = current_country(db)  # Core insert bypasses hist_scope's before_flush stamp
         for row in rows:
             row.setdefault("created_at", now)
             row.setdefault("updated_at", now)
+            row["country"] = country
         db.execute(insert(model), rows)
         rows.clear()
 
@@ -495,6 +519,7 @@ def rebuild_expiring(db: Session, today: date) -> int:
     for award in awards:
         if award.event_date:
             latest_by_entity_category[(award.entity_ruc, award.category)].append((award.event_date, award.convocatoria_code))
+    country = get_country(current_country(db))
     pending: list[dict] = []
     for award in awards:
         if not award.event_date:
@@ -515,7 +540,7 @@ def rebuild_expiring(db: Session, today: date) -> int:
             "contract_id": contract.id if contract else None,
             "start_date": term.start,
             "end_date": term.end,
-            "date_source": term.source[:80],
+            "date_source": _date_source_label(term.source, country)[:80],
             "is_real_date": term.is_real,
             "days_to_end": days,
             "bucket": expiring_bucket(days),
@@ -530,6 +555,15 @@ def rebuild_expiring(db: Session, today: date) -> int:
     return db.query(HistExpiring).count()
 
 
+def _date_source_label(source: str, country) -> str:
+    """derive.end_of_term speaks SEACE; reword it for other countries."""
+    if country.code == "peru":
+        return source
+    if source.startswith("Contrato SEACE"):
+        return country.real_date_label
+    return source.replace("buena pro", "adjudicación")
+
+
 def rebuild_recurring(db: Session, today: date) -> int:
     db.execute(delete(HistRecurring))
     window_start = today - timedelta(days=365)
@@ -540,7 +574,7 @@ def rebuild_recurring(db: Session, today: date) -> int:
             HistContracting.event_date <= today,
         )
     ).scalars().all()
-    orders = [order for order in orders if "anulad" not in normalize(order.status)]
+    orders = [order for order in orders if not any(term in normalize(order.status) for term in ("anulad", "cancelad", "cancelacion"))]
     by_pair: dict[tuple[str, str], list[HistContracting]] = defaultdict(list)
     entity_total: dict[str, float] = defaultdict(float)
     entity_suppliers: dict[str, set[str]] = defaultdict(set)

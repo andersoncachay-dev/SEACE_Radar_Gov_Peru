@@ -1,4 +1,5 @@
-"""Histórico Perú emails: weekly digest and "manual upload needed" notice."""
+"""Histórico emails (per session country): weekly digest and "manual upload
+needed" notice."""
 from __future__ import annotations
 
 import html
@@ -9,18 +10,25 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...config import settings
+from ...hist_scope import current_country
 from ...models import HistAlert, HistImportRun, User
 from ...module_access import has_module_access
 from ..notification_service import _branded_email_html, _send_email
-from . import conosce
+from . import chilecompra, conosce
+from .countries import get_country
 from .alerts_service import PRIORITY_LABELS, get_preference, matches_preference
 
 logger = logging.getLogger(__name__)
 
 
+def _country(db: Session):
+    return get_country(current_country(db))
+
+
 def _module_users(db: Session) -> list[User]:
+    module = _country(db).module
     users = db.scalars(select(User).where(User.is_active.is_(True))).all()
-    return [user for user in users if user.role == "admin" or has_module_access(user.module_access, "historico_peru")]
+    return [user for user in users if user.role == "admin" or has_module_access(user.module_access, module)]
 
 
 def digest_recipients(db: Session) -> list[User]:
@@ -29,10 +37,6 @@ def digest_recipients(db: Session) -> list[User]:
 
 def admin_recipients(db: Session) -> list[User]:
     return [user for user in _module_users(db) if user.role == "admin"]
-
-
-def _money(value: float) -> str:
-    return f"S/ {value:,.0f}".replace(",", " ")
 
 
 def build_digest(db: Session, today: date, user: User | None = None) -> tuple[str, str, str] | None:
@@ -49,11 +53,12 @@ def build_digest(db: Session, today: date, user: User | None = None) -> tuple[st
     if not urgent and not new_this_week:
         return None
     latest = db.scalar(select(HistImportRun).where(HistImportRun.status == "completed").order_by(HistImportRun.finished_at.desc()).limit(1))
-    data_line = f"Datos CONOSCE al {latest.data_cut_date:%d/%m/%Y}." if latest and latest.data_cut_date else "Aún no hay una actualización completada."
+    country = _country(db)
+    data_line = f"Datos {country.source_label} al {latest.data_cut_date:%d/%m/%Y}." if latest and latest.data_cut_date else "Aún no hay una actualización completada."
     rows = "".join(
         f"<tr><td style='padding:6px 8px;border-bottom:1px solid #e3ebf6'><strong>{PRIORITY_LABELS.get(a.priority, a.priority)}</strong></td>"
         f"<td style='padding:6px 8px;border-bottom:1px solid #e3ebf6'>{html.escape(a.title)}<br><span style='color:#51627b'>{html.escape(a.entity_name)} · {html.escape(a.department)}</span></td>"
-        f"<td style='padding:6px 8px;border-bottom:1px solid #e3ebf6;text-align:right;white-space:nowrap'>{_money(a.amount) if a.amount else ''}</td></tr>"
+        f"<td style='padding:6px 8px;border-bottom:1px solid #e3ebf6;text-align:right;white-space:nowrap'>{country.money(a.amount) if a.amount else ''}</td></tr>"
         for a in urgent[:15]
     )
     body = (
@@ -63,7 +68,7 @@ def build_digest(db: Session, today: date, user: User | None = None) -> tuple[st
         f"<p style='color:#51627b'>{data_line}</p>"
     )
     text = "\n".join(f"[{PRIORITY_LABELS.get(a.priority)}] {a.title} — {a.entity_name}" for a in urgent[:15])
-    subject = f"Histórico Perú · {len(urgent)} alertas prioritarias esta semana"
+    subject = f"{country.label} · {len(urgent)} alertas prioritarias esta semana"
     return subject, text, _branded_email_html("Resumen semanal de alertas", body, f"{settings.frontend_url}/", "Abrir el centro de alertas")
 
 
@@ -83,16 +88,20 @@ def send_digest(db: Session, today: date) -> int:
 
 
 def send_manual_upload_notice(db: Session, reason: str) -> int:
-    files = [source for source in conosce.catalogue(date.today()) if source.dataset != "ordenes"][:8]
+    country = _country(db)
+    if country.code == "chile":
+        today = country.today()
+        files = [chilecompra.monthly_file(dataset, today.year, today.month) for dataset in chilecompra.DATASETS]
+        how = ("<p>Descarga las licitaciones y órdenes de compra del mes desde datos-abiertos.chilecompra.cl (Descargas) y súbelas en "
+               "<strong>Configuración › Histórico Chile › Cargar archivos</strong>, con el nombre lic-AAAA-M.zip u oc-AAAA-M.zip.</p>")
+    else:
+        files = [source for source in conosce.catalogue(date.today()) if source.dataset != "ordenes"][:8]
+        how = ("<p>Descarga los archivos del mes desde CONOSCE (Datos Abiertos) y súbelos en "
+               "<strong>Configuración › Histórico Perú › Cargar archivos</strong>. Las órdenes de compra son un archivo por mes.</p>")
     links = "".join(f"<li><a href='{source.url}'>{html.escape(source.filename)}</a></li>" for source in files)
-    body = (
-        f"<p>La actualización automática de Histórico Perú no se completó: {html.escape(reason)}</p>"
-        "<p>Descarga los archivos del mes desde CONOSCE (Datos Abiertos) y súbelos en "
-        "<strong>Sistema › Histórico Perú › Cargar archivos</strong>. Las órdenes de compra son un archivo por mes.</p>"
-        f"<ul>{links}</ul>"
-    )
-    subject = "Histórico Perú · Carga manual requerida"
-    text = f"La actualización automática de Histórico Perú falló ({reason}). Sube los archivos de CONOSCE en Sistema › Histórico Perú."
+    body = f"<p>La actualización automática de {country.label} no se completó: {html.escape(reason)}</p>{how}<ul>{links}</ul>"
+    subject = f"{country.label} · Carga manual requerida"
+    text = f"La actualización automática de {country.label} falló ({reason}). Sube los archivos de {country.source_label} en Configuración › {country.label}."
     sent = 0
     for user in admin_recipients(db):
         try:

@@ -150,6 +150,22 @@ az containerapp job start -g govradar-rg -n govradar-historico-peru --env-vars H
 
 Una importacion completa (unos 60 archivos, cerca de 3 GB) toma alrededor de 40 minutos; la mayor parte es la lectura de las ordenes mensuales con `python-calamine`.
 
+
+### 11. Modulo Historico Chile (datos abiertos ChileCompra)
+
+Mismo modulo que Historico Peru (mismas tablas `hist_*` con columna `country`, mismas pantallas y alertas), con otra fuente: los zip mensuales de `datos-abiertos.chilecompra.cl/descargas`, en `https://transparenciachc.blob.core.windows.net/lic-da/AAAA-M.zip` (licitaciones) y `.../oc-da/AAAA-M.zip` (ordenes de compra). Ver `backend/app/services/historico/chilecompra.py` y `chile_import.py`. ChileCompra los actualiza a diario; una actualizacion relee los ultimos 18 meses de licitaciones y 3 de ordenes, y los meses anteriores solo si faltan.
+
+- **Job de Azure** [historico-chile-job.yaml](historico-chile-job.yaml) (`govradar-historico-chile`), cron horario `20 * * * *`, `HISTORICO_COUNTRY=chile`, timeout 3 h. La primera carga (2023 a hoy, unos 92 archivos) toma unos 40 minutos; despues, el dia de actualizacion por defecto es el 3 de cada mes (editable en Configuracion › Historico Chile).
+- **Sin script de PC:** la fuente es Azure Blob y se descarga directo desde el job. Si el job falla, los admins reciben "Historico Chile · Carga manual requerida" y suben los zip en Configuracion › Historico Chile › Cargar archivos, nombrados `lic-AAAA-M.zip` / `oc-AAAA-M.zip` (si se suben con el nombre original `AAAA-M.zip`, se reconocen por la cabecera del CSV).
+- **Permiso:** modulo `historico_chile` en Usuarios, independiente de `historico_peru`.
+
+```powershell
+(Get-Content azure/historico-chile-job.yaml) -replace 'IMAGE_TAG', '<tag>' | Set-Content $env:TEMP\historico-chile-job.yaml
+az containerapp job create -g govradar-rg -n govradar-historico-chile --yaml $env:TEMP\historico-chile-job.yaml
+# primera carga inmediata
+az containerapp job start -g govradar-rg -n govradar-historico-chile --env-vars HISTORICO_COUNTRY=chile HISTORICO_FORCE=true
+```
+
 ### 11. Prueba de aceptacion
 
 1. Crear una regla interna y verificar estado `sent`.

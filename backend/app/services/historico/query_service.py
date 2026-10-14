@@ -1,4 +1,4 @@
-"""Read side of Histórico Perú: filters, dashboard aggregates, paginated
+"""Read side of Histórico (Perú and Chile, per session country): filters, dashboard aggregates, paginated
 lists, record detail and filtered Excel export."""
 from __future__ import annotations
 
@@ -10,7 +10,9 @@ from sqlalchemy import String, case, cast, distinct, func, or_, select
 from sqlalchemy.orm import Session
 
 from ...models import HistContract, HistContracting, HistExpiring, HistPacItem, HistRecurring
+from ...hist_scope import current_country
 from .alerts_service import expiring_priority
+from .countries import get_country
 from .derive import EXPIRING_BUCKETS, RECURRING_BUCKETS
 
 MAX_PAGE_SIZE = 200
@@ -37,6 +39,10 @@ class Filters:
     # None = no favorites filter; otherwise the user's keys per favorite kind
     # (services/favorite_service.py), set by the router for "Solo favoritos".
     favorite_keys: dict[str, list[str]] | None = None
+
+
+def _scale(db: Session) -> float:
+    return get_country(current_country(db)).amount_scale
 
 
 def _like(term: str) -> str:
@@ -162,6 +168,7 @@ def _without(filters: Filters, *names: str) -> Filters:
 
 def expiring_runway(db: Session, filters: Filters, today: date, limit: int = 600) -> list[dict]:
     """Contracts ending in the next 12 months, for the "pista de vencimientos"."""
+    scale = _scale(db)
     rows = db.execute(
         select(HistExpiring, HistContracting)
         .join(HistContracting, HistContracting.id == HistExpiring.contracting_id)
@@ -178,7 +185,7 @@ def expiring_runway(db: Session, filters: Filters, today: date, limit: int = 600
         "department": award.department,
         "is_real_date": expiring.is_real_date,
         "possibly_renewed": expiring.possibly_renewed,
-        "priority": expiring_priority(expiring.days_to_end, award.amount) or "P4",
+        "priority": expiring_priority(expiring.days_to_end, award.amount, scale) or "P4",
     } for expiring, award in rows]
 
 
@@ -232,7 +239,7 @@ def _expiring_conditions(filters: Filters) -> list:
     return conditions
 
 
-def _expiring_dict(expiring: HistExpiring, award: HistContracting, contract: HistContract | None) -> dict:
+def _expiring_dict(expiring: HistExpiring, award: HistContracting, contract: HistContract | None, scale: float = 1.0) -> dict:
     return {
         **_contracting_dict(award),
         "id": expiring.id,
@@ -246,7 +253,7 @@ def _expiring_dict(expiring: HistExpiring, award: HistContracting, contract: His
         "monthly_amount": expiring.monthly_amount,
         "extras_amount": expiring.extras_amount,
         "possibly_renewed": expiring.possibly_renewed,
-        "priority": expiring_priority(expiring.days_to_end, award.amount),
+        "priority": expiring_priority(expiring.days_to_end, award.amount, scale),
         "contract_number": contract.contract_number if contract else "",
         "contract_url": contract.url if contract else "",
     }
@@ -277,7 +284,7 @@ def list_expiring(db: Session, filters: Filters, page: int = 1, page_size: int =
     ).one()
     order = EXPIRING_SORTS.get(sort, EXPIRING_SORTS["days_asc"])
     rows = db.execute(_expiring_query(filters).order_by(*order, HistExpiring.id).offset((page - 1) * size).limit(size)).all()
-    return {"items": [_expiring_dict(*row) for row in rows], "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
+    return {"items": [_expiring_dict(*row, scale=_scale(db)) for row in rows], "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
 
 
 def recurring_fav_key():
@@ -453,13 +460,13 @@ def detail(db: Session, kind: str, record_id: int) -> dict | None:
         record = _contracting_dict(row)
         if expiring:
             contract = db.get(HistContract, expiring.contract_id) if expiring.contract_id else None
-            record = _expiring_dict(expiring, row, contract) | {"id": row.id, "expiring_id": expiring.id}
+            record = _expiring_dict(expiring, row, contract, scale=_scale(db)) | {"id": row.id, "expiring_id": expiring.id}
         entity_ruc, exclude = row.entity_ruc, row.id
     elif kind == "vencimientos":
         found = db.execute(_expiring_query(Filters(relevance="")).where(HistExpiring.id == record_id)).first()
         if not found:
             return None
-        record = _expiring_dict(*found)
+        record = _expiring_dict(*found, scale=_scale(db))
         entity_ruc, exclude = found[1].entity_ruc, found[1].id
     elif kind == "recurrentes":
         row = db.get(HistRecurring, record_id)
@@ -524,6 +531,27 @@ EXPORT_COLUMNS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+# Perú labels -> Chile labels for the Excel headers.
+_CHILE_LABELS = (
+    ("Procedimiento SEACE", "Tipo de adquisición"), ("S/", "$ CLP"), ("RUC", "RUT"), ("Departamento", "Región"),
+    ("Nivel de gobierno", "Sector"), ("Buena pro", "Adjudicación"), ("Causal (Contratación Directa)", "Causal (trato directo)"),
+    ("Causal (CD)", "Causal (trato directo)"), ("Nº contrato", "Plazo declarado"), ("URL contrato", "Ficha de la licitación"),
+    ("Nomenclatura / Orden", "Código licitación / orden"), ("Nomenclatura", "Código licitación"),
+)
+
+
+def export_columns(db: Session, kind: str) -> list[tuple[str, str]]:
+    columns = EXPORT_COLUMNS[kind]
+    if current_country(db) != "chile":
+        return columns
+    relabeled = []
+    for key, label in columns:
+        for old, new in _CHILE_LABELS:
+            label = label.replace(old, new)
+        relabeled.append((key, label))
+    return relabeled
+
+
 _LISTERS = {"contrataciones": list_contractings, "vencimientos": list_expiring, "recurrentes": list_recurring, "pac": list_pac}
 
 
@@ -532,7 +560,7 @@ def export_xlsx(db: Session, kind: str, filters: Filters, sort: str | None = Non
     from openpyxl.styles import Font, PatternFill
 
     lister = _LISTERS[kind]
-    columns = EXPORT_COLUMNS[kind]
+    columns = export_columns(db, kind)
     workbook = Workbook(write_only=True)
     sheet = workbook.create_sheet(title=kind.capitalize()[:31])
     header_font = Font(bold=True, color="FFFFFF")

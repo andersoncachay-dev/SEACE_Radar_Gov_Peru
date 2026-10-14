@@ -206,9 +206,9 @@ export function formatAccessProfile(countries: CountryCode[]): AccessProfile {
 
 // Product modules, independent of the per-country access_profile. Admins
 // always reach every module (the backend's require_module enforces it too).
-export type AppModule = "radar" | "historico_peru";
+export type AppModule = "radar" | "historico_peru" | "historico_chile";
 export type ModuleAccess = string;
-export const APP_MODULES: AppModule[] = ["radar", "historico_peru"];
+export const APP_MODULES: AppModule[] = ["radar", "historico_peru", "historico_chile"];
 
 export function parseModuleAccess(value: ModuleAccess | undefined | null): AppModule[] {
   const selected = new Set((value || "").split(",").map((item) => item.trim()));
@@ -1154,78 +1154,85 @@ function historicoQuery(filters: HistoricoFilters = {}, extra: Record<string, st
   return query ? `?${query}` : "";
 }
 
-export const historicoApi = {
-  status: (token: string) => request<HistoricoStatus>("/historico/status", token, { cache: "no-store" }),
-  filters: (token: string) => request<HistoricoFilterOptions>("/historico/filters", token),
-  summary: (token: string, filters: HistoricoFilters) => request<HistoricoSummary>(`/historico/summary${historicoQuery(filters)}`, token),
-  list: <K extends HistoricoKind>(token: string, kind: K, filters: HistoricoFilters, page = 1, pageSize = 50, sort?: string) =>
-    request<HistoricoPage<HistoricoRowByKind[K]>>(`/historico/${kind}${historicoQuery(filters, { page, page_size: pageSize, sort })}`, token),
-  buckets: (token: string, kind: "vencimientos" | "recurrentes", filters: HistoricoFilters) =>
-    request<HistoricoGroup[]>(`/historico/${kind}/buckets${historicoQuery(filters)}`, token),
-  detail: (token: string, kind: HistoricoKind, id: number) => request<HistoricoDetail>(`/historico/${kind}/${id}`, token),
-  exportXlsx: async (token: string, kind: HistoricoKind, filters: HistoricoFilters, sort?: string) => {
-    const response = await fetch(`${API_URL}/historico/${kind}/export.xlsx${historicoQuery(filters, { sort })}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) throw new ApiError("No se pudo generar el archivo Excel", response.status);
-    return response.blob();
-  },
-  runway: (token: string, filters: HistoricoFilters) => request<HistoricoRunwayItem[]>(`/historico/vencimientos-runway${historicoQuery(filters)}`, token),
-  pacSummary: (token: string, filters: HistoricoFilters) => request<HistoricoPacSummary>(`/historico/pac-summary${historicoQuery(filters)}`, token),
-  alerts: (token: string, params: { kinds?: string[]; priorities?: string[]; statuses?: string[]; departments?: string[]; categories?: string[]; q?: string; mine?: boolean; page?: number; page_size?: number }) => {
-    const { page, page_size, mine, ...filters } = params;
-    return request<HistoricoAlertPage>(`/historico/alerts/list${historicoQuery(filters as HistoricoFilters, { page, page_size, mine: mine ? "true" : undefined })}`, token, { cache: "no-store" });
-  },
-  alertPreferences: (token: string) => request<HistoricoAlertPreference>("/historico/alerts/preferences", token, { cache: "no-store" }),
-  saveAlertPreferences: (token: string, preference: HistoricoAlertPreference) =>
-    request<HistoricoAlertPreference>("/historico/alerts/preferences", token, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(preference),
-    }),
-  previewAlertPreferences: (token: string, preference: HistoricoAlertPreference) =>
-    request<{ total: number; counts: Record<HistoricoPriority, number> }>("/historico/alerts/preview", token, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(preference),
-    }),
-  updateAlert: (token: string, id: number, payload: { status?: HistoricoAlertStatus; assignee_id?: number | null }) =>
-    request<HistoricoAlert>(`/historico/alerts/${id}`, token, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  keywords: (token: string) => request<HistoricoKeyword[]>("/historico/admin/keywords", token),
-  createKeyword: (token: string, payload: Omit<HistoricoKeyword, "id">) =>
-    request<HistoricoKeyword>("/historico/admin/keywords", token, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  updateKeyword: (token: string, id: number, payload: Omit<HistoricoKeyword, "id">) =>
-    request<HistoricoKeyword>(`/historico/admin/keywords/${id}`, token, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  deleteKeyword: (token: string, id: number) => request<void>(`/historico/admin/keywords/${id}`, token, { method: "DELETE" }),
-  imports: (token: string) => request<{ status: HistoricoStatus; runs: HistoricoImportRun[] }>("/historico/admin/imports", token, { cache: "no-store" }),
-  importRun: (token: string, id: number) => request<HistoricoImportRun>(`/historico/admin/imports/${id}`, token, { cache: "no-store" }),
-  requestRefresh: (token: string) => request<HistoricoStatus>("/historico/admin/refresh", token, { method: "POST" }),
-  updateSettings: (token: string, refreshDay: number) =>
-    request<HistoricoStatus>("/historico/admin/settings", token, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_day: refreshDay }),
-    }),
-  createUpload: (token: string) => request<HistoricoImportRun>("/historico/admin/imports", token, { method: "POST" }),
-  uploadFile: (token: string, runId: number, file: File) => {
-    const body = new FormData();
-    body.append("file", file);
-    return request<{ filename: string; dataset: string; year: number | null; month: number | null }>(`/historico/admin/imports/${runId}/files`, token, {
-      method: "POST",
-      body,
-    });
-  },
-  processUpload: (token: string, runId: number) => request<HistoricoImportRun>(`/historico/admin/imports/${runId}/process`, token, { method: "POST" }),
-};
+/** Histórico API for one country: "/historico" (Perú) or "/historico-chile". */
+export function makeHistoricoApi(base: string) {
+  return {
+    status: (token: string) => request<HistoricoStatus>(`${base}/status`, token, { cache: "no-store" }),
+    filters: (token: string) => request<HistoricoFilterOptions>(`${base}/filters`, token),
+    summary: (token: string, filters: HistoricoFilters) => request<HistoricoSummary>(`${base}/summary${historicoQuery(filters)}`, token),
+    list: <K extends HistoricoKind>(token: string, kind: K, filters: HistoricoFilters, page = 1, pageSize = 50, sort?: string) =>
+      request<HistoricoPage<HistoricoRowByKind[K]>>(`${base}/${kind}${historicoQuery(filters, { page, page_size: pageSize, sort })}`, token),
+    buckets: (token: string, kind: "vencimientos" | "recurrentes", filters: HistoricoFilters) =>
+      request<HistoricoGroup[]>(`${base}/${kind}/buckets${historicoQuery(filters)}`, token),
+    detail: (token: string, kind: HistoricoKind, id: number) => request<HistoricoDetail>(`${base}/${kind}/${id}`, token),
+    exportXlsx: async (token: string, kind: HistoricoKind, filters: HistoricoFilters, sort?: string) => {
+      const response = await fetch(`${API_URL}${base}/${kind}/export.xlsx${historicoQuery(filters, { sort })}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new ApiError("No se pudo generar el archivo Excel", response.status);
+      return response.blob();
+    },
+    runway: (token: string, filters: HistoricoFilters) => request<HistoricoRunwayItem[]>(`${base}/vencimientos-runway${historicoQuery(filters)}`, token),
+    pacSummary: (token: string, filters: HistoricoFilters) => request<HistoricoPacSummary>(`${base}/pac-summary${historicoQuery(filters)}`, token),
+    alerts: (token: string, params: { kinds?: string[]; priorities?: string[]; statuses?: string[]; departments?: string[]; categories?: string[]; q?: string; mine?: boolean; page?: number; page_size?: number }) => {
+      const { page, page_size, mine, ...filters } = params;
+      return request<HistoricoAlertPage>(`${base}/alerts/list${historicoQuery(filters as HistoricoFilters, { page, page_size, mine: mine ? "true" : undefined })}`, token, { cache: "no-store" });
+    },
+    alertPreferences: (token: string) => request<HistoricoAlertPreference>(`${base}/alerts/preferences`, token, { cache: "no-store" }),
+    saveAlertPreferences: (token: string, preference: HistoricoAlertPreference) =>
+      request<HistoricoAlertPreference>(`${base}/alerts/preferences`, token, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preference),
+      }),
+    previewAlertPreferences: (token: string, preference: HistoricoAlertPreference) =>
+      request<{ total: number; counts: Record<HistoricoPriority, number> }>(`${base}/alerts/preview`, token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preference),
+      }),
+    updateAlert: (token: string, id: number, payload: { status?: HistoricoAlertStatus; assignee_id?: number | null }) =>
+      request<HistoricoAlert>(`${base}/alerts/${id}`, token, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    keywords: (token: string) => request<HistoricoKeyword[]>(`${base}/admin/keywords`, token),
+    createKeyword: (token: string, payload: Omit<HistoricoKeyword, "id">) =>
+      request<HistoricoKeyword>(`${base}/admin/keywords`, token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    updateKeyword: (token: string, id: number, payload: Omit<HistoricoKeyword, "id">) =>
+      request<HistoricoKeyword>(`${base}/admin/keywords/${id}`, token, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    deleteKeyword: (token: string, id: number) => request<void>(`${base}/admin/keywords/${id}`, token, { method: "DELETE" }),
+    imports: (token: string) => request<{ status: HistoricoStatus; runs: HistoricoImportRun[] }>(`${base}/admin/imports`, token, { cache: "no-store" }),
+    importRun: (token: string, id: number) => request<HistoricoImportRun>(`${base}/admin/imports/${id}`, token, { cache: "no-store" }),
+    requestRefresh: (token: string) => request<HistoricoStatus>(`${base}/admin/refresh`, token, { method: "POST" }),
+    updateSettings: (token: string, refreshDay: number) =>
+      request<HistoricoStatus>(`${base}/admin/settings`, token, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_day: refreshDay }),
+      }),
+    createUpload: (token: string) => request<HistoricoImportRun>(`${base}/admin/imports`, token, { method: "POST" }),
+    uploadFile: (token: string, runId: number, file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      return request<{ filename: string; dataset: string; year: number | null; month: number | null }>(`${base}/admin/imports/${runId}/files`, token, {
+        method: "POST",
+        body,
+      });
+    },
+    processUpload: (token: string, runId: number) => request<HistoricoImportRun>(`${base}/admin/imports/${runId}/process`, token, { method: "POST" }),
+  };
+}
+
+export type HistoricoApi = ReturnType<typeof makeHistoricoApi>;
+export const historicoApi = makeHistoricoApi("/historico");
+export const historicoChileApi = makeHistoricoApi("/historico-chile");

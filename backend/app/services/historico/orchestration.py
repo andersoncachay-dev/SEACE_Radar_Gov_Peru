@@ -1,6 +1,8 @@
-"""When Histórico Perú refreshes, and what happens when a refresh fails.
+"""When Histórico Perú / Chile refresh, and what happens when a refresh fails.
 
-The govradar-historico-peru Container Apps Job fires hourly and is a no-op
+Every setting is per country (``historico.<country>.*`` AppSetting keys,
+Peru's are the original ones) and every query runs on the session's
+country (hist_scope). The govradar-historico-<country> Container Apps Job fires hourly and is a no-op
 almost every time (claim pattern, like scheduler_service). Real work:
 
 * monthly import: from ``refresh_day`` (default 9, OECE publishes in the
@@ -19,14 +21,16 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ...hist_scope import current_country
 from ...models import AppSetting, HistImportRun
+from .countries import get_country
 
-KEY_REFRESH_DAY = "historico.peru.refresh_day"
-KEY_REFRESH_REQUESTED = "historico.peru.refresh_requested"
-KEY_DAILY_DONE = "historico.peru.daily_refreshed_on"
-KEY_DIGEST_SENT = "historico.peru.digest_sent_on"
-KEY_JOB_FAILED_AT = "historico.peru.job_failed_at"
-KEY_MANUAL_NOTICE_AT = "historico.peru.manual_notice_sent_at"
+KEY_REFRESH_DAY = "refresh_day"
+KEY_REFRESH_REQUESTED = "refresh_requested"
+KEY_DAILY_DONE = "daily_refreshed_on"
+KEY_DIGEST_SENT = "digest_sent_on"
+KEY_JOB_FAILED_AT = "job_failed_at"
+KEY_MANUAL_NOTICE_AT = "manual_notice_sent_at"
 DEFAULT_REFRESH_DAY = 9
 STALE_RUNNING_HOURS = 3
 PC_GRACE_HOURS = 24
@@ -37,12 +41,21 @@ def lima_now() -> datetime:
     return datetime.utcnow() - timedelta(hours=5)
 
 
+def local_now(db: Session) -> datetime:
+    return lima_now() if current_country(db) == "peru" else get_country(current_country(db)).now()
+
+
+def _key(db: Session, name: str) -> str:
+    return f"historico.{current_country(db)}.{name}"
+
+
 def get_setting(db: Session, key: str, default: str = "") -> str:
-    item = db.scalar(select(AppSetting).where(AppSetting.key == key))
+    item = db.scalar(select(AppSetting).where(AppSetting.key == _key(db, key)))
     return item.value if item else default
 
 
 def set_setting(db: Session, key: str, value: str, user_id: int | None = None) -> None:
+    key = _key(db, key)
     item = db.scalar(select(AppSetting).where(AppSetting.key == key))
     if item is None:
         db.add(AppSetting(key=key, value=value, updated_by_id=user_id))
@@ -53,14 +66,15 @@ def set_setting(db: Session, key: str, value: str, user_id: int | None = None) -
 
 
 def refresh_day(db: Session) -> int:
+    default = get_country(current_country(db)).default_refresh_day
     try:
-        return min(28, max(1, int(get_setting(db, KEY_REFRESH_DAY, str(DEFAULT_REFRESH_DAY)))))
+        return min(28, max(1, int(get_setting(db, KEY_REFRESH_DAY, str(default)))))
     except ValueError:
-        return DEFAULT_REFRESH_DAY
+        return default
 
 
 def _completed_this_month(db: Session, today: date) -> HistImportRun | None:
-    month_start = datetime(today.year, today.month, 1) + timedelta(hours=5)  # Lima midnight in UTC
+    month_start = datetime(today.year, today.month, 1) + timedelta(hours=5)  # ~local midnight in UTC
     return db.scalar(
         select(HistImportRun)
         .where(HistImportRun.status == "completed", HistImportRun.finished_at >= month_start, HistImportRun.origin != "manual_upload")
@@ -77,7 +91,7 @@ def running_import(db: Session) -> HistImportRun | None:
 
 
 def import_is_due(db: Session, now: datetime | None = None) -> bool:
-    now = now or lima_now()
+    now = now or local_now(db)
     if running_import(db):
         return False
     if get_setting(db, KEY_REFRESH_REQUESTED) == "true":
@@ -137,7 +151,7 @@ def mark_daily_refresh(db: Session, today: date) -> None:
 
 
 def digest_due(db: Session, now: datetime | None = None) -> bool:
-    now = now or lima_now()
+    now = now or local_now(db)
     return now.weekday() == 0 and now.hour >= 8 and get_setting(db, KEY_DIGEST_SENT) != now.date().isoformat()
 
 
@@ -148,7 +162,7 @@ def mark_digest_sent(db: Session, today: date) -> None:
 def status(db: Session) -> dict:
     latest = db.scalar(select(HistImportRun).order_by(HistImportRun.created_at.desc()).limit(1))
     completed = db.scalar(select(HistImportRun).where(HistImportRun.status == "completed").order_by(HistImportRun.finished_at.desc()).limit(1))
-    now = lima_now()
+    now = local_now(db)
     return {
         "latest_run_id": latest.id if latest else None,
         "latest_status": latest.status if latest else None,

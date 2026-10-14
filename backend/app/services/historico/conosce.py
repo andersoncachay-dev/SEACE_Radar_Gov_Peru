@@ -81,7 +81,7 @@ def catalogue(today: date, first_year: int = FIRST_YEAR) -> list[SourceFile]:
     return files
 
 
-def identify_file(filename: str) -> SourceFile | None:
+def identify_file(filename: str, path: Path | None = None) -> SourceFile | None:
     """Recognise a manually uploaded CONOSCE file by its name, tolerating the
     SETIEMBRE/SEPTIEMBRE spelling and browser suffixes like " (1)"."""
     name = unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode().upper()
