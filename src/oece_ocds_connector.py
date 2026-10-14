@@ -327,6 +327,13 @@ def _csv_status(row: pd.Series) -> str:
         return "Vigente para Consultas y Propuesta"
     if tender_end and now <= tender_end:
         return "Vigente para Propuesta"
+    if consultation_end is None and tender_end is None:
+        # Contrataciones Directas (and some Adjudicaciones Abreviadas) are
+        # published with no enquiry/tender period at all. Without a deadline
+        # there is nothing to say the window closed, so they stay open
+        # candidates; calling them culminated made automatic discovery drop
+        # them (e.g. DIRECTA-DIRECTA-7-2026-SEDAPAR-1, 2026-10-12).
+        return "Vigente para Propuesta"
     return "Proceso Culminado"
 
 

@@ -84,6 +84,32 @@ class PeruSchedulePipelineTests(unittest.TestCase):
         self.assertEqual(parsed["consulta_fin"], datetime(2026, 7, 11, 4, 59))
         self.assertEqual(parsed["propuesta_fin"], datetime(2026, 7, 21, 4, 59))
 
+    def test_direct_contracting_without_periods_stays_in_automatic_discovery(self) -> None:
+        row = pd.Series(
+            {
+                "Entrega compilada:Licitación:Título de la licitación": "DIRECTA-DIRECTA-7-2026-SEDAPAR-1",
+                "Entrega compilada:Licitación:Descripción de la licitación": "CONTRATACIÓN DE SERVICIO DE INTERNET PARA LAS SEDES DE SEDAPAR S.A.",
+                "compiledRelease/tender/datePublished": "2026-10-12T14:54:00-05:00",
+                "Entrega compilada:Licitación:Detalles del método de contratación": "Contratación Directa",
+            }
+        )
+
+        parsed = _parse_csv_row(row, "seace_v3")
+        self.assertEqual(parsed["Estado Comercial"], "Vigente para Propuesta")
+        rows = pd.DataFrame([parsed])
+        self.assertEqual(rows[_active_row_mask(rows)]["Nomenclatura"].tolist(), ["DIRECTA-DIRECTA-7-2026-SEDAPAR-1"])
+
+    def test_expired_periods_are_still_culminated(self) -> None:
+        row = pd.Series(
+            {
+                "Entrega compilada:Licitación:Título de la licitación": "AS-SM-1-2026-X-1",
+                "Entrega compilada:Licitación:Periodo de consulta:Fecha de fin": "2026-01-10T23:59:00-05:00",
+                "Entrega compilada:Licitación:Periodo de licitación:Fecha de fin": "2026-01-20T23:59:00-05:00",
+            }
+        )
+
+        self.assertEqual(_parse_csv_row(row, "seace_v3")["Estado Comercial"], "Proceso Culminado")
+
     def test_progressive_queue_skips_schedules_already_validated_by_seace(self) -> None:
         engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
         Base.metadata.create_all(engine)
