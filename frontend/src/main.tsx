@@ -1,11 +1,12 @@
-import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, Alert, AlertRule, APP_MODULES, AppModule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, parseModuleAccess, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
+import { api, historicoApi, Alert, AlertRule, APP_MODULES, AppModule, confirmPasswordReset, CountryCode, login, Opportunity, parseAccessProfile, parseModuleAccess, requestPasswordReset, Run, setUnauthorizedHandler, Stats, UserRecord } from "./api";
 import "./ui/tokens.css";
 import "./styles.css";
 import "./ui/ui.css";
 import { applyTenantBrand, DEFAULT_BRAND } from "./ui/brand";
-import { Country, CountryFlagIcon, LegalDialog, LegalDocumentsMap, LegalView, countryFlagUrls, userInitials } from "./shared";
+import { Country, LegalDialog, LegalDocumentsMap, LegalView, countryFlagUrls, userInitials } from "./shared";
+import { AppShell as UiAppShell, CountryOption, CountrySelector, IconName, NavSection, PageHeader } from "./ui";
 
 const Home = lazy(() => import("./pages/HomePage"));
 const Opportunities = lazy(() => import("./pages/OpportunitiesPage"));
@@ -27,17 +28,17 @@ type Page = "Inicio Peru" | "Inicio Chile" | "Inicio Argentina" | "Oportunidades
 
 type HistoricoPage = "Resumen Histórico Perú" | "Historial de Contrataciones" | "Contratos por Vencer" | "PAC Perú" | "Alertas Histórico Perú";
 
-type NavIconName = "home" | "target" | "globe" | "database" | "money" | "bell" | "users" | "settings" | "calendar" | "chart" | "clipboard";
 
 // Histórico Perú is a separate product module (monthly CONOSCE open data),
 // gated by User.module_access rather than by the per-country access_profile.
 const historicoPages: HistoricoPage[] = ["Resumen Histórico Perú", "Historial de Contrataciones", "Contratos por Vencer", "PAC Perú", "Alertas Histórico Perú"];
 const adminPages: Page[] = ["Usuarios", "Sistema"];
-const moduleLabels: Record<AppModule, string> = { radar: "Radar en vivo", historico_peru: "Histórico Perú" };
 
 function isHistoricoPage(page: Page): page is HistoricoPage {
   return (historicoPages as Page[]).includes(page);
 }
+
+const rodarLogoUrl = "/assets/Rodarfondoblanco.png";
 
 const pagesByCountry: Record<CountryCode, Page[]> = {
   peru: ["Inicio Peru", "Oportunidades OCDS Peru", "Histórico Procesos Eliminados PE", "Alertas", "Seguimiento de Oportunidades Peru"],
@@ -45,66 +46,9 @@ const pagesByCountry: Record<CountryCode, Page[]> = {
   argentina: ["Inicio Argentina", "Procesos COMPR.AR Argentina", "Publicaciones COMPR.AR Argentina", "Histórico Procesos Eliminados AR", "Alertas", "Seguimiento de Oportunidades Argentina"],
 };
 
-const rodarLogoUrl = "/assets/Rodarfondoblanco.png";
 
-const navIcons: Record<Page, NavIconName> = {
-  "Inicio Peru": "home",
-  "Inicio Chile": "home",
-  "Inicio Argentina": "home",
-  Oportunidades: "money",
-  "Oportunidades Chile LMP-GC": "money",
-  "Oportunidades OCDS Peru": "money",
-  "Procesos COMPR.AR Argentina": "money",
-  "Publicaciones COMPR.AR Argentina": "database",
-  "Histórico Procesos Eliminados PE": "database",
-  "Histórico Procesos Eliminados CL": "database",
-  "Histórico Procesos Eliminados AR": "database",
-  Alertas: "bell",
-  "Seguimiento de Oportunidades Peru": "target",
-  "Seguimiento de Oportunidades Chile": "target",
-  "Seguimiento de Oportunidades Argentina": "target",
-  Usuarios: "users",
-  Sistema: "settings",
-  "Resumen Histórico Perú": "chart",
-  "Historial de Contrataciones": "database",
-  "Contratos por Vencer": "calendar",
-  "PAC Perú": "clipboard",
-  "Alertas Histórico Perú": "bell",
-};
 
-const launcherNavGroups: Array<{ label: string; pages: Page[]; module: AppModule | "admin" }> = [
-  { label: "Perú", pages: ["Inicio Peru", "Oportunidades OCDS Peru", "Oportunidades", "Histórico Procesos Eliminados PE", "Seguimiento de Oportunidades Peru"], module: "radar" },
-  { label: "Chile", pages: ["Inicio Chile", "Oportunidades Chile LMP-GC", "Histórico Procesos Eliminados CL", "Seguimiento de Oportunidades Chile"], module: "radar" },
-  { label: "Argentina", pages: ["Inicio Argentina", "Procesos COMPR.AR Argentina", "Histórico Procesos Eliminados AR", "Seguimiento de Oportunidades Argentina"], module: "radar" },
-  { label: "Operación", pages: ["Alertas"], module: "radar" },
-  { label: "Histórico Perú", pages: historicoPages, module: "historico_peru" },
-  { label: "Administración", pages: adminPages, module: "admin" },
-];
 
-const launcherLabels: Record<Page, string> = {
-  "Inicio Peru": "Inicio Peru",
-  "Inicio Chile": "Inicio Chile",
-  "Inicio Argentina": "Inicio Argentina",
-  Oportunidades: "Oportunidades",
-  "Oportunidades Chile LMP-GC": "Detalle Oportunidades Chile",
-  "Oportunidades OCDS Peru": "Detalle Oportunidades Perú",
-  "Procesos COMPR.AR Argentina": "Detalle Oportunidades Argentina",
-  "Publicaciones COMPR.AR Argentina": "Publicaciones Argentina",
-  "Histórico Procesos Eliminados PE": "Histórico Procesos Eliminados PE",
-  "Histórico Procesos Eliminados CL": "Histórico Procesos Eliminados CL",
-  "Histórico Procesos Eliminados AR": "Histórico Procesos Eliminados AR",
-  Alertas: "Alertas",
-  "Seguimiento de Oportunidades Peru": "Seguimiento de Oportunidades Perú",
-  "Seguimiento de Oportunidades Chile": "Seguimiento de Oportunidades Chile",
-  "Seguimiento de Oportunidades Argentina": "Seguimiento de Oportunidades Argentina",
-  Usuarios: "Usuarios",
-  Sistema: "Sistema",
-  "Resumen Histórico Perú": "Resumen",
-  "Historial de Contrataciones": "Historial de contrataciones",
-  "Contratos por Vencer": "Contratos por vencer",
-  "PAC Perú": "PAC",
-  "Alertas Histórico Perú": "Centro de alertas",
-};
 
 const launcherDescriptions: Record<Page, string> = {
   "Inicio Peru": "Resumen operativo de procesos SEACE",
@@ -131,24 +75,6 @@ const launcherDescriptions: Record<Page, string> = {
   "Alertas Histórico Perú": "Prioridades comerciales del mes",
 };
 
-function NavIcon({ name }: { name: NavIconName }) {
-  const common = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  return (
-    <svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
-      {name === "home" ? <path {...common} d="M3 11.5 12 4l9 7.5M5 10.5V20h14v-9.5M9 20v-6h6v6" /> : null}
-      {name === "target" ? <><circle {...common} cx="12" cy="12" r="8" /><circle {...common} cx="12" cy="12" r="3" /><path {...common} d="M17 7l3-3M17.5 4H20v2.5" /></> : null}
-      {name === "globe" ? <><circle {...common} cx="12" cy="12" r="9" /><path {...common} d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z" /></> : null}
-      {name === "database" ? <><ellipse {...common} cx="12" cy="5" rx="7" ry="3" /><path {...common} d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></> : null}
-      {name === "money" ? <><circle {...common} cx="12" cy="12" r="9" /><path {...common} d="M15.5 8.5C14.8 7.5 13.6 7 12 7c-2 0-3.5 1-3.5 2.5S10 12 12 12s3.5 1 3.5 2.5S14 17 12 17c-1.6 0-2.8-.5-3.5-1.5M12 5v14" /></> : null}
-      {name === "bell" ? <><path {...common} d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path {...common} d="M10 21h4" /></> : null}
-      {name === "users" ? <><path {...common} d="M16 21v-2a4 4 0 0 0-8 0v2" /><circle {...common} cx="12" cy="7" r="4" /><path {...common} d="M22 21v-2a4 4 0 0 0-3-3.8M16 3.2a4 4 0 0 1 0 7.6" /></> : null}
-      {name === "calendar" ? <><rect {...common} x="3.5" y="5" width="17" height="15" rx="2" /><path {...common} d="M3.5 10h17M8 3v4M16 3v4M8 14h3" /></> : null}
-      {name === "chart" ? <path {...common} d="M4 20V10M10 20V4M16 20v-7M22 20H2" /> : null}
-      {name === "clipboard" ? <><rect {...common} x="5" y="4" width="14" height="17" rx="2" /><path {...common} d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3" /></> : null}
-      {name === "settings" ? <><path {...common} d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z" /><path {...common} d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.7 1.7 0 0 0-2 .2 1.7 1.7 0 0 0-.8 1.7V22H9.2v-.2a1.7 1.7 0 0 0-.8-1.7 1.7 1.7 0 0 0-2-.2l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.4-1.1H3v-4h.2a1.7 1.7 0 0 0 1.4-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.7 1.7 0 0 0 2-.2A1.7 1.7 0 0 0 9.2 2V2h5.6v.2a1.7 1.7 0 0 0 .8 1.7 1.7 1.7 0 0 0 2 .2l.2-.1 2 3.4-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.4 1.1h.2v4h-.2A1.7 1.7 0 0 0 19.4 15Z" /></> : null}
-    </svg>
-  );
-}
 
 function useBackend(token: string) {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -403,11 +329,69 @@ function Login({ onLogin, resetToken = "" }: { onLogin: (token: string, email: s
   );
 }
 
+type RadarRole = "inicio" | "oportunidades" | "publicaciones" | "seguimiento" | "eliminados";
+
+// Radar navigation per country; the CountrySelector swaps the country and
+// keeps the same section (Oportunidades Perú -> Oportunidades Chile).
+const radarNav: Record<CountryCode, Array<{ role: RadarRole; page: Page; label: string; shortLabel: string; icon: IconName }>> = {
+  peru: [
+    { role: "inicio", page: "Inicio Peru", label: "Inicio", shortLabel: "Inicio", icon: "home" },
+    { role: "oportunidades", page: "Oportunidades OCDS Peru", label: "Oportunidades", shortLabel: "Oport.", icon: "target" },
+    { role: "seguimiento", page: "Seguimiento de Oportunidades Peru", label: "Seguimiento", shortLabel: "Seguim.", icon: "tracking" },
+    { role: "eliminados", page: "Histórico Procesos Eliminados PE", label: "Procesos eliminados", shortLabel: "Elimin.", icon: "database" },
+  ],
+  chile: [
+    { role: "inicio", page: "Inicio Chile", label: "Inicio", shortLabel: "Inicio", icon: "home" },
+    { role: "oportunidades", page: "Oportunidades Chile LMP-GC", label: "Oportunidades", shortLabel: "Oport.", icon: "target" },
+    { role: "seguimiento", page: "Seguimiento de Oportunidades Chile", label: "Seguimiento", shortLabel: "Seguim.", icon: "tracking" },
+    { role: "eliminados", page: "Histórico Procesos Eliminados CL", label: "Procesos eliminados", shortLabel: "Elimin.", icon: "database" },
+  ],
+  argentina: [
+    { role: "inicio", page: "Inicio Argentina", label: "Inicio", shortLabel: "Inicio", icon: "home" },
+    { role: "oportunidades", page: "Procesos COMPR.AR Argentina", label: "Oportunidades", shortLabel: "Oport.", icon: "target" },
+    { role: "publicaciones", page: "Publicaciones COMPR.AR Argentina", label: "Publicaciones", shortLabel: "Public.", icon: "file" },
+    { role: "seguimiento", page: "Seguimiento de Oportunidades Argentina", label: "Seguimiento", shortLabel: "Seguim.", icon: "tracking" },
+    { role: "eliminados", page: "Histórico Procesos Eliminados AR", label: "Procesos eliminados", shortLabel: "Elimin.", icon: "database" },
+  ],
+};
+
+const historicoNav: Array<{ page: HistoricoPage; label: string; shortLabel: string; icon: IconName }> = [
+  { page: "Resumen Histórico Perú", label: "Resumen", shortLabel: "Resumen", icon: "chart" },
+  { page: "Historial de Contrataciones", label: "Historial de contrataciones", shortLabel: "Historial", icon: "database" },
+  { page: "Contratos por Vencer", label: "Contratos por vencer", shortLabel: "Por vencer", icon: "clock" },
+  { page: "PAC Perú", label: "PAC Perú", shortLabel: "PAC", icon: "file" },
+  { page: "Alertas Histórico Perú", label: "Alertas", shortLabel: "Alertas", icon: "bell" },
+];
+
+const countryCodeOf: Record<Country, CountryCode> = { Peru: "peru", Chile: "chile", Argentina: "argentina" };
+const countryOfCode: Record<CountryCode, Country> = { peru: "Peru", chile: "Chile", argentina: "Argentina" };
+const countryOptions: Record<CountryCode, CountryOption<Country>> = {
+  peru: { value: "Peru", label: "Perú", code: "PE", flagUrl: countryFlagUrls.Peru },
+  chile: { value: "Chile", label: "Chile", code: "CL", flagUrl: countryFlagUrls.Chile },
+  argentina: { value: "Argentina", label: "Argentina", code: "AR", flagUrl: countryFlagUrls.Argentina },
+};
+
+function countryOfPage(page: Page): Country | null {
+  for (const code of Object.keys(radarNav) as CountryCode[]) {
+    if (radarNav[code].some((item) => item.page === page)) return countryOfCode[code];
+  }
+  if (page === "Oportunidades" || isHistoricoPage(page)) return "Peru";
+  return null;
+}
+
+function pageTitle(page: Page): string {
+  const radar = Object.values(radarNav).flat().find((item) => item.page === page);
+  if (radar) return radar.label;
+  const historico = historicoNav.find((item) => item.page === page);
+  if (historico) return historico.label;
+  if (page === "Sistema") return "Configuración";
+  return page;
+}
+
 function AppShell({ onLogout }: { onLogout: () => void }) {
   const token = localStorage.getItem("rodar_token") || "";
   const [page, setPage] = useState<Page>("Inicio Peru");
   const [country, setCountry] = useState<Country>("Peru");
-  const [launcherOpen, setLauncherOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserRecord | null>(null);
   const [sessionError, setSessionError] = useState("");
   const [keywordSearchHandoff, setKeywordSearchHandoff] = useState<{ country: Country; keyword: string } | null>(null);
@@ -415,9 +399,9 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   const [homeScrollSignal, setHomeScrollSignal] = useState(0);
   const [legalView, setLegalView] = useState<LegalView | null>(null);
   const [versionLabel, setVersionLabel] = useState("Versión 1.0 (Beta)");
+  const [historicoUrgent, setHistoricoUrgent] = useState(0);
+  const brand = DEFAULT_BRAND;
   const legalDocuments = useLegalDocuments();
-  const launcherRef = useRef<HTMLElement | null>(null);
-  const launcherButtonRef = useRef<HTMLButtonElement | null>(null);
   const backend = useBackend(token);
   const userName = currentUser?.full_name || "Cargando usuario…";
   const allowedModules = useMemo<AppModule[]>(() => {
@@ -426,31 +410,18 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
     const modules = parseModuleAccess(currentUser.module_access);
     return modules.length ? modules : ["radar"];
   }, [currentUser]);
+  const allowedCountries = useMemo<CountryCode[]>(
+    () => (currentUser ? parseAccessProfile(currentUser.access_profile) : ["peru"]),
+    [currentUser],
+  );
   const visibleNav = useMemo(() => {
-    const countries = currentUser ? parseAccessProfile(currentUser.access_profile) : (["peru"] as CountryCode[]);
-    const radarPages = allowedModules.includes("radar") ? countries.flatMap((country) => pagesByCountry[country]) : [];
+    const radarPages = allowedModules.includes("radar") ? allowedCountries.flatMap((code) => [...pagesByCountry[code], ...radarNav[code].map((item) => item.page)]) : [];
     const moduleHistorico = allowedModules.includes("historico_peru") ? historicoPages : [];
     const allowed = Array.from(new Set<Page>([...radarPages, ...moduleHistorico]));
     return currentUser?.role === "admin" ? [...allowed, ...adminPages] : allowed;
-  }, [currentUser, allowedModules]);
+  }, [currentUser, allowedModules, allowedCountries]);
   const activeModule: AppModule = isHistoricoPage(page) ? "historico_peru" : "radar";
-  const [launcherModule, setLauncherModule] = useState<AppModule>(activeModule);
-  const visibleLauncherGroups = useMemo(() => launcherNavGroups
-    .filter((group) => group.module === "admin" || group.module === launcherModule)
-    .map((group) => ({ ...group, pages: group.pages.filter((item) => visibleNav.includes(item)) }))
-    .filter((group) => group.pages.length > 0), [visibleNav, launcherModule]);
-  const [expandedLauncherGroups, setExpandedLauncherGroups] = useState<Set<string>>(() => {
-    const active = launcherNavGroups.find((group) => group.pages.includes(page));
-    return new Set(active ? [active.label] : []);
-  });
-  function toggleLauncherGroup(label: string) {
-    setExpandedLauncherGroups((current) => {
-      const next = new Set(current);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      return next;
-    });
-  }
+  const isAdmin = currentUser?.role === "admin";
 
   useEffect(() => {
     api.appSettings()
@@ -479,59 +450,29 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
   }, [currentUser, page, visibleNav, allowedModules]);
 
   useEffect(() => {
-    // Opening the launcher always starts on the module the user is in.
-    if (launcherOpen) setLauncherModule(activeModule);
-  }, [launcherOpen, activeModule]);
-
-  useEffect(() => {
-    if (page === "Inicio Chile" || page === "Oportunidades Chile LMP-GC" || page === "Histórico Procesos Eliminados CL" || page === "Seguimiento de Oportunidades Chile") {
-      setCountry("Chile");
-    } else if (page === "Inicio Argentina" || page === "Procesos COMPR.AR Argentina" || page === "Publicaciones COMPR.AR Argentina" || page === "Histórico Procesos Eliminados AR" || page === "Seguimiento de Oportunidades Argentina") {
-      setCountry("Argentina");
-    } else if (page === "Inicio Peru" || page === "Oportunidades" || page === "Oportunidades OCDS Peru" || page === "Histórico Procesos Eliminados PE" || page === "Seguimiento de Oportunidades Peru" || isHistoricoPage(page)) {
-      setCountry("Peru");
-    }
+    const pageCountry = countryOfPage(page);
+    if (pageCountry) setCountry(pageCountry);
   }, [page]);
 
   useEffect(() => {
-    if (!launcherOpen) return;
+    // Badge for the Histórico alerts tab: open critical alerts.
+    if (!currentUser || !allowedModules.includes("historico_peru")) return;
+    historicoApi.alerts(token, { page_size: 1 })
+      .then((result) => setHistoricoUrgent(result.counts?.P1 ?? 0))
+      .catch(() => setHistoricoUrgent(0));
+  }, [currentUser, allowedModules, token, page === "Alertas Histórico Perú"]);
 
-    const focusFrame = window.requestAnimationFrame(() => {
-      launcherRef.current?.querySelector<HTMLButtonElement>(".launcher-nav-item")?.focus();
-    });
-    function closeOnOutsidePointer(event: PointerEvent) {
-      const target = event.target as Node;
-      if (!launcherRef.current?.contains(target) && !launcherButtonRef.current?.contains(target)) {
-        setLauncherOpen(false);
-      }
-    }
-    function closeOnOutsideFocus(event: FocusEvent) {
-      const target = event.target as Node;
-      if (!launcherRef.current?.contains(target) && !launcherButtonRef.current?.contains(target)) {
-        setLauncherOpen(false);
-      }
-    }
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setLauncherOpen(false);
-        launcherButtonRef.current?.focus();
-      }
-    }
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    document.addEventListener("focusin", closeOnOutsideFocus);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("focusin", closeOnOutsideFocus);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [launcherOpen]);
+  function changeModule(next: AppModule) {
+    if (next === activeModule) return;
+    if (next === "historico_peru") setPage("Resumen Histórico Perú");
+    else setPage(radarNav[countryCodeOf[country]][0].page);
+  }
 
-  function navigateFromLauncher(item: Page) {
-    setPage(item);
-    setLauncherOpen(false);
-    window.requestAnimationFrame(() => launcherButtonRef.current?.focus());
+  function changeCountry(next: Country) {
+    const role = radarNav[countryCodeOf[country]].find((item) => item.page === page)?.role ?? "inicio";
+    const target = radarNav[countryCodeOf[next]].find((item) => item.role === role) ?? radarNav[countryCodeOf[next]][0];
+    setCountry(next);
+    if (activeModule === "radar" && (countryOfPage(page) || page === "Alertas")) setPage(target.page);
   }
 
   function openKeywordSearch(targetCountry: Country, keyword: string) {
@@ -557,146 +498,71 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
     setHomeScrollSignal((current) => current + 1);
   }
 
+  const countryCode = countryCodeOf[country];
+  const adminSection: NavSection | null = isAdmin
+    ? { label: "Administración", items: [
+      { id: "Usuarios", label: "Usuarios", icon: "users" },
+      { id: "Sistema", label: "Configuración", shortLabel: "Config.", icon: "settings" },
+    ] }
+    : null;
+  const sections: NavSection[] = activeModule === "historico_peru"
+    ? [
+      { label: "Histórico Perú", items: historicoNav.map((item) => ({ id: item.page, label: item.label, shortLabel: item.shortLabel, icon: item.icon, badge: item.page === "Alertas Histórico Perú" ? historicoUrgent : undefined })) },
+      ...(adminSection ? [{ ...adminSection, items: adminSection.items.filter((item) => item.id === "Sistema") }] : []),
+    ]
+    : [
+      { label: countryOptions[countryCode].label, items: [
+        ...radarNav[countryCode].filter((item) => item.role !== "eliminados").map((item) => ({ id: item.page, label: item.label, shortLabel: item.shortLabel, icon: item.icon })),
+        { id: "Alertas", label: "Alertas", icon: "bell" as IconName },
+        ...radarNav[countryCode].filter((item) => item.role === "eliminados").map((item) => ({ id: item.page, label: item.label, shortLabel: item.shortLabel, icon: item.icon })),
+      ] },
+      ...(adminSection ? [adminSection] : []),
+    ];
+  const phoneTabs = activeModule === "historico_peru"
+    ? ["Resumen Histórico Perú", "Historial de Contrataciones", "Contratos por Vencer", "Alertas Histórico Perú"]
+    : [radarNav[countryCode][0].page, radarNav[countryCode][1].page, radarNav[countryCode].find((item) => item.role === "seguimiento")!.page, "Alertas"];
+  const selectableCountries = activeModule === "radar" ? allowedCountries.map((code) => countryOptions[code]) : [countryOptions.peru];
+  const countrySelector = (compact: boolean) => (
+    <CountrySelector
+      value={activeModule === "radar" ? country : "Peru"}
+      options={selectableCountries}
+      onChange={activeModule === "radar" && selectableCountries.length > 1 ? changeCountry : undefined}
+      compact={compact}
+      onDark={compact}
+    />
+  );
+  const pageMeta = activeModule === "historico_peru"
+    ? "Datos abiertos OECE · CONOSCE"
+    : countryOfPage(page)
+      ? `${countryOptions[countryCode].label} · ${launcherDescriptions[page]}`
+      : launcherDescriptions[page];
+
   return (
-    <div className="app-shell">
-      <div className="workspace">
-        <header className="topbar">
-          {launcherOpen ? <div className="launcher-backdrop" aria-hidden="true" /> : null}
-          <div className="top-title">
-            <div className="launcher-anchor">
-              <button
-                ref={launcherButtonRef}
-                className={`menu-toggle ${launcherOpen ? "active" : ""}`}
-                type="button"
-                onClick={() => setLauncherOpen((value) => !value)}
-                aria-label={launcherOpen ? "Cerrar navegación" : "Abrir navegación"}
-                aria-expanded={launcherOpen}
-                aria-haspopup="true"
-                aria-controls="app-launcher"
-              >
-                <span />
-                <span />
-                <span />
-              </button>
-              {launcherOpen ? (
-                <section ref={launcherRef} className="launcher-panel" id="app-launcher" aria-label="Navegación principal">
-                  <div className="launcher-header">
-                    <div className="launcher-brand">
-                      <img src={rodarLogoUrl} alt="" />
-                      <div>
-                        <span>Navegación</span>
-                        <strong>CRM Radar Gobierno</strong>
-                      </div>
-                    </div>
-                    <button
-                      className="launcher-close"
-                      type="button"
-                      onClick={() => {
-                        setLauncherOpen(false);
-                        window.requestAnimationFrame(() => launcherButtonRef.current?.focus());
-                      }}
-                      aria-label="Cerrar navegación"
-                    >×</button>
-                  </div>
-                  {allowedModules.length > 1 ? (
-                    <div className="launcher-modules" role="tablist" aria-label="Módulo">
-                      {allowedModules.map((module) => (
-                        <button
-                          key={module}
-                          type="button"
-                          role="tab"
-                          aria-selected={launcherModule === module}
-                          className={`launcher-module ${launcherModule === module ? "active" : ""}`}
-                          onClick={() => {
-                            setLauncherModule(module);
-                            setExpandedLauncherGroups(new Set(module === "historico_peru" ? ["Histórico Perú"] : []));
-                          }}
-                        >
-                          <strong>{moduleLabels[module]}</strong>
-                          <small>{module === "radar" ? "Procesos vigentes en Perú, Chile y Argentina" : "Contrataciones, vencimientos y PAC"}</small>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="launcher-intro">
-                      <strong>Centro de navegación</strong>
-                      <span>Accede a los módulos habilitados para tu perfil.</span>
-                    </div>
-                  )}
-                  <nav className="launcher-nav" aria-label="Módulos disponibles">
-                    {visibleLauncherGroups.map((group) => {
-                      const isExpanded = expandedLauncherGroups.has(group.label);
-                      return (
-                        <div className="launcher-group" key={group.label}>
-                          <button
-                            className="launcher-group-toggle"
-                            type="button"
-                            onClick={() => toggleLauncherGroup(group.label)}
-                            aria-expanded={isExpanded}
-                          >
-                            <span>{group.label}</span>
-                            <span className={`launcher-group-chevron ${isExpanded ? "open" : ""}`} aria-hidden="true">▾</span>
-                          </button>
-                          {isExpanded ? (
-                            <div>
-                              {group.pages.map((item) => (
-                                <button
-                                  className={`launcher-nav-item ${item === page ? "active" : ""}`}
-                                  type="button"
-                                  key={item}
-                                  onClick={() => navigateFromLauncher(item)}
-                                  aria-current={item === page ? "page" : undefined}
-                                >
-                                  <span className="launcher-icon-shell"><NavIcon name={navIcons[item]} /></span>
-                                  <span className="launcher-item-copy">
-                                    <strong>{launcherLabels[item]}</strong>
-                                    <small>{launcherDescriptions[item]}</small>
-                                  </span>
-                                  {item === page ? <span className="launcher-current">Actual</span> : null}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </nav>
-                  <div className="launcher-footer">
-                    <strong className="launcher-version">{versionLabel}</strong>
-                    <span className="launcher-api-status">
-                      <span><i aria-hidden="true" /> API</span>
-                      <b>{backend.loading ? "Sincronizando" : "Conectada"}</b>
-                    </span>
-                    <div className="launcher-mobile-session">
-                      <span className="launcher-mobile-user">
-                        <span className="user-pill">{userInitials(userName)}</span>
-                        <span>
-                          <small>Sesión activa</small>
-                          <strong>{userName}</strong>
-                        </span>
-                      </span>
-                      <button className="ghost" type="button" onClick={onLogout}>Salir</button>
-                    </div>
-                  </div>
-                </section>
-              ) : null}
-            </div>
-            <div>
-              <p className="overline">{activeModule === "historico_peru" ? "Histórico Perú · datos abiertos OECE" : "Radar en vivo · sala de control comercial"}</p>
-              <h1>{isHistoricoPage(page) ? launcherLabels[page] : page}</h1>
-            </div>
-          </div>
-          <div className="top-actions">
-            <div className="country-flag-pill" title={country} aria-label={`Modulo ${country}`}>
-              <CountryFlagIcon country={country} className="country-flag-image" />
-            </div>
-            <div className="user-identity" title={userName}>
-              <div className="user-pill">{userInitials(userName)}</div>
-              <span>{userName}</span>
-            </div>
-            <button className="ghost" onClick={onLogout}>Salir</button>
-          </div>
-        </header>
+    <UiAppShell
+      brand={brand}
+      module={activeModule}
+      modules={allowedModules}
+      onModuleChange={changeModule}
+      sections={sections}
+      phoneTabs={phoneTabs}
+      currentId={page}
+      onNavigate={(id) => setPage(id as Page)}
+      pageLabel={pageTitle(page)}
+      topbarEnd={countrySelector(false)}
+      phoneEnd={countrySelector(true)}
+      user={{ name: userName, roleLabel: isAdmin ? "Administrador" : "Usuario", initials: userInitials(userName) }}
+      onLogout={onLogout}
+      footer={
+        <footer className="legal-footer ui-legal-footer">
+          <span>© 2026 {brand.name}™ · {versionLabel}</span>
+          <span aria-hidden="true">|</span>
+          <button type="button" onClick={() => setLegalView("terms")}>Términos</button>
+          <span aria-hidden="true">|</span>
+          <button type="button" onClick={() => setLegalView("privacy")}>Política de Privacidad</button>
+        </footer>
+      }
+    >
+      <PageHeader title={pageTitle(page)} meta={pageMeta} />
         {sessionError ? <div className="notice danger">{sessionError}</div> : null}
         {backend.error ? <div className="notice danger">{backend.error}</div> : null}
         <Suspense fallback={<div className="panel module-loading" role="status">Cargando módulo…</div>}>
@@ -737,16 +603,8 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
           />
         ) : null}
         </Suspense>
-        <footer className="legal-footer">
-          <span>© 2026 Rodar Consulting S.A.C.™</span>
-          <span aria-hidden="true">|</span>
-          <button type="button" onClick={() => setLegalView("terms")}>Términos</button>
-          <span aria-hidden="true">|</span>
-          <button type="button" onClick={() => setLegalView("privacy")}>Política de Privacidad</button>
-        </footer>
-      </div>
       {legalView ? <LegalDialog view={legalView} documents={legalDocuments.documents} onClose={() => setLegalView(null)} /> : null}
-    </div>
+    </UiAppShell>
   );
 }
 
