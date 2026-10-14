@@ -181,6 +181,19 @@ class AppSettingsOut(BaseModel):
     updated_at: datetime | None = None
 
 
+class TenantBrandIn(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    logoUrl: str = Field(min_length=1, max_length=400_000)
+    primary: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class TenantBrandOut(BaseModel):
+    name: str
+    logoUrl: str
+    primary: str
+    updated_at: datetime | None = None
+
+
 class SchedulerIntervalUpdate(BaseModel):
     days: int = Field(ge=0, le=30)
     hours: int = Field(ge=0, le=23)

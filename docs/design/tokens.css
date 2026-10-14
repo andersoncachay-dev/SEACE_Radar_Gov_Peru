@@ -1,0 +1,126 @@
+/* GovRadar SaaS — tokens unificados (propuesta aprobada en el mockup comparativo)
+   Destino sugerido: frontend/src/ui/tokens.css, importado ANTES de styles.css.
+   Regla: ningún componente nuevo usa hex sueltos; todo sale de estas variables.
+   --brand-* lo sobrescribe en runtime applyTenantBrand() (brand.ts) con el color del cliente. */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Marca del cliente (configurable por tenant) ---- */
+  --brand: #185bc1;          /* primario: botón principal, foco, pestaña activa */
+  --brand-hover: #144b9e;    /* derivado: primario mezclado 18% con negro */
+  --brand-soft: #e8eff9;     /* derivado: primario mezclado 90% con blanco (fondos activos) */
+  --brand-ink: #103b7d;      /* derivado: primario mezclado 35% con negro (texto sobre --brand-soft) */
+  --brand-ring: rgba(24, 91, 193, 0.22); /* halo de foco */
+  --on-brand: #ffffff;       /* texto sobre --brand; brand.ts lo cambia a --ink si el blanco < 4.5:1 */
+
+  /* ---- Shell (fijo, identidad RODAR GovRadar) ---- */
+  --shell-bg: #061a35;       /* sidebar, riel de tablet, encabezado móvil */
+  --shell-text: #b9c8dd;     /* items de navegación sobre --shell-bg */
+  --shell-text-strong: #ffffff;
+  --shell-muted: #8ea3c0;    /* subtítulos sobre --shell-bg */
+  --shell-section: #7f93b0;  /* rótulos de sección en mayúsculas */
+  --shell-item-active: rgba(255, 255, 255, 0.10);
+  --shell-item-hover: rgba(255, 255, 255, 0.06);
+  --shell-avatar: #123f86;
+
+  /* ---- Superficies y texto ---- */
+  --page-bg: #f3f7fc;
+  --surface: #ffffff;
+  --surface-2: #f3f7fc;      /* cabecera de tabla, bloques secundarios */
+  --surface-hover: #f7faff;  /* hover de fila */
+  --segment-bg: #e4ecf6;     /* fondo del selector segmentado claro (tablet) */
+  --ink: #051326;
+  --ink-strong: #061a35;     /* cifras KPI */
+  --muted: #51627b;
+  --label: #12315a;
+  --th-ink: #314761;
+  --line: #d5e1f0;           /* borde de tarjetas y separadores principales */
+  --line-soft: #e4ecf6;      /* separadores de filas */
+  --control-border: #7d95b6; /* borde de input/select/botón secundario (>= 3:1 sobre blanco) */
+  --chip-border: #c8d8ee;    /* chips de filtro inactivos */
+  --secondary-ink: #0a2449;  /* texto de botón secundario/ghost */
+
+  /* ---- Estados semánticos (NO cambian con la marca del cliente) ---- */
+  --danger: #b42318;
+  --danger-dot: #d33a34;     /* badges de conteo */
+
+  /* Señal comercial: bg / border / ink / dot */
+  --signal-green-bg: #e7f8f1;   --signal-green-border: #a8e1cc;   --signal-green-ink: #086448;   --signal-green-dot: #12a66f;
+  --signal-amber-bg: #fff5df;   --signal-amber-border: #f3d28f;   --signal-amber-ink: #7b4a00;   --signal-amber-dot: #d99016;
+  --signal-pending-bg: #f3f6fb; --signal-pending-border: #c7d4e8; --signal-pending-ink: #405471; --signal-pending-dot: #7184a1;
+  --signal-red-bg: #fff0f0;     --signal-red-border: #ffc7c7;     --signal-red-ink: #9d1d1d;     --signal-red-dot: #d33a34;
+
+  /* Urgencia Histórico P1–P4: bg / border / ink (+ glifo ▲▲ ▲ ● ○ en el componente) */
+  --urg-p1-bg: #fde8e6; --urg-p1-border: #f3b8b1; --urg-p1-ink: #b42318;
+  --urg-p2-bg: #fdf0dc; --urg-p2-border: #efc98f; --urg-p2-ink: #8a4b06;
+  --urg-p3-bg: #e7f1ff; --urg-p3-border: #b5cff3; --urg-p3-ink: #185bc1;
+  --urg-p4-bg: #edf1f6; --urg-p4-border: #c9d3e0; --urg-p4-ink: #4d5c72;
+
+  /* ---- Tipografía (una sola escala para Radar e Histórico) ---- */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --text-kpi: 28px;          /* peso 800, tracking -0.02em, tabular-nums */
+  --text-kpi-mobile: 24px;
+  --text-page: 20px;         /* título de página, 700, -0.01em */
+  --text-section: 16px;      /* título de sección/panel, 700 */
+  --text-card-title: 15px;   /* entidad en tarjeta móvil/tablet, 600 */
+  --text-body: 14px;         /* 400; botones 600 */
+  --text-table: 13px;        /* celdas 400, etiquetas de campo 600 */
+  --text-caption: 12px;      /* notas, chips (600), cabecera de tabla (600) */
+  --text-micro: 11px;        /* rótulos de sección en mayúsculas, labels de bottom nav */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-black: 800;       /* SOLO cifras KPI */
+  --leading: 1.45;
+
+  /* ---- Espaciado (base 4) ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-10: 40px;
+
+  /* ---- Radios ---- */
+  --radius-sm: 8px;          /* botones, inputs, items de navegación */
+  --radius-md: 10px;         /* selector segmentado, buscador móvil, botones de riel */
+  --radius-lg: 12px;         /* tarjetas, KPI, paneles */
+  --radius-pill: 999px;      /* chips, badges, pestaña activa móvil */
+
+  /* ---- Controles ---- */
+  --control-h-sm: 32px;      /* dentro de tablas y barras de filtros */
+  --control-h: 40px;         /* laptop */
+  --control-h-touch: 44px;   /* tablet y celular (mínimo táctil) */
+  --chip-h: 24px;
+
+  /* ---- Layout ---- */
+  --sidebar-w: 248px;        /* laptop >= 1024 */
+  --rail-w: 76px;            /* tablet 640–1023 */
+  --topbar-h: 64px;
+  --bottom-nav-h: 60px;      /* celular < 640, + env(safe-area-inset-bottom) */
+
+  /* ---- Elevación ---- */
+  --shadow-card: 0 1px 2px rgba(6, 26, 53, 0.04);
+  --shadow-raised: 0 12px 24px rgba(7, 47, 103, 0.12);
+  --shadow-segment: 0 1px 2px rgba(6, 26, 53, 0.12);
+  --z-sticky: 30;
+  --z-nav: 50;
+  --z-launcher: 80;
+  --z-modal: 1000;
+
+  --motion: 160ms ease;
+}
+
+/* Breakpoints (usar en media queries; CSS no permite variables aquí):
+   celular  : max-width: 639px
+   tablet   : 640px – 1023px
+   laptop   : min-width: 1024px
+   ancho    : min-width: 1440px (opcional: más columnas visibles) */
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion: 0ms linear; }
+}

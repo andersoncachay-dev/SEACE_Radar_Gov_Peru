@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Histórico Perú — celular</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.gr{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#051326;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.gr *{box-sizing:border-box}
+.gr svg.ic{width:20px;height:20px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 14px;border-radius:8px;font-family:inherit;font-size:14px;font-weight:600;border:1px solid transparent;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn-secondary{background:#fff;color:#0a2449;border-color:#7d95b6}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid;white-space:nowrap}
+.chip b{font-size:10px;line-height:1}
+.p1{background:#fde8e6;border-color:#f3b8b1;color:#b42318}
+.p2{background:#fdf0dc;border-color:#efc98f;color:#8a4b06}
+.p3{background:#e7f1ff;border-color:#b5cff3;color:#185bc1}
+.p4{background:#edf1f6;border-color:#c9d3e0;color:#4d5c72}
+.card{background:#fff;border:1px solid #d5e1f0;border-radius:12px}
+.cap{font-size:12px;color:#51627b}
+.num{font-variant-numeric:tabular-nums}
+.kpi{flex:0 0 132px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.kpi-label{font-size:12px;font-weight:600;color:#51627b}
+.kpi-value{font-size:24px;font-weight:800;letter-spacing:-0.02em;color:#061a35;font-variant-numeric:tabular-nums;line-height:1.15}
+.tab{flex:1 1 0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;height:56px;font-size:11px;font-weight:500;color:#51627b;text-decoration:none;position:relative}
+.tab.on{color:var(--brand);font-weight:700}
+.tab.on .pill{background:var(--brand-soft)}
+.tab .pill{width:52px;height:28px;border-radius:999px;display:grid;place-items:center}
+.tab .dot{position:absolute;top:6px;left:calc(50% + 8px);min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#d33a34;color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center}
+.fchip{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:999px;border:1px solid #c8d8ee;background:#fff;font-size:13px;font-weight:500;color:#12315a;white-space:nowrap}
+.fchip.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand-ink);font-weight:600}
+</style>
+</helmet>
+<div class="gr" style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #f3f7fc; overflow: hidden; --brand: {{brand}}; --brand-hover: {{brandHover}}; --brand-soft: {{brandSoft}}; --brand-ink: {{brandInk}};">
+  <header style="background: #061a35; color: #fff; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button class="btn" style="height: 40px; padding: 0 10px 0 4px; background: transparent; color: #fff; font-size: 17px; font-weight: 700; gap: 6px;">
+        <img src="/_blob/0c0f666da91799acfe5407a3a82edfc6" alt="" style="width: 32px; height: 32px; border-radius: 8px; background: #fff; object-fit: contain; padding: 2px;">Histórico Perú<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 18px; height: 18px;"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <span class="btn" style="margin-left: auto; height: 40px; padding: 0 10px; background: rgba(255,255,255,0.10); color: #fff; gap: 6px;"><img src="/_blob/274e8b2cc466fb96cb57489cb57b524f" alt="" style="width: 20px; height: 20px;">PE</span>
+    </div>
+    <div style="height: 44px; border-radius: 10px; background: #fff; color: #51627b; display: flex; align-items: center; gap: 8px; padding: 0 12px;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>Buscar entidad o proveedor</div>
+  </header>
+  <div style="flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 14px; padding: 14px 0 0;">
+    <div style="display: flex; gap: 10px; overflow-x: auto; padding: 0 16px;">
+      <sc-for list="{{kpis}}" as="k" hint-placeholder-count="4">
+        <div class="card kpi"><span class="kpi-label">{{k.label}}</span><span class="kpi-value">{{k.value}}</span><span class="cap">{{k.hint}}</span></div>
+      </sc-for>
+    </div>
+    <div style="display: flex; gap: 8px; overflow-x: auto; padding: 0 16px;">
+      <span class="fchip on">Todas</span>
+      <span class="fchip"><b style="font-size: 10px; color: #b42318;">▲▲</b>P1</span>
+      <span class="fchip"><b style="font-size: 10px; color: #8a4b06;">▲</b>P2</span>
+      <span class="fchip"><b style="font-size: 10px; color: #185bc1;">●</b>P3</span>
+      <span class="fchip"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px;"><path d="M4 5h16l-6 8v6l-4-2v-4z"/></svg>Filtros</span>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px; padding: 0 16px;">
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
+        <a class="card" href="#" style="display: flex; flex-direction: column; gap: 8px; padding: 14px; text-decoration: none; color: inherit;">
+          <span style="display: flex; align-items: center; gap: 8px;"><span class="chip {{r.cls}}"><b>{{r.glyph}}</b>{{r.urg}}</span><span class="cap" style="margin-left: auto; font-weight: 600;">{{r.left}}</span></span>
+          <span style="font-weight: 600; font-size: 15px; line-height: 1.3;">{{r.entity}}</span>
+          <span class="cap" style="font-size: 13px;">{{r.desc}} · {{r.vendor}}</span>
+          <span style="display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #e4ecf6;"><span class="num" style="font-weight: 700;">{{r.amount}}</span><span class="num cap" style="font-size: 13px;">Fin {{r.end}}</span></span>
+        </a>
+      </sc-for>
+    </div>
+  </div>
+  <nav aria-label="Navegación" style="flex: 0 0 auto; background: #fff; border-top: 1px solid #d5e1f0; display: flex; padding: 4px 4px 22px;">
+    <a class="tab" href="#"><span class="pill"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>Resumen</a>
+    <a class="tab" href="#"><span class="pill"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>Historial</a>
+    <a class="tab on" href="#"><span class="pill"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>Por vencer</a>
+    <a class="tab" href="#"><span class="pill"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21h4"/></svg></span><span class="dot">5</span>Alertas</a>
+    <a class="tab" href="#"><span class="pill"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></span>Más</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"brand":{"editor":"color","default":"#185bc1","options":["#185bc1","#0b6e74","#b4461b","#1f2a44"],"section":"Marca del cliente"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const brand = this.props.brand ?? '#185bc1';
+    const mix = (hex, t, w) => {
+      const n = parseInt(String(hex).replace('#', '').slice(0, 6), 16);
+      const ch = [n >> 16, (n >> 8) & 255, n & 255].map(c => Math.round(c + (t - c) * w));
+      return '#' + ch.map(c => c.toString(16).padStart(2, '0')).join('');
+    };
+    return {
+      brand, brandHover: mix(brand, 0, 0.18), brandSoft: mix(brand, 255, 0.9), brandInk: mix(brand, 0, 0.35),
+      kpis: [
+        { label: 'Por vencer', value: '148', hint: '180 días' },
+        { label: 'P1 · Crítica', value: '12', hint: '≤ 30 días' },
+        { label: 'P2 · Alta', value: '18', hint: '31–60 días' },
+        { label: 'Por renovar', value: 'S/ 48,6 M', hint: 'Monto total' }
+      ],
+      rows: [
+        { cls: 'p1', glyph: '▲▲', urg: 'P1 · Crítica', left: 'En 22 días', entity: 'Gobierno Regional de Puno', desc: 'Internet para establecimientos de salud', vendor: 'Proveedor A S.A.C.', amount: 'S/ 2 340 000', end: '04/11/2026' },
+        { cls: 'p1', glyph: '▲▲', urg: 'P1 · Crítica', left: 'En 27 días', entity: 'Municipalidad Metropolitana de Lima', desc: 'Enlaces de datos para sedes', vendor: 'Proveedor B S.A.', amount: 'S/ 870 000', end: '09/11/2026' },
+        { cls: 'p2', glyph: '▲', urg: 'P2 · Alta', left: 'En 46 días', entity: 'Universidad Nacional de San Agustín', desc: 'Conectividad para campus', vendor: 'Proveedor C E.I.R.L.', amount: 'S/ 415 000', end: '28/11/2026' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

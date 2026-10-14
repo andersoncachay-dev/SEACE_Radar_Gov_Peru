@@ -270,6 +270,13 @@ export type LegalDocumentRecord = {
   updated_at: string;
 };
 
+export type TenantBrandRecord = {
+  name: string;
+  logoUrl: string;
+  primary: string;
+  updated_at: string | null;
+};
+
 export type AppSettingsRecord = {
   version_label: string;
   updated_at: string | null;
@@ -509,6 +516,13 @@ export async function confirmPasswordReset(token: string, password: string) {
 
 export const api = {
   appSettings: () => request<AppSettingsRecord>("/app-settings", ""),
+  tenantBrand: () => request<TenantBrandRecord>("/app-settings/brand", ""),
+  updateTenantBrand: (token: string, brand: { name: string; logoUrl: string; primary: string }) =>
+    request<TenantBrandRecord>("/app-settings/brand", token, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(brand),
+    }),
   updateAppSettings: (token: string, versionLabel: string) =>
     request<AppSettingsRecord>("/app-settings", token, {
       method: "PUT",

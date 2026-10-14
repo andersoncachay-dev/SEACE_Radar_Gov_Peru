@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Histórico Perú — tablet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.gr{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#051326;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.gr *{box-sizing:border-box}
+.gr svg.ic{width:20px;height:20px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 16px;border-radius:8px;font-family:inherit;font-size:14px;font-weight:600;border:1px solid transparent;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-secondary{background:#fff;color:#0a2449;border-color:#7d95b6}
+.btn-icon{width:44px;padding:0}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid;white-space:nowrap}
+.chip b{font-size:10px;line-height:1}
+.p1{background:#fde8e6;border-color:#f3b8b1;color:#b42318}
+.p2{background:#fdf0dc;border-color:#efc98f;color:#8a4b06}
+.p3{background:#e7f1ff;border-color:#b5cff3;color:#185bc1}
+.p4{background:#edf1f6;border-color:#c9d3e0;color:#4d5c72}
+.card{background:#fff;border:1px solid #d5e1f0;border-radius:12px}
+.kpi{padding:14px 16px;display:flex;flex-direction:column;gap:2px}
+.kpi-label{font-size:13px;font-weight:600;color:#51627b}
+.kpi-value{font-size:28px;font-weight:800;letter-spacing:-0.02em;color:#061a35;font-variant-numeric:tabular-nums;line-height:1.15}
+.cap{font-size:12px;color:#51627b}
+.num{font-variant-numeric:tabular-nums}
+.h-page{margin:0;font-size:20px;font-weight:700;letter-spacing:-0.01em}
+.input{height:44px;border:1px solid #7d95b6;border-radius:8px;padding:0 12px;background:#fff;font-size:14px;color:#51627b;display:flex;align-items:center;gap:8px}
+.rail{background:#061a35;color:#b9c8dd}
+.rb{width:52px;height:52px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#b9c8dd;text-decoration:none;font-size:10px;font-weight:500;position:relative}
+.rb.on{background:rgba(255,255,255,0.10);color:#fff;font-weight:600}
+.rb .dot{position:absolute;top:8px;right:12px;width:8px;height:8px;border-radius:50%;background:#d33a34}
+.segl{display:inline-grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;padding:4px;border-radius:10px;background:#e4ecf6}
+.segl a{height:36px;padding:0 16px;display:flex;align-items:center;justify-content:center;border-radius:7px;font-size:14px;font-weight:600;color:#405471;text-decoration:none}
+.segl a.on{background:#fff;color:#061a35;box-shadow:0 1px 2px rgba(6,26,53,0.12)}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 16px;padding:14px 16px;border-bottom:1px solid #e4ecf6}
+</style>
+</helmet>
+<div class="gr" style="width: 834px; height: 1112px; display: flex; background: #f3f7fc; overflow: hidden; --brand: {{brand}}; --brand-hover: {{brandHover}}; --brand-soft: {{brandSoft}}; --brand-ink: {{brandInk}};">
+  <nav class="rail" aria-label="Navegación" style="width: 76px; flex: 0 0 76px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 0;">
+    <img src="/_blob/0c0f666da91799acfe5407a3a82edfc6" alt="Logo de RODAR Consulting" style="width: 44px; height: 44px; border-radius: 10px; background: #fff; object-fit: contain; padding: 3px; margin-bottom: 14px;">
+    <a class="rb" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Resumen</a>
+    <a class="rb" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Historial</a>
+    <a class="rb on" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Vencer</a>
+    <a class="rb" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>PAC</a>
+    <a class="rb" href="#"><span class="dot"></span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21h4"/></svg>Alertas</a>
+    <a class="rb" href="Componentes.dc.html" style="margin-top: auto;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Config.</a>
+    <span style="width: 36px; height: 36px; border-radius: 50%; background: #123f86; color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; margin-top: 8px;">AC</span>
+  </nav>
+  <main style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px 24px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <nav class="segl" aria-label="Módulo"><a href="Radar-Tablet.dc.html">Radar en vivo</a><a href="Historico-Tablet.dc.html" class="on">Histórico</a></nav>
+      <span class="btn btn-secondary" style="margin-left: auto;"><img src="/_blob/274e8b2cc466fb96cb57489cb57b524f" alt="" style="width: 20px; height: 20px;">Perú</span>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 12px;">
+      <div style="display: flex; flex-direction: column; gap: 4px;"><h1 class="h-page">Contratos por vencer</h1><span class="cap">CONOSCE · corte septiembre 2026</span></div>
+      <button class="btn btn-secondary btn-icon" aria-label="Exportar" style="margin-left: auto;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
+      <button class="btn btn-primary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21h4"/></svg>Crear alerta</button>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;">
+      <sc-for list="{{kpis}}" as="k" hint-placeholder-count="4">
+        <div class="card kpi"><span class="kpi-label">{{k.label}}</span><span class="kpi-value">{{k.value}}</span><span class="cap">{{k.hint}}</span></div>
+      </sc-for>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <div class="input" style="flex: 1 1 auto;"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>Buscar entidad, contrato o proveedor</div>
+      <button class="btn btn-secondary"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 8v6l-4-2v-4z"/></svg>Filtros · 1</button>
+    </div>
+    <div class="card" style="flex: 1 1 auto; min-height: 0; overflow: hidden;">
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+        <div class="row">
+          <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+            <span style="display: flex; gap: 8px; align-items: center;"><span class="chip {{r.cls}}"><b>{{r.glyph}}</b>{{r.urg}}</span><span class="cap">{{r.vendor}}</span></span>
+            <span style="font-weight: 600; font-size: 15px;">{{r.entity}}</span>
+            <span class="cap" style="font-size: 13px;">{{r.desc}}</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right;">
+            <span class="num" style="font-weight: 700;">{{r.amount}}</span>
+            <span class="num" style="font-size: 13px; font-weight: 600;">{{r.end}}</span>
+            <span class="cap">{{r.left}}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"brand":{"editor":"color","default":"#185bc1","options":["#185bc1","#0b6e74","#b4461b","#1f2a44"],"section":"Marca del cliente"},"$preview":{"width":834,"height":1112}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const brand = this.props.brand ?? '#185bc1';
+    const mix = (hex, t, w) => {
+      const n = parseInt(String(hex).replace('#', '').slice(0, 6), 16);
+      const ch = [n >> 16, (n >> 8) & 255, n & 255].map(c => Math.round(c + (t - c) * w));
+      return '#' + ch.map(c => c.toString(16).padStart(2, '0')).join('');
+    };
+    return {
+      brand, brandHover: mix(brand, 0, 0.18), brandSoft: mix(brand, 255, 0.9), brandInk: mix(brand, 0, 0.35),
+      kpis: [
+        { label: 'Por vencer', value: '148', hint: 'Próximos 180 días' },
+        { label: 'P1 · Crítica', value: '12', hint: 'Vencen en 30 días' },
+        { label: 'P2 · Alta', value: '18', hint: '31 a 60 días' },
+        { label: 'Monto por renovar', value: 'S/ 48,6 M', hint: 'Suma de contratos' }
+      ],
+      rows: [
+        { cls: 'p1', glyph: '▲▲', urg: 'P1 · Crítica', entity: 'Gobierno Regional de Puno', desc: 'Servicio de internet para establecimientos de salud', vendor: 'Proveedor A S.A.C.', amount: 'S/ 2 340 000', end: '04/11/2026', left: 'en 22 días' },
+        { cls: 'p1', glyph: '▲▲', urg: 'P1 · Crítica', entity: 'Municipalidad Metropolitana de Lima', desc: 'Enlaces de datos para sedes descentralizadas', vendor: 'Proveedor B S.A.', amount: 'S/ 870 000', end: '09/11/2026', left: 'en 27 días' },
+        { cls: 'p2', glyph: '▲', urg: 'P2 · Alta', entity: 'Universidad Nacional de San Agustín', desc: 'Conectividad para campus y filiales', vendor: 'Proveedor C E.I.R.L.', amount: 'S/ 415 000', end: '28/11/2026', left: 'en 46 días' },
+        { cls: 'p2', glyph: '▲', urg: 'P2 · Alta', entity: 'Instituto Nacional Penitenciario', desc: 'Telecomunicaciones para establecimientos remotos', vendor: 'Proveedor A S.A.C.', amount: 'S/ 1 080 000', end: '06/12/2026', left: 'en 54 días' },
+        { cls: 'p3', glyph: '●', urg: 'P3 · Media', entity: 'Gobierno Regional de Ucayali', desc: 'Internet satelital para instituciones educativas', vendor: 'Proveedor D S.A.C.', amount: 'S/ 3 120 000', end: '20/01/2027', left: 'en 99 días' },
+        { cls: 'p4', glyph: '○', urg: 'P4 · Baja', entity: 'Municipalidad Provincial de Piura', desc: 'Servicio de internet para oficinas', vendor: 'Proveedor E S.A.', amount: 'S/ 96 000', end: '02/04/2027', left: 'en 171 días' },
+        { cls: 'p4', glyph: '○', urg: 'P4 · Baja', entity: 'Autoridad Nacional del Agua', desc: 'Enlaces para estaciones hidrométricas', vendor: 'Proveedor B S.A.', amount: 'S/ 640 000', end: '08/04/2027', left: 'en 177 días' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

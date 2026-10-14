@@ -1,27 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { HistoricoFilterOptions, HistoricoFilters, HistoricoKind, HistoricoPriority, HistoricoRunwayItem } from "../../api";
+import { Chip, Icon } from "../../ui";
 import { useHistoricoDetail, money, moneyShort, shortDate, titleCase } from "./useHistorico";
 
 export const PRIORITY_LABEL: Record<HistoricoPriority, string> = { P1: "Crítica", P2: "Alta", P3: "Media", P4: "Baja" };
 const MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"];
 export const monthName = (month: number) => MONTHS[month - 1] ?? String(month);
 
-/* ---------- priority badge: color + label + glyph, never color alone ---------- */
+/* ---------- priority badge: ui Chip p1–p4 (color + label + glyph, never color alone) ---------- */
 
-function Glyph({ priority }: { priority: HistoricoPriority }) {
-  if (priority === "P1") return <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 11 10H1z" fill="currentColor" /></svg>;
-  if (priority === "P2") return <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 11 6 6 11 1 6z" fill="currentColor" /></svg>;
-  if (priority === "P3") return <svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="currentColor" /></svg>;
-  return <svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="2" /></svg>;
-}
+const PRIORITY_TONE = { P1: "p1", P2: "p2", P3: "p3", P4: "p4" } as const;
 
 export function PriorityBadge({ priority }: { priority: HistoricoPriority | null | undefined }) {
-  if (!priority) return <span className="hist-prio" data-p="">Sin alerta</span>;
-  return <span className="hist-prio" data-p={priority}><Glyph priority={priority} />{PRIORITY_LABEL[priority]}</span>;
+  if (!priority) return <span className="ui-chip ui-chip-p4">Sin alerta</span>;
+  return <Chip tone={PRIORITY_TONE[priority]} label={PRIORITY_LABEL[priority]} />;
 }
 
 export const priorityTone = (priority: string | null | undefined) =>
-  priority === "P1" ? "var(--hist-p1)" : priority === "P2" ? "var(--hist-p2)" : priority === "P3" ? "var(--hist-p3)" : "var(--hist-p4)";
+  priority === "P1" ? "var(--urg-p1-ink)" : priority === "P2" ? "var(--urg-p2-ink)" : priority === "P3" ? "var(--urg-p3-ink)" : "var(--urg-p4-ink)";
 
 /* ---------- multi-select filter bar ---------- */
 
@@ -161,8 +157,8 @@ export function FilterBar({
         {extra}
         <span className="hist-spacer" />
         {onExport ? (
-          <button className="hist-btn hist-btn-excel" type="button" onClick={onExport} disabled={exporting}>
-            <span aria-hidden="true">⤓</span><span className="hist-export-label">{exporting ? "Generando…" : "Descargar Excel"}</span>
+          <button className="ui-btn ui-btn-secondary" type="button" onClick={onExport} disabled={exporting}>
+            <Icon name="download" size={16} /><span className="hist-export-label">{exporting ? "Generando…" : "Descargar Excel"}</span>
           </button>
         ) : null}
       </div>
@@ -263,10 +259,10 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
       <div className="hist-runway-wrap">
         <div className="hist-runway" style={{ height: H + 10 }} onMouseLeave={() => setTip(null)}>
           <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={`${items.length} contratos que vencen en los próximos 12 meses`}>
-            <rect x={30} y={top} width={x(90) - 30} height={base - top} style={{ fill: "var(--hist-p1-soft)" }} opacity={0.6} />
-            <rect x={x(90)} y={top} width={x(180) - x(90)} height={base - top} style={{ fill: "var(--hist-p2-soft)" }} opacity={0.5} />
-            <text x={36} y={top + 13} style={{ fill: "var(--hist-p1)" }} fontSize={11} fontWeight={700}>≤ 90 días</text>
-            <text x={x(90) + 6} y={top + 13} style={{ fill: "var(--hist-p2)" }} fontSize={11} fontWeight={700}>91–180 días</text>
+            <rect x={30} y={top} width={x(90) - 30} height={base - top} style={{ fill: "var(--urg-p1-bg)" }} opacity={0.6} />
+            <rect x={x(90)} y={top} width={x(180) - x(90)} height={base - top} style={{ fill: "var(--urg-p2-bg)" }} opacity={0.5} />
+            <text x={36} y={top + 13} style={{ fill: "var(--urg-p1-ink)" }} fontSize={11} fontWeight={700}>≤ 90 días</text>
+            <text x={x(90) + 6} y={top + 13} style={{ fill: "var(--urg-p2-ink)" }} fontSize={11} fontWeight={700}>91–180 días</text>
             {ticks.map((tick) => (
               <g key={tick.days}>
                 <line x1={x(tick.days)} x2={x(tick.days)} y1={top} y2={base} stroke="var(--line)" strokeDasharray="2 4" />
@@ -274,8 +270,8 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
               </g>
             ))}
             <line x1={30} x2={W - 30} y1={base} y2={base} stroke="var(--muted)" />
-            <line x1={30} x2={30} y1={top - 6} y2={base} stroke="var(--hist-p1)" strokeWidth={2} />
-            <text x={30} y={top - 9} style={{ fill: "var(--hist-p1)" }} fontSize={11} fontWeight={700} textAnchor="middle">hoy</text>
+            <line x1={30} x2={30} y1={top - 6} y2={base} stroke="var(--urg-p1-ink)" strokeWidth={2} />
+            <text x={30} y={top - 9} style={{ fill: "var(--urg-p1-ink)" }} fontSize={11} fontWeight={700} textAnchor="middle">hoy</text>
             {marks.map(({ item, cx, cy, r }) => (
               <g
                 key={item.id}
@@ -300,10 +296,10 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
         </div>
       </div>
       <div className="hist-legend">
-        <span><i style={{ background: "var(--hist-p1)" }} />Crítica ≤ 30 d</span>
-        <span><i style={{ background: "var(--hist-p2)" }} />Alta</span>
-        <span><i style={{ background: "var(--hist-p3)" }} />Media</span>
-        <span><i style={{ background: "var(--hist-p4)" }} />Baja</span>
+        <span><i style={{ background: "var(--urg-p1-ink)" }} />Crítica ≤ 30 d</span>
+        <span><i style={{ background: "var(--urg-p2-ink)" }} />Alta</span>
+        <span><i style={{ background: "var(--urg-p3-ink)" }} />Media</span>
+        <span><i style={{ background: "var(--urg-p4-ink)" }} />Baja</span>
         <span>Punto lleno = fecha real del contrato · tamaño = monto · {items.length.toLocaleString("es-PE")} contratos</span>
       </div>
     </div>
@@ -319,9 +315,9 @@ export function Pager({ page, pageSize, total, onPage }: { page: number; pageSiz
     <div className="hist-pager">
       <span className="hist-num">{from.toLocaleString("es-PE")}–{Math.min(total, page * pageSize).toLocaleString("es-PE")} de {total.toLocaleString("es-PE")}</span>
       <span className="hist-pager-actions">
-        <button className="hist-btn" type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</button>
+        <button className="ui-btn ui-btn-secondary" type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</button>
         <span className="hist-num">Página {page} de {pages}</span>
-        <button className="hist-btn" type="button" disabled={page >= pages} onClick={() => onPage(page + 1)}>Siguiente</button>
+        <button className="ui-btn ui-btn-secondary" type="button" disabled={page >= pages} onClick={() => onPage(page + 1)}>Siguiente</button>
       </span>
     </div>
   );
@@ -366,7 +362,7 @@ export function DetailDrawer({ token, kind, id, onClose }: { token: string; kind
             <h2 id="hist-drawer-title">{detail ? titleCase(record.entity_name) : "Cargando…"}</h2>
             <span className="hist-sub">{record.nomenclature || record.supplier_name || record.process_type || ""}</span>
           </div>
-          <button ref={closeRef} className="hist-btn hist-btn-ghost" type="button" onClick={onClose} aria-label="Cerrar detalle">✕</button>
+          <button ref={closeRef} className="ui-btn ui-btn-ghost ui-btn-icon-only" type="button" onClick={onClose} aria-label="Cerrar detalle"><Icon name="close" size={18} /></button>
         </header>
         <div className="hist-drawer-body">
           {error ? <div className="notice danger" role="alert">{error}</div> : null}
@@ -414,7 +410,7 @@ export function DetailDrawer({ token, kind, id, onClose }: { token: string; kind
               </>}
             </dl>
           ) : null}
-          {record.contract_url ? <a className="hist-btn" href={record.contract_url} target="_blank" rel="noopener noreferrer">Ver contrato en SEACE</a> : null}
+          {record.contract_url ? <a className="ui-btn ui-btn-secondary" href={record.contract_url} target="_blank" rel="noopener noreferrer">Ver contrato en SEACE</a> : null}
           {history.length ? (
             <section>
               <h3>Compras del rubro de la entidad por año</h3>

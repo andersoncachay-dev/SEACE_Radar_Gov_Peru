@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Componentes unificados</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.gr{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#051326;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.gr *{box-sizing:border-box}
+.gr svg.ic{width:20px;height:20px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:8px;font-family:inherit;font-size:14px;font-weight:600;border:1px solid transparent;cursor:pointer;white-space:nowrap}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-secondary{background:#fff;color:#0a2449;border-color:#7d95b6}
+.btn-ghost{background:transparent;color:#0a2449}
+.btn-danger{background:#b42318;color:#fff}
+.btn-sm{height:32px;padding:0 12px;font-size:13px}
+.btn-touch{height:44px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid;white-space:nowrap}
+.chip i{width:8px;height:8px;border-radius:50%;display:block}
+.chip b{font-size:10px;line-height:1}
+.s-green{background:#e7f8f1;border-color:#a8e1cc;color:#086448}.s-green i{background:#12a66f}
+.s-amber{background:#fff5df;border-color:#f3d28f;color:#7b4a00}.s-amber i{background:#d99016}
+.s-pending{background:#f3f6fb;border-color:#c7d4e8;color:#405471}.s-pending i{background:#7184a1}
+.s-red{background:#fff0f0;border-color:#ffc7c7;color:#9d1d1d}.s-red i{background:#d33a34}
+.p1{background:#fde8e6;border-color:#f3b8b1;color:#b42318}
+.p2{background:#fdf0dc;border-color:#efc98f;color:#8a4b06}
+.p3{background:#e7f1ff;border-color:#b5cff3;color:#185bc1}
+.p4{background:#edf1f6;border-color:#c9d3e0;color:#4d5c72}
+.card{background:#fff;border:1px solid #d5e1f0;border-radius:12px}
+.cap{font-size:12px;color:#51627b}
+.muted{color:#51627b}
+.lbl{font-size:13px;font-weight:600;color:#12315a}
+.input{height:40px;border:1px solid #7d95b6;border-radius:8px;padding:0 12px;background:#fff;font-size:14px;color:#051326;display:flex;align-items:center;gap:8px}
+.sec{padding:24px;display:flex;flex-direction:column;gap:16px}
+.sec h2{margin:0;font-size:16px;font-weight:700}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#51627b}
+.tr{display:grid;grid-template-columns:160px minmax(0,1fr) 120px;gap:12px;align-items:baseline;padding:8px 0;border-bottom:1px solid #e4ecf6}
+.bp{display:flex;flex-direction:column;gap:8px;padding:16px;border-radius:10px;background:#f3f7fc}
+.sw{width:56px;height:56px;border-radius:10px;border:1px solid #d5e1f0}
+</style>
+</helmet>
+<div class="gr" style="width: 1440px; min-height: 1180px; background: #f3f7fc; padding: 40px; display: flex; flex-direction: column; gap: 24px; --brand: {{brand}}; --brand-hover: {{brandHover}}; --brand-soft: {{brandSoft}}; --brand-ink: {{brandInk}};">
+  <div style="display: flex; align-items: flex-end; gap: 16px;">
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <span class="eyebrow">GovRadar SaaS · propuesta</span>
+      <h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em;">Un solo set de componentes para Radar e Histórico</h1>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px;">
+    <section class="card sec">
+      <span class="eyebrow">Hoy en el código</span>
+      <h2>Dos módulos, dos estilos</h2>
+      <div style="display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 14px 12px; align-items: center;">
+        <span class="cap">Radar</span>
+        <span style="display: flex; gap: 8px; align-items: center;"><span style="display: inline-flex; align-items: center; height: 42px; padding: 0 16px; border-radius: 10px; background: #185bc1; color: #fff; font-weight: 800;">Actualizar</span><span style="border-radius: 999px; padding: 6px 9px; background: #e7f8f1; color: #0f8a5f; font-size: 13px; font-weight: 800;">Completado</span></span>
+        <span class="cap">Histórico</span>
+        <span style="display: flex; gap: 8px; align-items: center;"><span style="display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 8px; background: #0f7a55; color: #fff; font-size: 13.8px; font-weight: 600;">Exportar Excel</span><span style="border-radius: 10px; padding: 4px 8px; background: #fde8e6; color: #b42318; font-size: 12px; font-weight: 650;">P1</span></span>
+      </div>
+      <ul class="cap" style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
+        <li>Radios 10px vs 8px; alturas 42px vs ~34px.</li>
+        <li>Pesos 800–900 vs 600–650; 14 tamaños de letra distintos.</li>
+        <li>Exportar es verde en uno y azul en otro.</li>
+        <li>En celular las tablas de 2170px sólo hacen scroll lateral.</li>
+      </ul>
+    </section>
+
+    <section class="card sec">
+      <span class="eyebrow">Unificado</span>
+      <h2>Botones</h2>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+        <button class="btn btn-primary">Actualizar ahora</button>
+        <button class="btn btn-secondary">Exportar</button>
+        <button class="btn btn-ghost">Cancelar</button>
+        <button class="btn btn-danger">Eliminar</button>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+        <button class="btn btn-primary btn-sm">Seguir</button>
+        <button class="btn btn-secondary btn-sm">Columnas</button>
+        <button class="btn btn-primary btn-touch">Táctil 44px</button>
+      </div>
+      <p class="cap" style="margin: 0; font-size: 13px;">Radio 8px, peso 600, 14px. Alturas: 32 (tabla), 40 (laptop), 44 (táctil). Una sola acción primaria por pantalla; exportar siempre es secundario en ambos módulos.</p>
+    </section>
+
+    <section class="card sec">
+      <span class="eyebrow">Unificado</span>
+      <h2>Campos</h2>
+      <label style="display: flex; flex-direction: column; gap: 6px;"><span class="lbl">Correo para alertas</span><span class="input">ventas@empresa.com</span></label>
+      <label style="display: flex; flex-direction: column; gap: 6px;"><span class="lbl">País</span><span class="input" style="justify-content: space-between;">Perú<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px;"><path d="M6 9l6 6 6-6"/></svg></span></label>
+      <span class="input" style="color: #51627b; box-shadow: 0 0 0 3px {{brandRing}}; border-color: var(--brand);"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>Con foco</span>
+    </section>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px;">
+    <section class="card sec">
+      <span class="eyebrow">Un componente: Estado</span>
+      <h2>Señal comercial · Urgencia · Ejecución</h2>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px;"><span class="chip s-green"><i></i>Verde</span><span class="chip s-amber"><i></i>Ámbar</span><span class="chip s-pending"><i></i>Pendiente</span><span class="chip s-red"><i></i>Rojo</span></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px;"><span class="chip p1"><b>▲▲</b>P1 · Crítica</span><span class="chip p2"><b>▲</b>P2 · Alta</span><span class="chip p3"><b>●</b>P3 · Media</span><span class="chip p4"><b>○</b>P4 · Baja</span></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px;"><span class="chip s-green"><i></i>Completado</span><span class="chip p3"><b>●</b>En curso</span><span class="chip s-red"><i></i>Fallido</span><span class="chip s-pending"><i></i>En cola</span></div>
+      <p class="cap" style="margin: 0; font-size: 13px;">Misma píldora 24px, 12px/600. Siempre color + texto + marca (punto o glifo); nunca sólo color.</p>
+    </section>
+
+    <section class="card sec">
+      <span class="eyebrow">Unificado</span>
+      <h2>KPI y tarjeta de oportunidad</h2>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px;">
+        <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 2px;"><span class="cap" style="font-size: 13px; font-weight: 600;">Vencen en 7 días</span><span style="font-size: 28px; font-weight: 800; letter-spacing: -0.02em; color: #061a35;">14</span><span class="cap">3 vencen mañana</span></div>
+        <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 2px;"><span class="cap" style="font-size: 13px; font-weight: 600;">P1 · Crítica</span><span style="font-size: 28px; font-weight: 800; letter-spacing: -0.02em; color: #061a35;">12</span><span class="cap">≤ 30 días</span></div>
+      </div>
+      <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 6px;">
+        <span style="display: flex; gap: 8px; align-items: center;"><span class="chip s-green"><i></i>Verde</span><span class="cap">SEACE</span><span class="cap" style="margin-left: auto; font-weight: 600;">En 4 días</span></span>
+        <span style="font-weight: 600; font-size: 15px;">Municipalidad Provincial de Arequipa</span>
+        <span style="display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px solid #e4ecf6;"><span style="font-weight: 700;">S/ 240 500</span><span class="cap" style="font-size: 13px;">Vence 17/10</span></span>
+      </div>
+    </section>
+
+    <section class="card sec">
+      <span class="eyebrow">Unificado</span>
+      <h2>Escala tipográfica (Inter)</h2>
+      <div style="display: flex; flex-direction: column;">
+        <div class="tr"><span class="cap">Cifra KPI</span><span style="font-size: 28px; font-weight: 800; letter-spacing: -0.02em;">128</span><span class="cap">28 / 800</span></div>
+        <div class="tr"><span class="cap">Título de página</span><span style="font-size: 20px; font-weight: 700;">Oportunidades</span><span class="cap">20 / 700</span></div>
+        <div class="tr"><span class="cap">Sección</span><span style="font-size: 16px; font-weight: 700;">Por vencer</span><span class="cap">16 / 700</span></div>
+        <div class="tr"><span class="cap">Cuerpo</span><span>Proceso publicado</span><span class="cap">14 / 400</span></div>
+        <div class="tr"><span class="cap">Tabla · etiqueta</span><span style="font-size: 13px; font-weight: 600;">Fecha de presentación</span><span class="cap">13 / 400·600</span></div>
+        <div class="tr" style="border-bottom: 0;"><span class="cap">Nota</span><span class="cap">Actualizado hace 4 min</span><span class="cap">12 / 400</span></div>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px;">
+    <section class="card sec">
+      <span class="eyebrow">Responsive</span>
+      <h2>Tres layouts, mismos componentes</h2>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+        <div class="bp"><strong>Celular · &lt; 640px</strong><span class="cap" style="font-size: 13px;">Barra inferior de 5 pestañas por módulo. Encabezado oscuro con selector de módulo y país. KPI en carrusel. Tabla → tarjetas. Controles de 44px. Filtros en hoja inferior.</span></div>
+        <div class="bp"><strong>Tablet · 640–1023px</strong><span class="cap" style="font-size: 13px;">Riel de iconos de 76px. Selector de módulo segmentado arriba. KPI en 2 columnas. Tabla → filas de 2 líneas con monto y fecha a la derecha. Controles de 44px.</span></div>
+        <div class="bp"><strong>Laptop · ≥ 1024px</strong><span class="cap" style="font-size: 13px;">Sidebar de 248px con selector de módulo. 5 KPI. Tabla completa con columnas configurables y cabecera fija. Controles de 40px; 32px dentro de tablas.</span></div>
+      </div>
+    </section>
+
+    <section class="card sec">
+      <span class="eyebrow">Configurable por cliente</span>
+      <h2>Marca de la empresa</h2>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <img src="/_blob/0c0f666da91799acfe5407a3a82edfc6" alt="Logo de RODAR Consulting" style="width: 56px; height: 56px; border-radius: 10px; background: #fff; border: 1px solid #d5e1f0; object-fit: contain; padding: 4px;">
+        <div style="display: flex; flex-direction: column;"><span style="font-weight: 600;">RODAR Consulting</span><span class="cap">Logo y nombre del cliente</span></div>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <div style="display: flex; flex-direction: column; gap: 4px; align-items: center;"><span class="sw" style="background: var(--brand);"></span><span class="cap">Primario</span></div>
+        <div style="display: flex; flex-direction: column; gap: 4px; align-items: center;"><span class="sw" style="background: var(--brand-hover);"></span><span class="cap">Hover</span></div>
+        <div style="display: flex; flex-direction: column; gap: 4px; align-items: center;"><span class="sw" style="background: var(--brand-soft);"></span><span class="cap">Suave</span></div>
+        <div style="display: flex; flex-direction: column; gap: 4px; align-items: center;"><span class="sw" style="background: var(--brand-ink);"></span><span class="cap">Texto</span></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px;"><button class="btn btn-primary">Vista previa</button><span class="chip {{contrastCls}}"><i></i>Blanco sobre primario {{contrast}}:1</span></div>
+      <p class="cap" style="margin: 0; font-size: 13px;">El cliente elige sólo el color primario; hover, suave y texto se derivan. Si el blanco no llega a 4.5:1 el sistema avisa y oscurece el primario. Señales y urgencias no cambian con la marca.</p>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"brand":{"editor":"color","default":"#185bc1","options":["#185bc1","#0b6e74","#b4461b","#1f2a44"],"section":"Marca del cliente"},"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const brand = this.props.brand ?? '#185bc1';
+    const rgb = (hex) => { const n = parseInt(String(hex).replace('#', '').slice(0, 6), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+    const mix = (hex, t, w) => '#' + rgb(hex).map(c => Math.round(c + (t - c) * w)).map(c => c.toString(16).padStart(2, '0')).join('');
+    const lum = (hex) => { const c = rgb(hex).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+    const ratio = 1.05 / (lum(brand) + 0.05);
+    const [r, g, b] = rgb(brand);
+    return {
+      brand, brandHover: mix(brand, 0, 0.18), brandSoft: mix(brand, 255, 0.9), brandInk: mix(brand, 0, 0.35),
+      brandRing: 'rgba(' + r + ', ' + g + ', ' + b + ', 0.22)',
+      contrast: ratio.toFixed(1),
+      contrastCls: ratio >= 4.5 ? 's-green' : 's-red'
+    };
+  }
+}
+</script>
+</body>
+</html>

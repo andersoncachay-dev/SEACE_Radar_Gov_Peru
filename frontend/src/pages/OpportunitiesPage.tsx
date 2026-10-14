@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, ApiError, DocumentRecord, Opportunity, Run } from "../api";
+import { Chip, Icon } from "../ui";
 import { CommercialClass, ConfirmModal, Country, Empty, HighlightedText, RunProgress, addKeyword, commercialSignal, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, normalizedSearchTerm, parseDate, presentationDeadline, sourceBelongsToCountry, uniqueKeywords, useDismissableMenu, useRadarKeywords } from "../shared";
 
 export function documentTypeLabel(doc: DocumentRecord): string {
@@ -2450,8 +2451,8 @@ export function OpportunityTable({
               <span>Ir a Inicio</span>
             </button>
           ) : null}
-          <button className="export-excel-button" type="button" onClick={() => void exportOpportunitiesToExcel(token, sortedRows, "Oportunidades GovRadar", country, actionMode === "restore" ? "historico" : "table")}>
-            <img src={excelLogoUrl} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+          <button className="export-excel-button ui-btn ui-btn-secondary" type="button" onClick={() => void exportOpportunitiesToExcel(token, sortedRows, "Oportunidades GovRadar", country, actionMode === "restore" ? "historico" : "table")}>
+            <Icon name="download" size={16} />
             <span>Exportar a Excel</span>
           </button>
         </div>
@@ -2460,7 +2461,7 @@ export function OpportunityTable({
       <div className={`table-scroll-top ${actionMode === "restore" ? "has-motivo-column" : ""}`} ref={topScrollRef} onScroll={() => syncTableScroll("top")} aria-label="Desplazamiento horizontal de oportunidades">
         <div />
       </div>
-      <div className="table-wrap" ref={tableScrollRef} onScroll={() => syncTableScroll("table")}>
+      <div className="table-wrap opp-table-wrap" ref={tableScrollRef} onScroll={() => syncTableScroll("table")}>
         <table className={actionMode === "restore" ? "has-motivo-column" : ""}>
           {actionMode === "restore" ? (
             // table-layout:fixed reads column widths from here first, ahead
@@ -2550,6 +2551,30 @@ export function OpportunityTable({
             ))}
           </tbody>
         </table>
+        {!sortedRows.length ? <Empty text="No hay oportunidades con los filtros actuales." /> : null}
+      </div>
+      <div className="ui-mcards opp-phone-cards" aria-label="Oportunidades">
+        {sortedRows.slice(0, 100).map(({ item, signal }) => (
+          <article className="ui-mcard opp-phone-card" key={item.id}>
+            <button type="button" className="opp-phone-card-open" onClick={() => setSelectedOpportunity(item)}>
+              <span className="ui-mcard-top">
+                <Chip tone={`signal-${signal.className}` as "signal-green"} label={signal.label} />
+                <span className="ui-mcard-right">{item.nomenclature || item.external_id}</span>
+              </span>
+              <span className="ui-mcard-title">{item.entity}</span>
+              <span className="ui-mcard-desc">{item.description}</span>
+              <span className="ui-mcard-foot">
+                <span>{formatDate(presentationDeadline(item))}</span>
+                <strong>{formatMoney(item.amount, country)}</strong>
+              </span>
+            </button>
+            {actionMode === "archive" ? (
+              <div className="opp-phone-card-actions">
+                <button type="button" className="ghost" onClick={() => confirmRemove(item)}>Retirar</button>
+              </div>
+            ) : null}
+          </article>
+        ))}
         {!sortedRows.length ? <Empty text="No hay oportunidades con los filtros actuales." /> : null}
       </div>
       {selectedOpportunity ? (

@@ -15,8 +15,9 @@ import {
   TrackingResponsiblePayload,
   TrackingStageTemplate,
 } from "../api";
+import { Icon } from "../ui";
 import { ConfirmModal, Empty, formatDate, useDismissableMenu } from "../shared";
-import { deadlineCountdownText, excelLogoUrl, formatDeadlineCountdown, OpportunityDetailModal } from "./OpportunitiesPage";
+import { deadlineCountdownText, formatDeadlineCountdown, OpportunityDetailModal } from "./OpportunitiesPage";
 
 function countryScopeLabel(scope: CountryScope) {
   return scope === "ambos" ? "Todos los países" : scope === "peru" ? "Perú" : scope === "chile" ? "Chile" : "Argentina";
@@ -1189,8 +1190,8 @@ function ConsolidatedView({ token, country }: { token: string; country: CountryC
             </option>
           ))}
         </select>
-        <button type="button" className="export-excel-button" disabled={exporting || !filteredSummaries.length} onClick={() => void exportToExcel()}>
-          <img src={excelLogoUrl} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+        <button type="button" className="export-excel-button ui-btn ui-btn-secondary" disabled={exporting || !filteredSummaries.length} onClick={() => void exportToExcel()}>
+          <Icon name="download" size={16} />
           <span>{exporting ? "Exportando..." : "Exportar a Excel"}</span>
         </button>
       </div>
