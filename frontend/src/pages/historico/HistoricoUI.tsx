@@ -292,7 +292,8 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
   // Favorite contracts glow on the runway (same store as the table stars).
   const favorites = useFavorites(localStorage.getItem("rodar_token") || "");
   const isFav = (item: HistoricoRunwayItem) => Boolean(item.fav_key && favorites.keys.has(`hist_contratacion::${item.fav_key}`));
-  const W = 1000, H = compact ? 150 : 200, top = 18, base = H - 34, span = 365;
+  const W = 1000, H = compact ? 300 : 400, top = 18, base = H - 34, span = 365;
+  const LANES = 16; // stacked contracts per week before marks start to overlap
   const x = (days: number) => 30 + (W - 60) * Math.min(1, Math.max(0, days / span));
   const marks = useMemo(() => {
     // Radius against the 95th percentile so one huge contract does not
@@ -304,7 +305,7 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
       const week = Math.floor(item.days / 7);
       const lane = lanes.get(week) ?? 0;
       lanes.set(week, lane + 1);
-      return { item, cx: x(item.days), cy: base - 8 - (lane % 8) * ((base - top - 10) / 8), r: 3 + 8 * Math.min(1.4, Math.sqrt(item.amount / ref)) };
+      return { item, cx: x(item.days), cy: base - 8 - (lane % LANES) * ((base - top - 10) / LANES), r: 3 + 8 * Math.min(1.4, Math.sqrt(item.amount / ref)) };
     });
   }, [items, compact]);
   const today = new Date();

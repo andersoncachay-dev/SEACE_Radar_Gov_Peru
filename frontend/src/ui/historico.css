@@ -275,3 +275,12 @@
 @keyframes hist-fav-pulse { 0% { transform: scale(1); opacity: 0.9; } 75% { transform: scale(2); opacity: 0; } 100% { transform: scale(2); opacity: 0; } }
 .hist-legend-fav { background: var(--surface) !important; box-shadow: 0 0 0 2px var(--signal-amber-dot), 0 0 6px var(--signal-amber-dot); }
 @media (prefers-reduced-motion: reduce) { .hist-mark-glow { animation: none; opacity: 0.6; } }
+
+/* Listas con scroll vertical propio y encabezado fijo (la página no se alarga) */
+.hist-module .hist-table-wrap,
+.hist-module .hist-scroll { max-height: min(70vh, 760px); overflow: auto; overscroll-behavior: contain; }
+.hist-module .hist-table-wrap thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
+.hist-module .hist-scroll { padding-right: var(--space-1); }
+@media (max-width: 639px) {
+  .hist-module .hist-cards { max-height: 75vh; overflow-y: auto; overscroll-behavior: contain; }
+}

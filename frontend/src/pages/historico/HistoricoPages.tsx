@@ -707,6 +707,7 @@ export function HistoricoAlertas({ token }: PageProps) {
         title={scope === "mine" ? "Mis alertas" : "Todas las alertas activas"}
         subtitle={alerts.data ? `${num(alerts.data.total)} alertas · ordenadas por prioridad y puntaje (urgencia, monto, fecha real)` : undefined}
       >
+        <div className="hist-scroll">
         {rows.length ? rows.map((alert) => (
           <article className="hist-alert" key={alert.id}>
             <PriorityBadge priority={alert.priority} />
@@ -722,6 +723,7 @@ export function HistoricoAlertas({ token }: PageProps) {
             </div>
           </article>
         )) : <p className="hist-empty">{alerts.loading ? "Cargando alertas…" : scope === "mine" ? "No hay alertas con tu configuración. Amplía categorías o baja la prioridad mínima." : "No hay alertas activas."}</p>}
+        </div>
         <Pager page={page} pageSize={40} total={alerts.data?.total ?? 0} onPage={setPage} />
       </Panel>
       {configOpen ? (
