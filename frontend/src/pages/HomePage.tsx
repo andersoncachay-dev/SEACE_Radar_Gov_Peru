@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, Alert, Opportunity, Run, SchedulerStatus, Stats } from "../api";
 import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, RunProgress, commercialSignal, countryCode, countryFlagUrls, formatDate, formatMoney, formatUtcDate, matchesCompletePhrase, parseDate, runHistoryLabel, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
 import { alertStatusLabel, ChannelSymbol } from "./AlertsPage";
-import { Icon } from "../ui";
+import { ExcelIcon } from "../ui";
 import { exportOpportunitiesToExcel, isOpportunityNew } from "./OpportunitiesPage";
 
 export type HomeStatusFilter = "all" | "priority-a" | "vigentes" | "cerrados";
@@ -1001,7 +1001,7 @@ export function Home({
                   "dashboard",
                 )}
               >
-                <Icon name="download" size={16} />
+                <ExcelIcon />
               </button>
               <div className="process-sort-control" ref={sortMenuRef}>
                 <button

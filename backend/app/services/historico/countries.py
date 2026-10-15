@@ -48,7 +48,7 @@ PERU = HistCountry(
 )
 CHILE = HistCountry(
     code="chile", module="historico_chile", label="Histórico Chile", source_label="ChileCompra", timezone="America/Santiago",
-    currency="$", amount_scale=250.0, default_refresh_day=3, real_date_label="Plazo declarado en la licitación",
+    currency="CLP", amount_scale=250.0, default_refresh_day=3, real_date_label="Plazo declarado en la licitación",
     small_purchase_group="Compra Ágil y trato directo", api_prefix="/historico-chile", job_name="govradar-historico-chile",
 )
 COUNTRIES: dict[str, HistCountry] = {PERU.code: PERU, CHILE.code: CHILE}

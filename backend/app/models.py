@@ -643,6 +643,21 @@ class HistAlertPreference(HistScoped, TimestampMixin, Base):
     min_priority: Mapped[str] = mapped_column(String(4), default="P4", nullable=False)
 
 
+class HistComment(HistScoped, TimestampMixin, Base):
+    """A note on a Histórico record (contract, recurring pair, PAC item),
+    keyed like UserFavorite (kind + stable ref_key) so it survives re-imports
+    and shows in Historial and Por vencer alike."""
+
+    __tablename__ = "hist_comments"
+    __table_args__ = (Index("ix_hist_comments_ref", "country", "kind", "ref_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # hist_contratacion | hist_recurrente | hist_pac
+    ref_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class UserFavorite(TimestampMixin, Base):
     """A process or contract a user starred. ``ref_key`` is the stable natural
     key of the record (see services/favorite_service.py), never a Histórico row

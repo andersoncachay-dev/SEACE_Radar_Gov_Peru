@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { HistoricoFilterOptions, HistoricoFilters, HistoricoKind, HistoricoPriority, HistoricoRunwayItem } from "../../api";
-import { Chip, FavoriteButton, Icon } from "../../ui";
-import { FavoriteKind } from "../../api";
+import { Chip, ExcelIcon, FavoriteButton, Icon } from "../../ui";
+import { FavoriteKind, HistoricoComment } from "../../api";
 import { useFavorites } from "../../favorites";
 import { activeHistCountry, useHistCountry } from "./country";
 import { useHistoricoDetail, money, moneyShort, shortDate, titleCase, num } from "./useHistorico";
@@ -215,7 +215,7 @@ export function FilterBar({
         <span className="hist-spacer" />
         {onExport ? (
           <button className="ui-btn ui-btn-secondary" type="button" onClick={onExport} disabled={exporting}>
-            <Icon name="download" size={16} /><span className="hist-export-label">{exporting ? "Generando…" : "Descargar Excel"}</span>
+            <ExcelIcon /><span className="hist-export-label">{exporting ? "Generando…" : "Descargar Excel"}</span>
           </button>
         ) : null}
       </div>
@@ -386,6 +386,84 @@ function Fact({ label, value, wide = false }: { label: string; value: React.Reac
   return <div className={wide ? "hist-fact-wide" : ""}><dt>{label}</dt><dd>{value || "—"}</dd></div>;
 }
 
+/* ---------- comments on a record ---------- */
+
+function HistComments({ token, kind, refKey }: { token: string; kind: HistoricoKind; refKey: string }) {
+  const { api, locale } = useHistCountry();
+  const [items, setItems] = useState<HistoricoComment[] | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    setItems(null);
+    api.comments(token, FAV_KIND[kind], refKey)
+      .then((rows) => { if (active) setItems(rows); })
+      .catch((err) => { if (active) { setItems([]); setError(err instanceof Error ? err.message : "No se pudieron cargar los comentarios"); } });
+    return () => { active = false; };
+  }, [api, token, kind, refKey]);
+
+  async function add(event: React.FormEvent) {
+    event.preventDefault();
+    const body = draft.trim();
+    if (!body) return;
+    setBusy(true);
+    setError("");
+    try {
+      const created = await api.addComment(token, FAV_KIND[kind], refKey, body);
+      setItems((current) => [created, ...(current ?? [])]);
+      setDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar el comentario");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(item: HistoricoComment) {
+    setError("");
+    try {
+      await api.deleteComment(token, item.id);
+      setItems((current) => (current ?? []).filter((row) => row.id !== item.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo borrar el comentario");
+    }
+  }
+
+  return (
+    <section className="hist-comments" aria-label="Comentarios">
+      <h3>Comentarios{items?.length ? ` (${items.length})` : ""}</h3>
+      <form className="hist-comment-form" onSubmit={add}>
+        <textarea
+          className="ui-input"
+          value={draft}
+          maxLength={2000}
+          rows={3}
+          placeholder="Agrega una nota para el equipo: contacto, próximos pasos, observaciones…"
+          aria-label="Nuevo comentario"
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button className="ui-btn ui-btn-primary ui-btn-sm" type="submit" disabled={busy || !draft.trim()}>{busy ? "Guardando…" : "Agregar comentario"}</button>
+      </form>
+      {error ? <div className="notice danger" role="alert">{error}</div> : null}
+      {items === null ? <p className="hist-muted">Cargando comentarios…</p> : null}
+      {items?.length === 0 ? <p className="hist-muted">Aún no hay comentarios.</p> : null}
+      <ul className="hist-comment-list">
+        {(items ?? []).map((item) => (
+          <li key={item.id}>
+            <div className="hist-row">
+              <span className="hist-strong">{item.user_name}</span>
+              <span className="hist-muted">{new Date(item.created_at.endsWith("Z") ? item.created_at : `${item.created_at}Z`).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })}</span>
+            </div>
+            <p>{item.body}</p>
+            {item.can_delete ? <button type="button" className="hist-clear" onClick={() => void remove(item)}>Borrar</button> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function DetailDrawer({ token, kind, id, onClose }: { token: string; kind: HistoricoKind; id: number | null; onClose: () => void }) {
   const country = useHistCountry();
   const { detail, error } = useHistoricoDetail(token, kind, id);
@@ -472,6 +550,7 @@ export function DetailDrawer({ token, kind, id, onClose }: { token: string; kind
             </dl>
           ) : null}
           {record.contract_url ? <a className="ui-btn ui-btn-secondary" href={record.contract_url} target="_blank" rel="noopener noreferrer">{country.officialRecordLink}</a> : null}
+          {detail && record.fav_key ? <HistComments token={token} kind={kind} refKey={record.fav_key} /> : null}
           {history.length ? (
             <section>
               <h3>Compras del rubro de la entidad por año</h3>

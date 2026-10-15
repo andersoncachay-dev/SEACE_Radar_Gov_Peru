@@ -1155,8 +1155,26 @@ function historicoQuery(filters: HistoricoFilters = {}, extra: Record<string, st
 }
 
 /** Histórico API for one country: "/historico" (Perú) or "/historico-chile". */
+export type HistoricoComment = {
+  id: number;
+  body: string;
+  created_at: string;
+  user_id: number;
+  user_name: string;
+  can_delete: boolean;
+};
+
 export function makeHistoricoApi(base: string) {
   return {
+    comments: (token: string, kind: FavoriteKind, refKey: string) =>
+      request<HistoricoComment[]>(`${base}/comments?${new URLSearchParams({ kind, ref_key: refKey })}`, token, { cache: "no-store" }),
+    addComment: (token: string, kind: FavoriteKind, refKey: string, body: string) =>
+      request<HistoricoComment>(`${base}/comments`, token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, ref_key: refKey, body }),
+      }),
+    deleteComment: (token: string, id: number) => request<void>(`${base}/comments/${id}`, token, { method: "DELETE" }),
     status: (token: string) => request<HistoricoStatus>(`${base}/status`, token, { cache: "no-store" }),
     filters: (token: string) => request<HistoricoFilterOptions>(`${base}/filters`, token),
     summary: (token: string, filters: HistoricoFilters) => request<HistoricoSummary>(`${base}/summary${historicoQuery(filters)}`, token),

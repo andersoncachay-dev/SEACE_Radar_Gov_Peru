@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..database import SessionLocal, get_db
 from ..dependencies import get_current_user, require_admin, user_has_module
 from ..hist_scope import current_country, use_country
-from ..models import HistAlert, HistAlertPreference, HistImportRun, HistKeyword, User
+from ..models import HistAlert, HistAlertPreference, HistComment, HistImportRun, HistKeyword, User
 from ..services.favorite_service import favorite_keys
 from ..services.historico import import_service, notify, orchestration, query_service
 from ..services.historico.countries import CHILE, COUNTRIES, get_country
@@ -122,6 +122,61 @@ def get_pac_summary(filters: query_service.Filters = Depends(_filters), _: User 
 @router.get("/summary")
 def get_summary(filters: query_service.Filters = Depends(_filters), _: User = Depends(module_user), db: Session = Depends(get_db)):
     return query_service.summary(db, filters, _today(db))
+
+
+# --- comments ------------------------------------------------------------------------
+
+COMMENT_KINDS = ("hist_contratacion", "hist_recurrente", "hist_pac")
+
+
+class CommentIn(BaseModel):
+    kind: str = Field(pattern="^(hist_contratacion|hist_recurrente|hist_pac)$")
+    ref_key: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=2000)
+
+
+def _comment_dict(comment: HistComment, author: User | None, user: User) -> dict:
+    return {
+        "id": comment.id, "body": comment.body, "created_at": comment.created_at.isoformat(),
+        "user_id": comment.user_id, "user_name": author.full_name if author else "Usuario eliminado",
+        "can_delete": comment.user_id == user.id or user.role == "admin",
+    }
+
+
+@router.get("/comments")
+def list_comments(kind: str, ref_key: str, user: User = Depends(module_user), db: Session = Depends(get_db)):
+    """Notes on one record (same kind + ref_key as favorites), newest first."""
+    if kind not in COMMENT_KINDS:
+        raise HTTPException(status_code=422, detail="Tipo de registro no válido")
+    rows = db.execute(
+        select(HistComment, User).outerjoin(User, User.id == HistComment.user_id)
+        .where(HistComment.kind == kind, HistComment.ref_key == ref_key).order_by(HistComment.created_at.desc(), HistComment.id.desc())
+    ).all()
+    return [_comment_dict(comment, author, user) for comment, author in rows]
+
+
+@router.post("/comments", status_code=201)
+def create_comment(payload: CommentIn, user: User = Depends(module_user), db: Session = Depends(get_db)):
+    body = payload.body.strip()
+    if not body:
+        raise HTTPException(status_code=422, detail="Escribe un comentario")
+    comment = HistComment(kind=payload.kind, ref_key=payload.ref_key.strip(), user_id=user.id, body=body)
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return _comment_dict(comment, user, user)
+
+
+@router.delete("/comments/{comment_id}", status_code=204)
+def delete_comment(comment_id: int, user: User = Depends(module_user), db: Session = Depends(get_db)):
+    comment = db.get(HistComment, comment_id)
+    if comment is None:
+        return Response(status_code=204)
+    if comment.user_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo el autor o un administrador puede borrar el comentario")
+    db.delete(comment)
+    db.commit()
+    return Response(status_code=204)
 
 
 # --- alerts --------------------------------------------------------------------------

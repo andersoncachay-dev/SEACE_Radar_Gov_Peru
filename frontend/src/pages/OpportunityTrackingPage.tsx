@@ -15,7 +15,7 @@ import {
   TrackingResponsiblePayload,
   TrackingStageTemplate,
 } from "../api";
-import { Icon } from "../ui";
+import { ExcelIcon } from "../ui";
 import { readStored, writeStored } from "../favorites";
 import { ConfirmModal, Empty, formatDate, useDismissableMenu } from "../shared";
 import { deadlineCountdownText, formatDeadlineCountdown, OpportunityDetailModal } from "./OpportunitiesPage";
@@ -1195,7 +1195,7 @@ function ConsolidatedView({ token, country }: { token: string; country: CountryC
           ))}
         </select>
         <button type="button" className="export-excel-button ui-btn ui-btn-secondary" disabled={exporting || !filteredSummaries.length} onClick={() => void exportToExcel()}>
-          <Icon name="download" size={16} />
+          <ExcelIcon />
           <span>{exporting ? "Exportando..." : "Exportar a Excel"}</span>
         </button>
       </div>

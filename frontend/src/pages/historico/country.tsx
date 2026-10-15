@@ -79,7 +79,7 @@ const CHILE: HistCountry = {
   source: "Datos abiertos ChileCompra · Mercado Público",
   sourceShort: "ChileCompra",
   locale: "es-CL",
-  currency: "$",
+  currency: "CLP",
   department: "Región",
   departments: "Regiones",
   level: "Sector",
@@ -98,7 +98,7 @@ const CHILE: HistCountry = {
   monthlyLag: "El mes en curso es parcial: ChileCompra lo completa a medida que se emiten órdenes y se adjudican licitaciones.",
   firstLoad: 'La primera carga se hace desde Configuración › Histórico Chile (botón "Actualizar ahora"). Lee 2023 a hoy desde ChileCompra en unos 40 minutos; luego el módulo se actualiza solo cada mes.',
   storagePrefix: "chile.",
-  amountChoices: [[0, "Cualquiera"], [10_000_000, "≥ $10 M"], [25_000_000, "≥ $25 M"], [125_000_000, "≥ $125 M"], [250_000_000, "≥ $250 M"]],
+  amountChoices: [[0, "Cualquiera"], [10_000_000, "≥ CLP 10 M"], [25_000_000, "≥ CLP 25 M"], [125_000_000, "≥ CLP 125 M"], [250_000_000, "≥ CLP 250 M"]],
   highAmount: 125_000_000,
   map: "chile",
 };

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, ApiError, DocumentRecord, Opportunity, Run } from "../api";
-import { Chip, FavoriteButton, Icon } from "../ui";
+import { Chip, ExcelIcon, FavoriteButton, Icon } from "../ui";
 import { readStored, useFavorites, writeStored } from "../favorites";
 import { CommercialClass, ConfirmModal, Country, Empty, HighlightedText, RunProgress, addKeyword, commercialSignal, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, normalizedSearchTerm, parseDate, presentationDeadline, sourceBelongsToCountry, uniqueKeywords, useDismissableMenu, useRadarKeywords } from "../shared";
 
@@ -2495,7 +2495,7 @@ export function OpportunityTable({
             </button>
           ) : null}
           <button className="export-excel-button ui-btn ui-btn-secondary" type="button" onClick={() => void exportOpportunitiesToExcel(token, sortedRows, "Oportunidades GovRadar", country, actionMode === "restore" ? "historico" : "table")}>
-            <Icon name="download" size={16} />
+            <ExcelIcon />
             <span>Exportar a Excel</span>
           </button>
         </div>

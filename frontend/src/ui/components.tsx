@@ -55,6 +55,11 @@ export function Chip({ tone, label, title }: { tone: ChipTone; label: React.Reac
 
 /* ---------- FilterChip ---------- */
 
+/** Green Excel logo for "Descargar / Exportar a Excel" buttons. */
+export function ExcelIcon({ size = 18 }: { size?: number }) {
+  return <img className="ui-excel-icon" src="/assets/logoexcel.png" alt="" aria-hidden="true" width={size} height={size} decoding="async" />;
+}
+
 /** Star toggle for a process/contract. Stops propagation so it works inside clickable rows. */
 export function FavoriteButton({ active, onToggle, label, size = "md" }: {
   active: boolean;

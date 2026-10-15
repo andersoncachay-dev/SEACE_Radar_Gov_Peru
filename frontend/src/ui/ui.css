@@ -397,3 +397,6 @@ select.ui-input { appearance: none; padding-right: 36px; cursor: pointer; }
 .ui-fav[aria-pressed="true"] svg { fill: currentColor; }
 .ui-fav-sm { width: 28px; height: 28px; }
 @media (max-width: 639px) { .ui-fav, .ui-fav-sm { width: var(--control-h-touch); height: var(--control-h-touch); } }
+
+/* ---------- Ícono de Excel en botones de exportación ---------- */
+.ui-excel-icon { display: block; flex: none; object-fit: contain; }
