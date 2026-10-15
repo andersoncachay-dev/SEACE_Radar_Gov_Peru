@@ -15,6 +15,10 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 
+# Strip CR in case a Windows checkout turned the entrypoints into CRLF
+# ("exec ...: no such file or directory" on start).
+RUN sed -i 's/\r$//' /app/azure/*.sh
+
 RUN chmod +x /app/azure/run-ingestion-worker.sh /app/azure/run-alert-worker.sh /app/azure/run-chile-region-backfill.sh /app/azure/run-chile-region-report.sh /app/azure/run-chile-region-manual-patch.sh /app/azure/run-tracking-alerts-worker.sh /app/azure/run-tracking-date-refresh-worker.sh /app/azure/run-historico-worker.sh
 
 EXPOSE 8000
