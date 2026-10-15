@@ -145,7 +145,9 @@ Alta del job (una sola vez, despues de desplegar la imagen y aplicar la migracio
 (Get-Content azure/historico-peru-job.yaml) -replace 'IMAGE_TAG', '<tag>' | Set-Content $env:TEMP\historico-job.yaml
 az containerapp job create -g govradar-rg -n govradar-historico-peru --yaml $env:TEMP\historico-job.yaml
 # primera carga sin esperar al dia 9:
-az containerapp job start -g govradar-rg -n govradar-historico-peru --env-vars HISTORICO_FORCE=true
+# Ojo: `job start --env-vars` REEMPLAZA todas las variables del contenedor (se pierde DATABASE_URL).
+# Para forzar una importacion usa "Actualizar ahora" en Configuracion, o un start simple si ya toca (dia >= dia de actualizacion).
+az containerapp job start -g govradar-rg -n govradar-historico-peru
 ```
 
 Una importacion completa (unos 60 archivos, cerca de 3 GB) toma alrededor de 40 minutos; la mayor parte es la lectura de las ordenes mensuales con `python-calamine`.
@@ -162,8 +164,8 @@ Mismo modulo que Historico Peru (mismas tablas `hist_*` con columna `country`, m
 ```powershell
 (Get-Content azure/historico-chile-job.yaml) -replace 'IMAGE_TAG', '<tag>' | Set-Content $env:TEMP\historico-chile-job.yaml
 az containerapp job create -g govradar-rg -n govradar-historico-chile --yaml $env:TEMP\historico-chile-job.yaml
-# primera carga inmediata
-az containerapp job start -g govradar-rg -n govradar-historico-chile --env-vars HISTORICO_COUNTRY=chile HISTORICO_FORCE=true
+# primera carga inmediata (sin --env-vars: reemplazaria DATABASE_URL; la primera carga ya "toca")
+az containerapp job start -g govradar-rg -n govradar-historico-chile
 ```
 
 ### 11. Prueba de aceptacion
