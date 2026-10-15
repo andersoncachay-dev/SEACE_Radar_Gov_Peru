@@ -229,3 +229,15 @@
 .hist-comment-list li { border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); display: grid; gap: var(--space-1); }
 .hist-comment-list p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-table); color: var(--ink); }
 .hist-comment-list .hist-clear { justify-self: start; }
+
+/* Último registro revisado */
+.hist-module .hist-table tbody tr.is-last-seen { background: var(--brand-soft); box-shadow: inset 4px 0 0 var(--brand); }
+.hist-module .hist-table tbody tr.is-last-seen td:nth-child(2)::after,
+.hist-card.is-last-seen::before {
+  content: "Último revisado"; display: inline-block; margin-top: var(--space-1); padding: 0 var(--space-2);
+  border-radius: var(--radius-pill); background: var(--brand); color: var(--on-brand);
+  font-size: var(--text-micro); font-weight: var(--weight-semibold); line-height: 18px; white-space: nowrap;
+}
+.hist-module .hist-table tbody tr.is-last-seen td:nth-child(2)::after { display: table; }
+.hist-card.is-last-seen { background: var(--brand-soft); border-color: var(--brand); }
+.hist-card.is-last-seen::before { justify-self: start; }

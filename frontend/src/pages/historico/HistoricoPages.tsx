@@ -237,6 +237,9 @@ export function HistoricoContrataciones({ token }: PageProps) {
   const [filters, setFilters] = useStoredState<HistoricoFilters>("contrataciones.filters", {});
   const [sort, setSort] = useStoredState("contrataciones.sort", "date_desc");
   const [openId, setOpenId] = useState<number | null>(null);
+  // Last record opened, kept highlighted so the team knows where they left off.
+  const [lastSeen, setLastSeen] = useStoredState<string | null>("contrataciones.last_seen", null);
+  const openRow = (row: { id: number; fav_key: string }) => { setOpenId(row.id); setLastSeen(row.fav_key); };
   const list = useHistoricoList(token, "contrataciones", filters, sort);
   const exporter = useExport(token);
   const rows = list.data?.items ?? [];
@@ -270,7 +273,7 @@ export function HistoricoContrataciones({ token }: PageProps) {
               <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Fecha</th><th>Tipo</th><th>Entidad · descripción</th><th className="hist-col-opt">Proveedor</th><th className="hist-col-opt">Categoría</th><th className="hist-money">Monto</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
+                  <tr key={row.id} className={row.fav_key === lastSeen ? "is-last-seen" : undefined} onClick={() => openRow(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") openRow(row); }}>
                     <td className="hist-fav-col"><HistFav token={token} kind="contrataciones" row={row} /></td>
                     <td className="hist-num">{shortDate(row.date)}</td>
                     <td>{row.process_group}</td>
@@ -286,7 +289,7 @@ export function HistoricoContrataciones({ token }: PageProps) {
           <div className="hist-cards">
             {rows.map((row) => (
               <div className="hist-card-item" key={row.id}>
-              <button type="button" className="hist-card" onClick={() => setOpenId(row.id)}>
+              <button type="button" className={`hist-card${row.fav_key === lastSeen ? " is-last-seen" : ""}`} onClick={() => openRow(row)}>
                 <span className="hist-row"><span className="hist-tag">{row.process_group}</span><span className="hist-strong hist-num">{moneyShort(row.amount)}</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-sub">{shortDate(row.date)} · {row.description}</span>
@@ -359,6 +362,9 @@ function ExpiringContracts({ token }: PageProps) {
   const [bucket, setBucket] = useStoredState<string | null>("vencimientos.bucket", null);
   const [sort, setSort] = useStoredState("vencimientos.sort", "days_asc");
   const [openId, setOpenId] = useState<number | null>(null);
+  // Last record opened, kept highlighted so the team knows where they left off.
+  const [lastSeen, setLastSeen] = useStoredState<string | null>("vencimientos.last_seen", null);
+  const openRow = (row: { id: number; fav_key: string }) => { setOpenId(row.id); setLastSeen(row.fav_key); };
   const key = JSON.stringify(filters);
   // Without a selected window the list shows what is still running; expired
   // contracts (most of the history) only appear when "Vencido" is picked.
@@ -409,7 +415,7 @@ function ExpiringContracts({ token }: PageProps) {
               <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Prioridad</th><th>Días</th><th>Fin de vigencia</th><th>Entidad · proceso</th><th className="hist-col-opt">Proveedor actual</th><th className="hist-money">Monto</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
+                  <tr key={row.id} className={row.fav_key === lastSeen ? "is-last-seen" : undefined} onClick={() => openRow(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") openRow(row); }}>
                     <td className="hist-fav-col"><HistFav token={token} kind="vencimientos" row={row} /></td>
                     <td><PriorityBadge priority={row.priority} /></td>
                     <td className="hist-days" style={{ color: priorityTone(row.priority) }}>{row.days_to_end}</td>
@@ -425,7 +431,7 @@ function ExpiringContracts({ token }: PageProps) {
           <div className="hist-cards">
             {rows.map((row) => (
               <div className="hist-card-item" key={row.id}>
-              <button type="button" className="hist-card" style={{ "--tone": priorityTone(row.priority) } as React.CSSProperties} onClick={() => setOpenId(row.id)}>
+              <button type="button" className={`hist-card${row.fav_key === lastSeen ? " is-last-seen" : ""}`} style={{ "--tone": priorityTone(row.priority) } as React.CSSProperties} onClick={() => openRow(row)}>
                 <span className="hist-row"><PriorityBadge priority={row.priority} /><span className="hist-days" style={{ color: priorityTone(row.priority) }}>{row.days_to_end} días</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-row"><span className="hist-sub">{titleCase(row.supplier_name)}</span><span className="hist-strong hist-num">{moneyShort(row.amount)}</span></span>
@@ -449,6 +455,9 @@ function RecurringPurchases({ token }: PageProps) {
   const [bucket, setBucket] = useStoredState<string | null>("recurrentes.bucket", null);
   const [sort, setSort] = useStoredState("recurrentes.sort", "days_asc");
   const [openId, setOpenId] = useState<number | null>(null);
+  // Last record opened, kept highlighted so the team knows where they left off.
+  const [lastSeen, setLastSeen] = useStoredState<string | null>("recurrentes.last_seen", null);
+  const openRow = (row: { id: number; fav_key: string }) => { setOpenId(row.id); setLastSeen(row.fav_key); };
   const key = JSON.stringify(filters);
   const listFilters = useMemo(() => ({ ...filters, buckets: bucket ? [bucket] : [] }), [key, bucket]);
   const list = useHistoricoList(token, "recurrentes", listFilters, sort);
@@ -491,7 +500,7 @@ function RecurringPurchases({ token }: PageProps) {
               <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Próxima compra</th><th>Patrón</th><th>Entidad</th><th className="hist-col-opt">Proveedor actual</th><th>Órdenes 12m</th><th className="hist-money">Monto 12m</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
+                  <tr key={row.id} className={row.fav_key === lastSeen ? "is-last-seen" : undefined} onClick={() => openRow(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") openRow(row); }}>
                     <td className="hist-fav-col"><HistFav token={token} kind="recurrentes" row={row} /></td>
                     <td className="hist-num"><span className="hist-strong">{shortDate(row.next_purchase_date)}</span><span className="hist-sub">{row.days_to_next < 0 ? `atrasada ${-row.days_to_next} días` : `en ${row.days_to_next} días`}</span></td>
                     <td>{row.pattern}</td>
@@ -507,7 +516,7 @@ function RecurringPurchases({ token }: PageProps) {
           <div className="hist-cards">
             {rows.map((row) => (
               <div className="hist-card-item" key={row.id}>
-              <button type="button" className="hist-card" onClick={() => setOpenId(row.id)}>
+              <button type="button" className={`hist-card${row.fav_key === lastSeen ? " is-last-seen" : ""}`} onClick={() => openRow(row)}>
                 <span className="hist-row"><span className="hist-strong">{shortDate(row.next_purchase_date)}</span><span className="hist-tag">{row.pattern}</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-row"><span className="hist-sub">{titleCase(row.supplier_name)}</span><span className="hist-strong hist-num">{moneyShort(row.amount_12m_supplier)}</span></span>
@@ -531,6 +540,9 @@ export function HistoricoPac({ token }: PageProps) {
   const { options, status, error } = useHistoricoMeta(token);
   const [filters, setFilters] = useStoredState<HistoricoFilters>("pac.filters", {});
   const [openId, setOpenId] = useState<number | null>(null);
+  // Last record opened, kept highlighted so the team knows where they left off.
+  const [lastSeen, setLastSeen] = useStoredState<string | null>("pac.last_seen", null);
+  const openRow = (row: { id: number; fav_key: string }) => { setOpenId(row.id); setLastSeen(row.fav_key); };
   const key = JSON.stringify(filters);
   const summary = useLatest(() => hist.api.pacSummary(token, filters), [hist.api, token, key]);
   const list = useHistoricoList(token, "pac", filters, "month_asc");
@@ -584,7 +596,7 @@ export function HistoricoPac({ token }: PageProps) {
               <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Mes previsto</th><th>Entidad</th><th>Tipo de proceso</th><th className="hist-col-opt">Descripción</th><th>Ya adjudicó</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} onClick={() => setOpenId(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") setOpenId(row.id); }}>
+                  <tr key={row.id} className={row.fav_key === lastSeen ? "is-last-seen" : undefined} onClick={() => openRow(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") openRow(row); }}>
                     <td className="hist-fav-col"><HistFav token={token} kind="pac" row={row} /></td>
                     <td className="hist-strong" style={{ color: row.situation.startsWith("Por convocar") ? "var(--urg-p2-ink)" : undefined }}>{monthName(row.planned_month)}</td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{titleCase(row.department)} · {row.situation}</span></td>
@@ -599,7 +611,7 @@ export function HistoricoPac({ token }: PageProps) {
           <div className="hist-cards">
             {rows.map((row) => (
               <div className="hist-card-item" key={row.id}>
-              <button type="button" className="hist-card" style={{ "--tone": row.situation.startsWith("Por convocar") ? "var(--urg-p2-ink)" : "var(--line)" } as React.CSSProperties} onClick={() => setOpenId(row.id)}>
+              <button type="button" className={`hist-card${row.fav_key === lastSeen ? " is-last-seen" : ""}`} style={{ "--tone": row.situation.startsWith("Por convocar") ? "var(--urg-p2-ink)" : "var(--line)" } as React.CSSProperties} onClick={() => openRow(row)}>
                 <span className="hist-row"><span className="hist-strong">{monthName(row.planned_month)}</span><span className="hist-tag">{row.process_type}</span></span>
                 <span className="hist-strong">{titleCase(row.entity_name)}</span>
                 <span className="hist-sub">{row.item_description || row.process_description}</span>
