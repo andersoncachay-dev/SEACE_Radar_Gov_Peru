@@ -62,26 +62,31 @@ export function sourceBelongsToCountry(source: string, country: Country) {
   return normalized.startsWith("seace") || normalized.includes("menor8") || normalized.startsWith("oece_ocds");
 }
 
+// Intl formatters are expensive to build; lists format thousands of cells, so
+// build each one once. On a mid-range phone this was most of the time spent
+// switching tabs.
+const MONEY_CL = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 });
+const MONEY_AR = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
+const MONEY_PE = new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 0 });
+const DATE_TIME_PE = new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short" });
+const DATE_TIME_LIMA = new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Lima" });
+
 export function formatMoney(value: number, country: Country = "Peru") {
   if (!Number.isFinite(value) || value <= 0) {
     return <span className="reserved-amount">Monto reservado</span>;
   }
   if (country === "Chile") {
-    return `PESO CL ${new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 }).format(value)}`;
+    return `PESO CL ${MONEY_CL.format(value)}`;
   }
   if (country === "Argentina") {
-    return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
+    return MONEY_AR.format(value);
   }
-  return new Intl.NumberFormat("es-PE", {
-    style: "currency",
-    currency: "PEN",
-    maximumFractionDigits: 0,
-  }).format(value || 0);
+  return MONEY_PE.format(value || 0);
 }
 
 export function formatDate(value: string | null) {
   if (!value) return "-";
-  return new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return DATE_TIME_PE.format(new Date(value));
 }
 
 // Para timestamps que el propio backend genera en UTC real (created_at, sent_at,
@@ -93,7 +98,7 @@ export function formatUtcDate(value: string | null) {
   const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
   const date = new Date(hasTimezone ? value : `${value}Z`);
   if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Lima" }).format(date);
+  return DATE_TIME_LIMA.format(date);
 }
 
 export function parseDate(value: string | null) {
@@ -272,12 +277,36 @@ export function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Keyword matching runs for every opportunity x keyword on each render:
+// cache the compiled pattern per phrase and the normalised text per string.
+const phrasePatterns = new Map<string, RegExp | null>();
+const normalizedTexts = new Map<string, string>();
+
+function normalizeForMatch(value: string) {
+  return stripAccents(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function compiledPhrase(phrase: string): RegExp | null {
+  let pattern = phrasePatterns.get(phrase);
+  if (pattern === undefined) {
+    const normalizedPhrase = normalizeForMatch(phrase);
+    const body = normalizedPhrase.split(" ").map(escapeRegex).join("\\s+");
+    pattern = normalizedPhrase ? new RegExp(`(?:^|[^\\p{L}\\p{N}_])${body}(?=$|[^\\p{L}\\p{N}_])`, "iu") : null;
+    phrasePatterns.set(phrase, pattern);
+  }
+  return pattern;
+}
+
 export function matchesCompletePhrase(text: string, phrase: string) {
-  const normalizedText = stripAccents(text).toLowerCase().replace(/\s+/g, " ").trim();
-  const normalizedPhrase = stripAccents(phrase).toLowerCase().replace(/\s+/g, " ").trim();
-  if (!normalizedPhrase) return true;
-  const phrasePattern = normalizedPhrase.split(" ").map(escapeRegex).join("\\s+");
-  return new RegExp(`(?:^|[^\\p{L}\\p{N}_])${phrasePattern}(?=$|[^\\p{L}\\p{N}_])`, "iu").test(normalizedText);
+  const pattern = compiledPhrase(phrase);
+  if (!pattern) return true;
+  let normalizedText = normalizedTexts.get(text);
+  if (normalizedText === undefined) {
+    if (normalizedTexts.size > 20000) normalizedTexts.clear();
+    normalizedText = normalizeForMatch(text);
+    normalizedTexts.set(text, normalizedText);
+  }
+  return pattern.test(normalizedText);
 }
 
 export function highlightTermsFromKeywords(keywords: string[]) {

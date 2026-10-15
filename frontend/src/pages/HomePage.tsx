@@ -82,9 +82,18 @@ export function matchesAnyKeywordHint(
   keywordHints: Array<{ label: string; terms: string[] }>,
 ) {
   if (!keywordHints.length) return false;
+  // Inicio asks this for every opportunity on each render; remember the answer
+  // per opportunity object (replaced on each poll) and keyword set.
+  const hintsKey = keywordHints.map((keyword) => keyword.terms.join("|")).join("||");
+  const cachedHint = keywordHintCache.get(opportunity);
+  if (cachedHint && cachedHint.key === hintsKey) return cachedHint.value;
   const text = `${opportunity.nomenclature} ${opportunity.description} ${opportunity.entity}`;
-  return keywordHints.some((keyword) => keyword.terms.some((term) => term.trim() && matchesCompletePhrase(text, term)));
+  const value = keywordHints.some((keyword) => keyword.terms.some((term) => term.trim() && matchesCompletePhrase(text, term)));
+  keywordHintCache.set(opportunity, { key: hintsKey, value });
+  return value;
 }
+
+const keywordHintCache = new WeakMap<Opportunity, { key: string; value: boolean }>();
 
 export function homeCommercialStatusLabel(item: Opportunity) {
   const signal = commercialSignal(item);

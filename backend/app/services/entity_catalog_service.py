@@ -129,6 +129,14 @@ def _entity_index() -> dict[str, dict[str, Any]]:
 
 
 def find_entity(entity_name: str) -> dict[str, Any] | None:
+    """Catalog match for a Peruvian entity name. A miss runs a fuzzy scan over
+    the whole catalog (~2 ms), so results are memoised per name: the
+    opportunity list enriches every row on each request."""
+    return _find_entity_cached(entity_name or "")
+
+
+@lru_cache(maxsize=16384)
+def _find_entity_cached(entity_name: str) -> dict[str, Any] | None:
     key = _normalize(entity_name)
     if not key:
         return None

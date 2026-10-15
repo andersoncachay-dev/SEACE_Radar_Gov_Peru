@@ -523,6 +523,8 @@ export async function confirmPasswordReset(token: string, password: string) {
   });
 }
 
+let lastOpportunities: { at: number; token: string; rows: Opportunity[] } | null = null;
+
 export const api = {
   appSettings: () => request<AppSettingsRecord>("/app-settings", ""),
   tenantBrand: () => request<TenantBrandRecord>("/app-settings/brand", ""),
@@ -583,11 +585,25 @@ export const api = {
       params.set("run_ids", options.runIds.join(","));
     }
     const query = params.toString();
-    return request<Opportunity[]>(`/opportunities${query ? `?${query}` : ""}`, token, {
+    const pending = request<Opportunity[]>(`/opportunities${query ? `?${query}` : ""}`, token, {
       cache: "no-store",
       headers: { "Cache-Control": "no-cache" },
     });
+    if (!query) {
+      pending.then((rows) => { lastOpportunities = { at: Date.now(), token, rows }; }).catch(() => undefined);
+    }
+    return pending;
   },
+  /** The full list as fetched moments ago by the app shell (useBackend polls
+   * it every 60 s); pages that only need to look rows up reuse it instead of
+   * downloading the whole list again on every visit. */
+  recentOpportunities: (token: string, maxAgeMs = 90_000) => {
+    if (lastOpportunities && lastOpportunities.token === token && Date.now() - lastOpportunities.at < maxAgeMs) {
+      return Promise.resolve(lastOpportunities.rows);
+    }
+    return api.opportunities(token);
+  },
+
   opportunityViewState: (token: string, scope: string) =>
     request<OpportunityViewStateRecord>(`/opportunity-view-states/${encodeURIComponent(scope)}`, token, { cache: "no-store" }),
   saveOpportunityViewState: (token: string, scope: string, state: object) =>

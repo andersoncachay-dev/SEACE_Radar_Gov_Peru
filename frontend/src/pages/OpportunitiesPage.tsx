@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, ApiError, DocumentRecord, Opportunity, Run } from "../api";
-import { Chip, ExcelIcon, FavoriteButton, Icon } from "../ui";
+import { Chip, ExcelIcon, FavoriteButton, Icon, useBreakpoint } from "../ui";
 import { readStored, useFavorites, writeStored } from "../favorites";
 import { CommercialClass, ConfirmModal, Country, Empty, HighlightedText, RunProgress, addKeyword, commercialSignal, formatDate, formatMoney, keywordFromRun, matchesCompletePhrase, normalizedSearchTerm, parseDate, presentationDeadline, sourceBelongsToCountry, uniqueKeywords, useDismissableMenu, useRadarKeywords } from "../shared";
 
@@ -2278,6 +2278,7 @@ export function OpportunityTable({
   const [reviewStatusMap, setReviewStatusMap] = useState<Map<number, "standby" | "resolved">>(new Map());
   const [trackedOpportunityIds, setTrackedOpportunityIds] = useState<Set<number>>(new Set());
   const [reviewHistoryOpportunityId, setReviewHistoryOpportunityId] = useState<number | null>(null);
+  const isPhone = useBreakpoint() === "phone";
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -2500,6 +2501,9 @@ export function OpportunityTable({
           </button>
         </div>
       </div>
+      {/* Phones get the card list only: rendering the 100-row table too (hidden
+          by CSS) doubled the work on every navigation. */}
+      {!isPhone ? (<>
       <p className="mobile-table-hint">Desliza horizontalmente para consultar todas las columnas.</p>
       <div className={`table-scroll-top ${actionMode === "restore" ? "has-motivo-column" : ""}`} ref={topScrollRef} onScroll={() => syncTableScroll("top")} aria-label="Desplazamiento horizontal de oportunidades">
         <div />
@@ -2598,6 +2602,8 @@ export function OpportunityTable({
         </table>
         {!sortedRows.length ? <Empty text="No hay oportunidades con los filtros actuales." /> : null}
       </div>
+      </>) : null}
+      {isPhone ? (
       <div className="ui-mcards opp-phone-cards" aria-label="Oportunidades">
         {sortedRows.slice(0, 100).map(({ item, signal }) => (
           <article className="ui-mcard opp-phone-card" key={item.id}>
@@ -2627,6 +2633,7 @@ export function OpportunityTable({
         ))}
         {!sortedRows.length ? <Empty text="No hay oportunidades con los filtros actuales." /> : null}
       </div>
+      ) : null}
       {selectedOpportunity ? (
         <OpportunityDetailModal
           opportunity={selectedOpportunity}

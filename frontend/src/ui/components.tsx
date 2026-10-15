@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Icon, IconName } from "./icons";
 
 /* ---------- Button ---------- */
@@ -301,7 +302,10 @@ export function Sheet({ title, onClose, children }: { title: React.ReactNode; on
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // Portal to <body>: opened from the sticky phone header, the sheet would
+  // otherwise live in the header's stacking context (z-index 30), under the
+  // bottom tab bar (50), hiding its last options and inheriting white text.
+  return createPortal(
     <div className="ui-overlay">
       <div className="ui-scrim" onClick={onClose} />
       <div className="ui-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}>
@@ -309,6 +313,7 @@ export function Sheet({ title, onClose, children }: { title: React.ReactNode; on
         <h2 className="ui-sheet-title" id={titleId}>{title}</h2>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

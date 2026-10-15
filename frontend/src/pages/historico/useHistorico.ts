@@ -125,24 +125,40 @@ export function toggleValue<T>(values: T[] | undefined, value: T): T[] {
   return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
 }
 
+// toLocaleString/toLocaleDateString build a new Intl formatter on every call;
+// Histórico lists format thousands of cells, so keep one per locale (this was
+// most of the time spent opening Histórico on a phone).
+const formatters = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat>();
+function cached<T extends Intl.NumberFormat | Intl.DateTimeFormat>(key: string, build: () => T): T {
+  let formatter = formatters.get(key) as T | undefined;
+  if (!formatter) {
+    formatter = build();
+    formatters.set(key, formatter);
+  }
+  return formatter;
+}
+const integer = (locale: string) => cached(`int:${locale}`, () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }));
+const oneDecimal = (locale: string) => cached(`dec1:${locale}`, () => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }));
+const dayMonthYear = (locale: string) => cached(`dmy:${locale}`, () => new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric" }));
+
 export const money = (value: number) => {
   const { currency, locale } = activeHistCountry();
-  return `${currency} ${Math.round(value || 0).toLocaleString(locale)}`;
+  return `${currency} ${integer(locale).format(Math.round(value || 0))}`;
 };
 
 export function moneyShort(value: number) {
   const { currency, locale } = activeHistCountry();
-  if (value >= 1e6) return `${currency} ${(value / 1e6).toLocaleString(locale, { maximumFractionDigits: value >= 1e8 ? 0 : 1 })} M`;
-  if (value >= 1e3) return `${currency} ${Math.round(value / 1e3).toLocaleString(locale)} mil`;
+  if (value >= 1e6) return `${currency} ${(value >= 1e8 ? integer(locale) : oneDecimal(locale)).format(value / 1e6)} M`;
+  if (value >= 1e3) return `${currency} ${integer(locale).format(Math.round(value / 1e3))} mil`;
   return money(value);
 }
 
 /** Integers in the active country's format (12.345 in Chile, 12,345 in Perú). */
-export const num = (value: number) => (value || 0).toLocaleString(activeHistCountry().locale);
+export const num = (value: number) => integer(activeHistCountry().locale).format(value || 0);
 
 export function shortDate(iso: string | null | undefined) {
   if (!iso) return "—";
-  return new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString(activeHistCountry().locale, { day: "2-digit", month: "short", year: "numeric" });
+  return dayMonthYear(activeHistCountry().locale).format(new Date(`${iso.slice(0, 10)}T12:00:00`));
 }
 
 /** CONOSCE and ChileCompra ship names in capitals; show them in title case. */

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from .config import settings
 from .database import Base, engine
@@ -42,6 +43,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # The opportunity list is ~1-2 MB of JSON; compressed it is ~10x smaller,
+    # which is what makes the app usable on a phone connection.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
     @app.middleware("http")
     async def prevent_stale_api_responses(request, call_next):

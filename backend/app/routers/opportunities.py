@@ -168,6 +168,10 @@ def _enriched_entity_fields(item: Opportunity) -> tuple[str, str]:
     buyer_ruc = str(item.buyer_ruc or "").strip()
     if region and buyer_ruc:
         return region, buyer_ruc
+    # The catalog is OECE's (Peru): fuzzy-matching Chilean or Argentine
+    # entities against it only costs time and can attach a Peruvian region.
+    if country_for_source(item.source) != "peru":
+        return region, buyer_ruc
     catalog = find_entity(str(item.entity or ""))
     if not catalog:
         return region, buyer_ruc

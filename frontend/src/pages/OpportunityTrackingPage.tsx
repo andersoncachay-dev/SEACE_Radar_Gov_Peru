@@ -620,7 +620,7 @@ function TrackingWorkspace({
       api.trackingAreas(token),
       api.trackingResponsibles(token, { country }),
       api.assignableUsers(token, country),
-      api.opportunities(token),
+      api.recentOpportunities(token),
     ])
       .then(([trackings, phaseList, areaList, responsibleList, userList, opportunityList]) => {
         setSummaries(trackings);
@@ -1070,7 +1070,7 @@ function ConsolidatedView({ token, country }: { token: string; country: CountryC
   useEffect(() => {
     setLoading(true);
     setError("");
-    Promise.all([api.opportunityTrackings(token, { country }), api.trackingPhases(token, country), api.opportunities(token)])
+    Promise.all([api.opportunityTrackings(token, { country }), api.trackingPhases(token, country), api.recentOpportunities(token)])
       .then(async ([summaryList, phaseList, opportunityList]) => {
         setSummaries(summaryList);
         setPhases(phaseList);
