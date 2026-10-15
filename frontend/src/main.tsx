@@ -576,6 +576,7 @@ function AppShell({ onLogout }: { onLogout: () => void }) {
     <UiAppShell
       brand={brand}
       module={activeModule}
+      moduleLabel={activeModule === "historico_peru" ? HIST_COUNTRIES[activeHistCountry].label : undefined}
       modules={shellModules}
       onModuleChange={changeModule}
       sections={sections}

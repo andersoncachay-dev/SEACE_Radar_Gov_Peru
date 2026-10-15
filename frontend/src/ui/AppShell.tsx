@@ -6,7 +6,7 @@ import { useBreakpoint } from "./useBreakpoint";
 
 export type ModuleValue = "radar" | "historico_peru";
 export const MODULE_LABEL: Record<ModuleValue, string> = { radar: "Radar en vivo", historico_peru: "Histórico" };
-const MODULE_LONG: Record<ModuleValue, string> = { radar: "Radar en vivo", historico_peru: "Histórico Perú" };
+const MODULE_LONG: Record<ModuleValue, string> = { radar: "Radar en vivo", historico_peru: "Histórico" };
 
 export type NavItem = {
   id: string;
@@ -119,6 +119,8 @@ type ShellProps = {
   brand: TenantBrand;
   appName?: string;
   module: ModuleValue;
+  /** Breadcrumb / header name of the active module, e.g. "Histórico Chile". */
+  moduleLabel?: string;
   modules: ModuleValue[];
   onModuleChange: (module: ModuleValue) => void;
   sections: NavSection[];
@@ -140,7 +142,7 @@ function Logo({ brand, variant }: { brand: TenantBrand; variant: "sidebar" | "ra
 }
 
 export function AppShell(props: ShellProps) {
-  const { brand, appName = "GovRadar", module, modules, onModuleChange, sections, phoneTabs, currentId, onNavigate, pageLabel, topbarEnd, phoneEnd, user, onLogout, footer, children } = props;
+  const { brand, appName = "GovRadar", module, moduleLabel, modules, onModuleChange, sections, phoneTabs, currentId, onNavigate, pageLabel, topbarEnd, phoneEnd, user, onLogout, footer, children } = props;
   const bp = useBreakpoint();
   const [moreOpen, setMoreOpen] = useState(false);
   const items = sections.flatMap((section) => section.items);
@@ -174,7 +176,7 @@ export function AppShell(props: ShellProps) {
         </aside>
         <div className="ui-shell-main">
           <header className="ui-topbar">
-            <span className="ui-crumbs">{MODULE_LONG[module]} <span aria-hidden="true">›</span> <strong>{pageLabel}</strong></span>
+            <span className="ui-crumbs">{moduleLabel ?? MODULE_LONG[module]} <span aria-hidden="true">›</span> <strong>{pageLabel}</strong></span>
             <div className="ui-topbar-end">{topbarEnd}</div>
           </header>
           <main className="ui-shell-content" id="main-content">{children}{footer}</main>
@@ -226,7 +228,7 @@ export function AppShell(props: ShellProps) {
           <Logo brand={brand} variant="phone" />
           {modules.length > 1
             ? <ModuleSwitcher value={module} modules={modules} onChange={onModuleChange} variant="sheet" />
-            : <span className="ui-module-trigger" style={{ cursor: "default" }}>{MODULE_LONG[module]}</span>}
+            : <span className="ui-module-trigger" style={{ cursor: "default" }}>{moduleLabel ?? MODULE_LONG[module]}</span>}
           <div className="ui-topbar-end">{phoneEnd ?? topbarEnd}</div>
         </div>
       </header>

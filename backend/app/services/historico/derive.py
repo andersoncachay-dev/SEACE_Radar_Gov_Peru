@@ -182,9 +182,11 @@ def next_purchase(orders: list[OrderPoint]) -> NextPurchase:
         gap = typical_gap if 0 < typical_gap <= 45 else 30
         return NextPurchase(PATTERN_MONTHLY, last.order_date + timedelta(days=gap))
     term = parse_term(last.description)
-    if term and not term.period_year:
+    # A term that ends before the last order ("... desde el año 2015") says
+    # nothing about the next purchase; fall back to the order history.
+    if term and not term.period_year and term.end_from(last.order_date) > last.order_date:
         return NextPurchase(PATTERN_PERIOD, term.end_from(last.order_date))
-    if term and term.period_year:
+    if term and term.period_year and date(term.period_year + 1, 1, 1) > last.order_date:
         return NextPurchase(PATTERN_PERIOD, date(term.period_year + 1, 1, 1))
     if len(ordered) >= 2 and typical_gap:
         return NextPurchase(PATTERN_REPEATED, last.order_date + timedelta(days=typical_gap))
