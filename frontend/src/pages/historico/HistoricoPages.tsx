@@ -11,7 +11,7 @@ import {
 } from "../../api";
 import { Icon } from "../../ui";
 import { useHistCountry } from "./country";
-import { DetailDrawer, FilterBar, HBars, HistFav, monthName, Pager, PriorityBadge, priorityTone, Runway, SearchAndAmount } from "./HistoricoUI";
+import { CommentCell, DetailDrawer, FilterBar, HBars, HistFav, monthName, Pager, PriorityBadge, priorityTone, Runway, SearchAndAmount } from "./HistoricoUI";
 import { downloadExport, money, moneyShort, num, shortDate, titleCase, toggleValue, useHistoricoList, useHistoricoMeta, useLatest, useStoredState } from "./useHistorico";
 
 type PageProps = { token: string };
@@ -270,7 +270,7 @@ export function HistoricoContrataciones({ token }: PageProps) {
         {rows.length ? <>
           <div className="hist-table-wrap">
             <table className="hist-table">
-              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Fecha</th><th>Tipo</th><th>Entidad · descripción</th><th className="hist-col-opt">Proveedor</th><th className="hist-col-opt">Categoría</th><th className="hist-money">Monto</th></tr></thead>
+              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Fecha</th><th>Tipo</th><th>Entidad · descripción</th><th className="hist-col-opt">Proveedor</th><th className="hist-col-comment">Comentario</th><th className="hist-col-opt">Categoría</th><th className="hist-money">Monto</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} className={row.fav_key === lastSeen ? "is-last-seen" : undefined} onClick={() => openRow(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") openRow(row); }}>
@@ -279,6 +279,7 @@ export function HistoricoContrataciones({ token }: PageProps) {
                     <td>{row.process_group}</td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{row.description}</span></td>
                     <td className="hist-col-opt">{titleCase(row.supplier_name)}</td>
+                    <td className="hist-col-comment"><CommentCell token={token} kind="contrataciones" row={row} /></td>
                     <td className="hist-col-opt">{row.category}</td>
                     <td className="hist-money hist-strong">{money(row.amount)}</td>
                   </tr>
@@ -301,7 +302,7 @@ export function HistoricoContrataciones({ token }: PageProps) {
           <Pager page={list.page} pageSize={list.pageSize} total={list.data?.total ?? 0} onPage={list.setPage} />
         </> : <p className="hist-empty">{list.loading ? "Cargando contrataciones…" : "Ninguna contratación cumple estos filtros. Quita alguno para ver resultados."}</p>}
       </Panel>
-      <DetailDrawer token={token} kind="contrataciones" id={openId} onClose={() => setOpenId(null)} />
+      <DetailDrawer token={token} kind="contrataciones" id={openId} onClose={() => { setOpenId(null); list.reload(); }} />
     </Frame>
   );
 }
@@ -412,7 +413,7 @@ function ExpiringContracts({ token }: PageProps) {
         {rows.length ? <>
           <div className="hist-table-wrap">
             <table className="hist-table">
-              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Prioridad</th><th>Días</th><th>Fin de vigencia</th><th>Entidad · proceso</th><th className="hist-col-opt">Proveedor actual</th><th className="hist-money">Monto</th></tr></thead>
+              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Prioridad</th><th>Días</th><th>Fin de vigencia</th><th>Entidad · proceso</th><th className="hist-col-opt">Proveedor actual</th><th className="hist-col-comment">Comentario</th><th className="hist-money">Monto</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} className={row.fav_key === lastSeen ? "is-last-seen" : undefined} onClick={() => openRow(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") openRow(row); }}>
@@ -422,6 +423,7 @@ function ExpiringContracts({ token }: PageProps) {
                     <td className="hist-num">{shortDate(row.end_date)}<span className="hist-sub"><span className={`hist-tag ${row.is_real_date ? "real" : ""}`}>{row.is_real_date ? hist.realDate : "Estimada"}</span>{row.possibly_renewed ? <span className="hist-tag">Posible renovado</span> : null}</span></td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{row.nomenclature} · {titleCase(row.department)} · {row.category}</span></td>
                     <td className="hist-col-opt">{titleCase(row.supplier_name)}</td>
+                    <td className="hist-col-comment"><CommentCell token={token} kind="vencimientos" row={row} /></td>
                     <td className="hist-money hist-strong">{money(row.amount)}</td>
                   </tr>
                 ))}
@@ -443,7 +445,7 @@ function ExpiringContracts({ token }: PageProps) {
           <Pager page={list.page} pageSize={list.pageSize} total={list.data?.total ?? 0} onPage={list.setPage} />
         </> : <p className="hist-empty">{list.loading ? "Cargando contratos…" : "Ningún contrato cumple estos filtros. Quita alguno para ver resultados."}</p>}
       </Panel>
-      <DetailDrawer token={token} kind="vencimientos" id={openId} onClose={() => setOpenId(null)} />
+      <DetailDrawer token={token} kind="vencimientos" id={openId} onClose={() => { setOpenId(null); list.reload(); }} />
     </Frame>
   );
 }
@@ -497,7 +499,7 @@ function RecurringPurchases({ token }: PageProps) {
         {rows.length ? <>
           <div className="hist-table-wrap">
             <table className="hist-table">
-              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Próxima compra</th><th>Patrón</th><th>Entidad</th><th className="hist-col-opt">Proveedor actual</th><th>Órdenes 12m</th><th className="hist-money">Monto 12m</th></tr></thead>
+              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Próxima compra</th><th>Patrón</th><th>Entidad</th><th className="hist-col-opt">Proveedor actual</th><th className="hist-col-comment">Comentario</th><th>Órdenes 12m</th><th className="hist-money">Monto 12m</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} className={row.fav_key === lastSeen ? "is-last-seen" : undefined} onClick={() => openRow(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") openRow(row); }}>
@@ -506,6 +508,7 @@ function RecurringPurchases({ token }: PageProps) {
                     <td>{row.pattern}</td>
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{titleCase(row.department)}</span></td>
                     <td className="hist-col-opt">{titleCase(row.supplier_name)}</td>
+                    <td className="hist-col-comment"><CommentCell token={token} kind="recurrentes" row={row} /></td>
                     <td className="hist-num">{row.orders_12m}</td>
                     <td className="hist-money hist-strong">{money(row.amount_12m_supplier)}</td>
                   </tr>
@@ -528,7 +531,7 @@ function RecurringPurchases({ token }: PageProps) {
           <Pager page={list.page} pageSize={list.pageSize} total={list.data?.total ?? 0} onPage={list.setPage} />
         </> : <p className="hist-empty">{list.loading ? "Cargando compras…" : "Ninguna compra cumple estos filtros."}</p>}
       </Panel>
-      <DetailDrawer token={token} kind="recurrentes" id={openId} onClose={() => setOpenId(null)} />
+      <DetailDrawer token={token} kind="recurrentes" id={openId} onClose={() => { setOpenId(null); list.reload(); }} />
     </Frame>
   );
 }
@@ -593,7 +596,7 @@ export function HistoricoPac({ token }: PageProps) {
         {rows.length ? <>
           <div className="hist-table-wrap">
             <table className="hist-table">
-              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Mes previsto</th><th>Entidad</th><th>Tipo de proceso</th><th className="hist-col-opt">Descripción</th><th>Ya adjudicó</th></tr></thead>
+              <thead><tr><th className="hist-fav-col"><span className="sr-only">Favorito</span></th><th>Mes previsto</th><th>Entidad</th><th>Tipo de proceso</th><th className="hist-col-opt">Descripción</th><th className="hist-col-comment">Comentario</th><th>Ya adjudicó</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} className={row.fav_key === lastSeen ? "is-last-seen" : undefined} onClick={() => openRow(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") openRow(row); }}>
@@ -602,6 +605,7 @@ export function HistoricoPac({ token }: PageProps) {
                     <td><span className="hist-strong">{titleCase(row.entity_name)}</span><span className="hist-sub">{titleCase(row.department)} · {row.situation}</span></td>
                     <td>{row.process_type}</td>
                     <td className="hist-col-opt"><span className="hist-sub">{row.item_description || row.process_description}</span></td>
+                    <td className="hist-col-comment"><CommentCell token={token} kind="pac" row={row} /></td>
                     <td>{row.already_awarded ? <span className="hist-tag">Posible</span> : "No"}</td>
                   </tr>
                 ))}
@@ -623,7 +627,7 @@ export function HistoricoPac({ token }: PageProps) {
           <Pager page={list.page} pageSize={list.pageSize} total={list.data?.total ?? 0} onPage={list.setPage} />
         </> : <p className="hist-empty">{list.loading ? "Cargando PAC…" : "Ningún ítem cumple estos filtros."}</p>}
       </Panel>
-      <DetailDrawer token={token} kind="pac" id={openId} onClose={() => setOpenId(null)} />
+      <DetailDrawer token={token} kind="pac" id={openId} onClose={() => { setOpenId(null); list.reload(); }} />
     </Frame>
   );
 }

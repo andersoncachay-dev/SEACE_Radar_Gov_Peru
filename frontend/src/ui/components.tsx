@@ -68,14 +68,17 @@ export function FavoriteButton({ active, onToggle, label, size = "md" }: {
   size?: "sm" | "md";
 }) {
   const action = active ? "Quitar de favoritos" : "Marcar como favorito";
+  // "Pop" only when the user stars it, not for stars already on at load.
+  const [popping, setPopping] = React.useState(false);
   return (
     <button
       type="button"
-      className={`ui-fav ${size === "sm" ? "ui-fav-sm" : ""}`}
+      className={`ui-fav ${size === "sm" ? "ui-fav-sm" : ""}${popping ? " is-popping" : ""}`}
       aria-pressed={active}
       aria-label={`${action}: ${label}`}
       title={action}
-      onClick={(event) => { event.stopPropagation(); onToggle(); }}
+      onAnimationEnd={() => setPopping(false)}
+      onClick={(event) => { event.stopPropagation(); if (!active) setPopping(true); onToggle(); }}
       onKeyDown={(event) => event.stopPropagation()}
     >
       <Icon name="star" size={size === "sm" ? 16 : 18} />

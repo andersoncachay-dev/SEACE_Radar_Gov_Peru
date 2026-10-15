@@ -58,6 +58,20 @@ class FavoriteTests(HistoricoFixture):
         self.assertEqual(query_service.list_contractings(self.db, none)["total"], 0)
         self.assertEqual(query_service.list_pac(self.db, none)["total"], 0)
 
+    def test_lists_carry_latest_comment(self) -> None:
+        from backend.app.routers.historico import CommentIn, create_comment
+
+        self._import(self._fixture_files())
+        row = query_service.list_expiring(self.db, query_service.Filters())["items"][0]
+        self.assertIsNone(row["comment"])
+        create_comment(CommentIn(kind="hist_contratacion", ref_key=row["fav_key"], body="Primera"), user=self.user, db=self.db)
+        create_comment(CommentIn(kind="hist_contratacion", ref_key=row["fav_key"], body="Llamar en noviembre"), user=self.other, db=self.db)
+        listed = next(item for item in query_service.list_expiring(self.db, query_service.Filters())["items"] if item["fav_key"] == row["fav_key"])
+        self.assertEqual((listed["comment"]["body"], listed["comment"]["user_name"], listed["comment_count"]), ("Llamar en noviembre", "Otro", 2))
+        same_award = next(item for item in query_service.list_contractings(self.db, query_service.Filters())["items"] if item["fav_key"] == row["fav_key"])
+        self.assertEqual(same_award["comment_count"], 2)  # Por vencer and Historial share the note
+        self.assertIn(("comment_text", "Último comentario"), query_service.EXPORT_COLUMNS["vencimientos"])
+
 
 if __name__ == "__main__":
     unittest.main()

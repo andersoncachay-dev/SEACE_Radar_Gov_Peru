@@ -9,7 +9,7 @@ from datetime import date
 from sqlalchemy import String, case, cast, distinct, func, or_, select
 from sqlalchemy.orm import Session
 
-from ...models import HistContract, HistContracting, HistExpiring, HistPacItem, HistRecurring
+from ...models import HistComment, HistContract, HistContracting, HistExpiring, HistPacItem, HistRecurring, User
 from ...hist_scope import current_country
 from .alerts_service import expiring_priority
 from .countries import get_country
@@ -186,10 +186,36 @@ def expiring_runway(db: Session, filters: Filters, today: date, limit: int = 600
         "is_real_date": expiring.is_real_date,
         "possibly_renewed": expiring.possibly_renewed,
         "priority": expiring_priority(expiring.days_to_end, award.amount, scale) or "P4",
+        "fav_key": award.source_key,
     } for expiring, award in rows]
 
 
 # --- lists ---------------------------------------------------------------------------------
+
+
+def attach_comments(db: Session, items: list[dict], kind: str) -> list[dict]:
+    """Latest comment and count per row (rows carry their favorite/comment
+    key in ``fav_key``), for the list's "Comentario" column and the Excel."""
+    keys = list({item["fav_key"] for item in items if item.get("fav_key")})
+    latest: dict[str, dict] = {}
+    counts: dict[str, int] = {}
+    for index in range(0, len(keys), 500):
+        rows = db.execute(
+            select(HistComment, User.full_name).outerjoin(User, User.id == HistComment.user_id)
+            .where(HistComment.kind == kind, HistComment.ref_key.in_(keys[index:index + 500]))
+            .order_by(HistComment.created_at.desc(), HistComment.id.desc())
+        ).all()
+        for comment, author in rows:
+            counts[comment.ref_key] = counts.get(comment.ref_key, 0) + 1
+            latest.setdefault(comment.ref_key, {
+                "body": comment.body, "user_name": author or "Usuario eliminado", "created_at": comment.created_at.isoformat(),
+            })
+    for item in items:
+        key = item.get("fav_key")
+        item["comment"] = latest.get(key)
+        item["comment_count"] = counts.get(key, 0)
+        item["comment_text"] = f"{latest[key]['body']} ({latest[key]['user_name']})" if key in latest else ""
+    return items
 
 
 def _page(page: int, page_size: int) -> tuple[int, int]:
@@ -225,7 +251,7 @@ def list_contractings(db: Session, filters: Filters, page: int = 1, page_size: i
     rows = db.scalars(
         select(HistContracting).where(*where).order_by(*CONTRACTING_SORTS.get(sort, CONTRACTING_SORTS["date_desc"])).offset((page - 1) * size).limit(size)
     ).all()
-    return {"items": [_contracting_dict(row) for row in rows], "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
+    return {"items": attach_comments(db, [_contracting_dict(row) for row in rows], "hist_contratacion"), "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
 
 
 def _expiring_conditions(filters: Filters) -> list:
@@ -284,7 +310,7 @@ def list_expiring(db: Session, filters: Filters, page: int = 1, page_size: int =
     ).one()
     order = EXPIRING_SORTS.get(sort, EXPIRING_SORTS["days_asc"])
     rows = db.execute(_expiring_query(filters).order_by(*order, HistExpiring.id).offset((page - 1) * size).limit(size)).all()
-    return {"items": [_expiring_dict(*row, scale=_scale(db)) for row in rows], "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
+    return {"items": attach_comments(db, [_expiring_dict(*row, scale=_scale(db)) for row in rows], "hist_contratacion"), "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
 
 
 def recurring_fav_key():
@@ -346,7 +372,7 @@ def list_recurring(db: Session, filters: Filters, page: int = 1, page_size: int 
     rows = db.scalars(
         select(HistRecurring).where(*where).order_by(*RECURRING_SORTS.get(sort, RECURRING_SORTS["days_asc"]), HistRecurring.id).offset((page - 1) * size).limit(size)
     ).all()
-    return {"items": [_recurring_dict(row) for row in rows], "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
+    return {"items": attach_comments(db, [_recurring_dict(row) for row in rows], "hist_recurrente"), "total": total, "amount": round(float(amount), 2), "page": page, "page_size": size}
 
 
 def _pac_conditions(filters: Filters) -> list:
@@ -417,7 +443,7 @@ def list_pac(db: Session, filters: Filters, page: int = 1, page_size: int = 50, 
     total = db.scalar(select(func.count()).select_from(HistPacItem).where(*where))
     order = (HistPacItem.planned_month.desc(),) if sort == "month_desc" else (HistPacItem.planned_month.asc(),)
     rows = db.scalars(select(HistPacItem).where(*where).order_by(*order, HistPacItem.id).offset((page - 1) * size).limit(size)).all()
-    return {"items": [_pac_dict(row) for row in rows], "total": total, "amount": 0, "page": page, "page_size": size}
+    return {"items": attach_comments(db, [_pac_dict(row) for row in rows], "hist_pac"), "total": total, "amount": 0, "page": page, "page_size": size}
 
 
 # --- detail --------------------------------------------------------------------------------
@@ -505,6 +531,7 @@ EXPORT_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("description", "Descripción"), ("category", "Categoría"), ("amount", "Monto S/"), ("reference_amount", "Monto referencial S/"),
         ("supplier_ruc", "RUC Proveedor"), ("supplier_name", "Proveedor"), ("status", "Estado"), ("direct_cause", "Causal (Contratación Directa)"),
         ("object_type", "Objeto"), ("government_level", "Nivel de gobierno"),
+        ("comment_text", "Último comentario"),
     ],
     "vencimientos": [
         ("bucket", "Estado"), ("days_to_end", "Días para vencer"), ("end_date", "Fin de vigencia"), ("date_source", "Fuente de la fecha"),
@@ -513,6 +540,7 @@ EXPORT_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("amount", "Monto adjudicado S/"), ("monthly_amount", "Monto mensual aprox. S/"), ("extras_amount", "Adicionales/prórrogas S/"),
         ("start_date", "Inicio"), ("date", "Buena pro"), ("contract_number", "Nº contrato"), ("possibly_renewed", "Posible renovado"),
         ("direct_cause", "Causal (CD)"), ("entity_ruc", "RUC entidad"), ("contract_url", "URL contrato"), ("government_level", "Nivel de gobierno"),
+        ("comment_text", "Último comentario"),
     ],
     "recurrentes": [
         ("bucket", "Ventana próxima compra"), ("next_purchase_date", "Próxima compra estimada"), ("days_to_next", "Días"), ("pattern", "Patrón"),
@@ -521,6 +549,7 @@ EXPORT_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("suppliers_12m", "Proveedores de la entidad 12m"), ("last_order_date", "Última orden"), ("last_order_amount", "Monto última orden S/"),
         ("last_order_description", "Descripción última orden"), ("category", "Categoría"), ("entity_ruc", "RUC entidad"), ("supplier_ruc", "RUC proveedor"),
         ("government_level", "Nivel de gobierno"),
+        ("comment_text", "Último comentario"),
     ],
     "pac": [
         ("situation", "Situación"), ("planned_month", "Mes previsto"), ("entity_name", "Entidad"), ("department", "Departamento"),
@@ -528,6 +557,7 @@ EXPORT_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("quantity", "Cantidad"), ("unit", "Unidad"), ("item_department", "Lugar del ítem (depto)"), ("province", "Provincia"), ("district", "Distrito"),
         ("already_awarded", "Ya adjudicó en el año"), ("reference_number", "Nº referencia PAC"), ("version", "Versión PAC"), ("entity_ruc", "RUC entidad"),
         ("government_level", "Nivel de gobierno"),
+        ("comment_text", "Último comentario"),
     ],
 }
 

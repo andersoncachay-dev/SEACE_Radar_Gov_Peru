@@ -289,6 +289,9 @@ const RUNWAY_MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "
 /** "Pista de vencimientos": every contract ending in the next 12 months. */
 export function Runway({ items, onOpen, compact = false }: { items: HistoricoRunwayItem[]; onOpen: (id: number) => void; compact?: boolean }) {
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
+  // Favorite contracts glow on the runway (same store as the table stars).
+  const favorites = useFavorites(localStorage.getItem("rodar_token") || "");
+  const isFav = (item: HistoricoRunwayItem) => Boolean(item.fav_key && favorites.keys.has(`hist_contratacion::${item.fav_key}`));
   const W = 1000, H = compact ? 150 : 200, top = 18, base = H - 34, span = 365;
   const x = (days: number) => 30 + (W - 60) * Math.min(1, Math.max(0, days / span));
   const marks = useMemo(() => {
@@ -329,10 +332,10 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
             <line x1={30} x2={W - 30} y1={base} y2={base} stroke="var(--muted)" />
             <line x1={30} x2={30} y1={top - 6} y2={base} stroke="var(--urg-p1-ink)" strokeWidth={2} />
             <text x={30} y={top - 9} style={{ fill: "var(--urg-p1-ink)" }} fontSize={11} fontWeight={700} textAnchor="middle">hoy</text>
-            {marks.map(({ item, cx, cy, r }) => (
+            {[...marks].sort((a, b) => Number(isFav(a.item)) - Number(isFav(b.item))).map(({ item, cx, cy, r }) => (
               <g
                 key={item.id}
-                className="hist-mark"
+                className={`hist-mark${isFav(item) ? " is-fav" : ""}`}
                 tabIndex={0}
                 role="button"
                 aria-label={`${titleCase(item.entity_name)}, ${moneyShort(item.amount)}, vence ${shortDate(item.end_date)}`}
@@ -345,7 +348,11 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
                 }}
               >
                 <line x1={cx} x2={cx} y1={cy} y2={base} stroke={priorityTone(item.priority)} strokeOpacity={0.35} />
-                <circle cx={cx} cy={cy} r={r} style={{ fill: priorityTone(item.priority), fillOpacity: item.is_real_date ? 1 : 0.5 }} />
+                {isFav(item) ? <>
+                  <circle className="hist-mark-glow" cx={cx} cy={cy} r={r + 3} />
+                  <circle className="hist-mark-glow is-delayed" cx={cx} cy={cy} r={r + 3} />
+                </> : null}
+                <circle className="hist-mark-dot" cx={cx} cy={cy} r={r} style={{ fill: priorityTone(item.priority), fillOpacity: item.is_real_date ? 1 : 0.5 }} />
               </g>
             ))}
           </svg>
@@ -357,6 +364,7 @@ export function Runway({ items, onOpen, compact = false }: { items: HistoricoRun
         <span><i style={{ background: "var(--urg-p2-ink)" }} />Alta</span>
         <span><i style={{ background: "var(--urg-p3-ink)" }} />Media</span>
         <span><i style={{ background: "var(--urg-p4-ink)" }} />Baja</span>
+        {items.some(isFav) ? <span><i className="hist-legend-fav" />Favorito</span> : null}
         <span>Punto lleno = {activeHistCountry().code === "chile" ? "plazo declarado en la licitación" : "fecha real del contrato"} · tamaño = monto · {items.length.toLocaleString(activeHistCountry().locale)} contratos</span>
       </div>
     </div>
@@ -387,6 +395,75 @@ function Fact({ label, value, wide = false }: { label: string; value: React.Reac
 }
 
 /* ---------- comments on a record ---------- */
+
+type CommentRow = { fav_key?: string; comment?: { body: string; user_name: string; created_at: string } | null; comment_count?: number };
+
+/** "Comentario" column: latest note + quick add without opening the detail. */
+export function CommentCell({ token, kind, row }: { token: string; kind: HistoricoKind; row: CommentRow }) {
+  const { api } = useHistCountry();
+  const [latest, setLatest] = useState(row.comment ?? null);
+  const [count, setCount] = useState(row.comment_count ?? 0);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { setLatest(row.comment ?? null); setCount(row.comment_count ?? 0); }, [row.comment?.created_at, row.comment_count]);
+  if (!row.fav_key) return null;
+
+  async function save() {
+    const body = draft.trim();
+    if (!body || !row.fav_key) return;
+    setBusy(true);
+    setError("");
+    try {
+      const created = await api.addComment(token, FAV_KIND[kind], row.fav_key, body);
+      setLatest({ body: created.body, user_name: created.user_name, created_at: created.created_at });
+      setCount((value) => value + 1);
+      setDraft("");
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="hist-comment-cell" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+      {latest && !editing ? (
+        <p className="hist-comment-snippet" title={`${latest.body} — ${latest.user_name}`}>
+          {latest.body}
+          <span className="hist-sub">{latest.user_name}{count > 1 ? ` · ${count} comentarios` : ""}</span>
+        </p>
+      ) : null}
+      {editing ? (
+        <div className="hist-comment-inline">
+          <textarea
+            className="ui-input"
+            autoFocus
+            rows={2}
+            maxLength={2000}
+            value={draft}
+            placeholder="Escribe y presiona Enter"
+            aria-label="Nuevo comentario"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void save(); }
+              if (event.key === "Escape") { setEditing(false); setDraft(""); }
+            }}
+          />
+          <div className="hist-comment-inline-actions">
+            <button type="button" className="hist-clear" onClick={() => { setEditing(false); setDraft(""); }}>Cancelar</button>
+            <button type="button" className="ui-btn ui-btn-primary ui-btn-sm" disabled={busy || !draft.trim()} onClick={() => void save()}>{busy ? "Guardando…" : "Guardar"}</button>
+          </div>
+          {error ? <span className="hist-comment-error" role="alert">{error}</span> : null}
+        </div>
+      ) : (
+        <button type="button" className="hist-comment-add" onClick={() => setEditing(true)}>{latest ? "+ Comentar" : "+ Agregar comentario"}</button>
+      )}
+    </div>
+  );
+}
 
 function HistComments({ token, kind, refKey }: { token: string; kind: HistoricoKind; refKey: string }) {
   const { api, locale } = useHistCountry();

@@ -960,6 +960,7 @@ export type HistoricoRunwayItem = {
   is_real_date: boolean;
   possibly_renewed: boolean;
   priority: HistoricoPriority;
+  fav_key?: string;
 };
 
 export type HistoricoSummary = {
@@ -977,6 +978,8 @@ export type HistoricoSummary = {
 };
 
 export type HistoricoContracting = {
+  comment?: { body: string; user_name: string; created_at: string } | null;
+  comment_count?: number;
   fav_key: string;
   id: number;
   dataset: "orden" | "adjudicacion";
@@ -1019,6 +1022,8 @@ export type HistoricoExpiring = HistoricoContracting & {
 };
 
 export type HistoricoRecurring = {
+  comment?: { body: string; user_name: string; created_at: string } | null;
+  comment_count?: number;
   fav_key: string;
   id: number;
   entity_ruc: string;
@@ -1043,6 +1048,8 @@ export type HistoricoRecurring = {
 };
 
 export type HistoricoPacItem = {
+  comment?: { body: string; user_name: string; created_at: string } | null;
+  comment_count?: number;
   fav_key: string;
   id: number;
   year: number;
