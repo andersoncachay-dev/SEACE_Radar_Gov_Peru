@@ -148,6 +148,8 @@ export const money = (value: number) => {
 
 export function moneyShort(value: number) {
   const { currency, locale } = activeHistCountry();
+  // From 10 thousand million on (Chilean pesos), "mil M" keeps figures short.
+  if (value >= 1e10) return `${currency} ${integer(locale).format(Math.round(value / 1e9))} mil M`;
   if (value >= 1e6) return `${currency} ${(value >= 1e8 ? integer(locale) : oneDecimal(locale)).format(value / 1e6)} M`;
   if (value >= 1e3) return `${currency} ${integer(locale).format(Math.round(value / 1e3))} mil`;
   return money(value);

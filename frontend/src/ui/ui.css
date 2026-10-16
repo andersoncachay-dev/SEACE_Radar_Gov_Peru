@@ -102,10 +102,13 @@ button.ui-kpi:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-r
   .ui-kpi { padding: 14px var(--space-4); gap: 2px; }
 }
 @media (max-width: 639px) {
-  .ui-kpi-grid, .ui-kpi-grid-4 { display: flex; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 2px; }
-  .ui-kpi-grid > .ui-kpi { flex: 0 0 132px; scroll-snap-align: start; padding: var(--space-3) 14px; }
-  .ui-kpi-value { font-size: var(--text-kpi-mobile); }
+  /* 2 x 2 grid: every KPI visible (the old 132px carousel cut long amounts
+     like "CLP 8.628.900 M" and hid the 4th card). The figure may wrap. */
+  .ui-kpi-grid, .ui-kpi-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+  .ui-kpi-grid > .ui-kpi { padding: var(--space-3); min-width: 0; }
+  .ui-kpi-value { font-size: clamp(18px, 5.6vw, var(--text-kpi-mobile)); white-space: normal; overflow-wrap: anywhere; line-height: 1.12; }
   .ui-kpi-label { font-size: var(--text-caption); }
+  .ui-kpi-hint { overflow-wrap: anywhere; }
 }
 
 /* ---------- Fields ---------- */
