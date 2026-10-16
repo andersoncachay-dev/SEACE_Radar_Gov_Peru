@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, chileStatusSlug, Alert, Opportunity, Run, SchedulerStatus, Stats } from "../api";
 import { ConfirmModal, Country, CountryFlagIcon, Empty, HighlightedText, RunProgress, commercialSignal, countryCode, countryFlagUrls, formatDate, formatMoney, formatUtcDate, matchesCompletePhrase, parseDate, runHistoryLabel, sourceBelongsToCountry, stripAccents, updateIntervalLabel, useRadarKeywords } from "../shared";
 import { alertStatusLabel, ChannelSymbol } from "./AlertsPage";
-import { ExcelIcon } from "../ui";
+import { ExcelIcon, useBreakpoint } from "../ui";
 import { exportOpportunitiesToExcel, isOpportunityNew } from "./OpportunitiesPage";
 
 export type HomeStatusFilter = "all" | "priority-a" | "vigentes" | "cerrados";
@@ -740,6 +740,12 @@ export function Home({
       window.clearInterval(countdownTimer);
     };
   }, [token, country]);
+  // Phones: the process list joins the page scroll (an inner 72dvh scroll box
+  // swallowed the swipe on iOS and the page "stopped") and grows 30 at a time.
+  const isPhone = useBreakpoint() === "phone";
+  const PHONE_PAGE = 30;
+  const [phoneVisible, setPhoneVisible] = useState(PHONE_PAGE);
+  useEffect(() => setPhoneVisible(PHONE_PAGE), [selectedRegion, processSearch, processSort, country]);
   const selectedRegionProcesses = useMemo(() => {
     const filtered = selectedRegion === unmappedRegionKey
       ? filteredHomeOpportunities.filter((item) => !normalizeRegionName(item.region))
@@ -1051,7 +1057,7 @@ export function Home({
           </div>
           {selectedRegionProcesses.length ? (
             <div className="region-opportunity-list">
-              {selectedRegionProcesses.map((item, index) => (
+              {(isPhone ? selectedRegionProcesses.slice(0, phoneVisible) : selectedRegionProcesses).map((item, index) => (
                 <article className="map-opportunity-card" key={item.id}>
                   <button
                     className="map-opportunity-copy"
@@ -1107,6 +1113,11 @@ export function Home({
                   </span>
                 </article>
               ))}
+              {isPhone && selectedRegionProcesses.length > phoneVisible ? (
+                <button type="button" className="ui-btn ui-btn-secondary ui-btn-block region-list-more" onClick={() => setPhoneVisible((value) => value + PHONE_PAGE)}>
+                  Ver más procesos ({selectedRegionProcesses.length - phoneVisible} restantes)
+                </button>
+              ) : null}
             </div>
           ) : (
             <Empty text={`La lista de procesos aparecerá cuando el radar de ${countryLabel} detecte coincidencias.`} />

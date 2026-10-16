@@ -216,3 +216,37 @@ svg [tabindex]:focus-visible { outline: none; stroke: var(--ink-strong); stroke-
 .opp-phone-card { position: relative; }
 .opp-phone-card > .ui-fav { position: absolute; top: var(--space-1); right: var(--space-1); z-index: 1; }
 .opp-phone-card-open .ui-mcard-top { padding-right: 44px; }
+
+/* ---------- Inicio en teléfono: sin cajas con scroll propio ----------
+   On iOS a swipe that starts inside a nested scroll box scrolls the box, not
+   the page, and stops dead at its end ("el scroll se corta"). On phones these
+   lists join the page scroll; the process list grows with "Ver más". */
+@media (max-width: 639px) {
+  .region-opportunity-list,
+  .region-ranking,
+  .recent-alerts-list,
+  .run-history-scroll { max-height: none; overflow: visible; padding-right: 0; }
+  .region-list-more { margin-top: var(--space-2); }
+  /* Skip layout/paint of cards outside the viewport while scrolling. */
+  .map-opportunity-card,
+  .opp-phone-card { content-visibility: auto; contain-intrinsic-size: auto 300px; }
+  /* Country-specific rules in styles.css pin a 72dvh max-height on the list;
+     without its own scroll the panel must grow with the cards instead. */
+  .map-process-list-panel,
+  .map-process-list-panel.peru .region-opportunity-list,
+  .map-process-list-panel.chile .region-opportunity-list,
+  .map-process-list-panel.argentina .region-opportunity-list { max-height: none; height: auto; flex: none; overflow: visible; }
+  /* Decorative loops repaint every frame while scrolling; keep them still. */
+  .hero-update-banner::before,
+  .panel-title .update-countdown::before,
+  .update-countdown::before,
+  .update-countdown::after { animation: none !important; }
+  .interactive-map-shell svg { filter: none; }
+  .execute-radar-button::before,
+  .new-opportunity-badge,
+  .new-opportunity-badge::before { animation: none !important; }
+  .new-opportunity-badge { box-shadow: 0 0 0 2px rgb(25 167 111 / 30%); }
+  .alert-event-list,
+  .tracking-selector-list,
+  .tracking-date-refresh-list { max-height: none; overflow: visible; }
+}
